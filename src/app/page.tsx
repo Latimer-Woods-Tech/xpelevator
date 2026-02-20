@@ -1,10 +1,7 @@
 export const runtime = 'edge';
 import Link from 'next/link';
-import { auth, signOut } from '@/auth';
 
-export default async function Home() {
-  const session = await auth();
-
+export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white">
       {/* Header bar */}
@@ -13,31 +10,12 @@ export default async function Home() {
           <span className="text-sm font-semibold">
             XP<span className="text-blue-400">Elevator</span>
           </span>
-          {session?.user ? (
-            <div className="flex items-center gap-4">
-              <span className="text-slate-400 text-sm">{session.user.name ?? session.user.email}</span>
-              <form
-                action={async () => {
-                  'use server';
-                  await signOut({ redirectTo: '/' });
-                }}
-              >
-                <button
-                  type="submit"
-                  className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
-                >
-                  Sign out
-                </button>
-              </form>
-            </div>
-          ) : (
-            <Link
-              href="/auth/signin"
-              className="text-xs px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 transition-colors"
-            >
-              Sign in
-            </Link>
-          )}
+          <Link
+            href="/admin"
+            className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
+          >
+            Admin
+          </Link>
         </div>
       </header>
 
@@ -50,11 +28,7 @@ export default async function Home() {
             Virtual customer simulator for training employees on real-world interactions.
             Practice phone calls and chat conversations, scored against customizable criteria.
           </p>
-          {session?.user && (
-            <p className="mt-4 text-slate-400 text-sm">
-              Welcome back, <span className="text-blue-400">{session.user.name ?? session.user.email}</span>
-            </p>
-          )}
+
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

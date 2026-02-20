@@ -28,9 +28,16 @@ declare module 'next-auth' {
   }
 }
 
+// Only include GitHub provider when credentials are configured.
+// Without this guard, NextAuth v5 throws "server configuration" errors at
+// runtime whenever AUTH_GITHUB_ID / AUTH_GITHUB_SECRET are not set, which
+// breaks /api/auth/session and cascades to all useSession() calls in the UI.
+const githubProvider =
+  process.env.AUTH_GITHUB_ID && process.env.AUTH_GITHUB_SECRET ? [GitHub] : [];
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
-    GitHub,
+    ...githubProvider,
 
     // Simple credentials provider — accepts any non-empty username.
     // Replace with real user lookup + bcrypt verification for production.

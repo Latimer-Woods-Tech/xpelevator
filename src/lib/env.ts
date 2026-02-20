@@ -15,14 +15,19 @@ type EnvVarSpec = {
 
 const ENV_VARS: EnvVarSpec[] = [
   {
+    key: 'DATABASE_URL',
+    required: true,
+    description: 'Neon Postgres connection string — all database queries will fail without this',
+  },
+  {
+    key: 'AUTH_SECRET',
+    required: true,
+    description: 'NextAuth secret — /api/auth/session returns 500 without this',
+  },
+  {
     key: 'GROQ_API_KEY',
     required: true,
     description: 'Groq API key for AI-powered virtual customer responses',
-  },
-  {
-    key: 'DATABASE_URL',
-    required: true,
-    description: 'Neon Postgres connection string for Prisma',
   },
 ];
 
@@ -70,3 +75,15 @@ export const GROQ_API_KEY = process.env.GROQ_API_KEY ?? '';
 
 /** Neon Postgres connection string */
 export const DATABASE_URL = process.env.DATABASE_URL ?? '';
+
+/** NextAuth secret — required for session signing */
+export const AUTH_SECRET = process.env.AUTH_SECRET ?? '';
+
+/**
+ * Whether GitHub OAuth is configured.
+ * The GitHub provider in src/auth.ts is only included when both of these are
+ * set — without them NextAuth throws "server configuration" 500 errors on
+ * every /api/auth/session call and cascades to useSession() in the UI.
+ */
+export const GITHUB_OAUTH_ENABLED =
+  !!(process.env.AUTH_GITHUB_ID && process.env.AUTH_GITHUB_SECRET);

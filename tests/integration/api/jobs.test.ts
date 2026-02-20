@@ -68,6 +68,15 @@ describe('GET /api/jobs', () => {
     const res = await GET();
     expect(res.status).toBe(500);
   });
+
+  it('returns error detail in non-production environments', async () => {
+    prismaMock.jobTitle.findMany.mockRejectedValueOnce(new Error('relation "job_titles" does not exist'));
+    const res = await GET();
+    const body = await res.json();
+    // In test (NODE_ENV=test) the detail field should be present
+    expect(body).toHaveProperty('error');
+    expect(body.detail).toContain('relation "job_titles" does not exist');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
 
 interface Scenario {
   id: string;
@@ -21,7 +20,6 @@ interface JobTitle {
 
 export default function SimulatePage() {
   const router = useRouter();
-  const { data: session } = useSession();
   const [jobTitles, setJobTitles] = useState<JobTitle[]>([]);
   const [selectedJob, setSelectedJob] = useState<JobTitle | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,9 +27,7 @@ export default function SimulatePage() {
   const [starting, setStarting] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
 
-  // Derive the userId / display name from the session
-  const userId = session?.user?.id ?? session?.user?.email ?? 'anonymous';
-  const displayName = session?.user?.name ?? session?.user?.email ?? 'Guest';
+  const userId = 'anonymous';
 
   useEffect(() => {
     loadJobs();
@@ -64,11 +60,7 @@ export default function SimulatePage() {
           <Link href="/" className="text-blue-400 hover:text-blue-300 text-sm">
             &larr; Back to Home
           </Link>
-          {session?.user && (
-            <span className="text-xs text-slate-400">
-              👤 {displayName}
-            </span>
-          )}
+
         </div>
 
         <h1 className="text-3xl font-bold mb-8">Start a Simulation</h1>

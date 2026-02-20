@@ -16,8 +16,15 @@ export async function GET() {
     });
     return NextResponse.json(jobTitles);
   } catch (error) {
-    console.error('Failed to fetch job titles:', error);
-    return NextResponse.json({ error: 'Failed to fetch job titles' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Failed to fetch job titles:', message);
+    return NextResponse.json(
+      {
+        error: 'Failed to fetch job titles',
+        detail: process.env.NODE_ENV !== 'production' ? message : undefined,
+      },
+      { status: 500 }
+    );
   }
 }
 
@@ -32,7 +39,14 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(jobTitle, { status: 201 });
   } catch (error) {
-    console.error('Failed to create job title:', error);
-    return NextResponse.json({ error: 'Failed to create job title' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Failed to create job title:', message);
+    return NextResponse.json(
+      {
+        error: 'Failed to create job title',
+        detail: process.env.NODE_ENV !== 'production' ? message : undefined,
+      },
+      { status: 500 }
+    );
   }
 }
