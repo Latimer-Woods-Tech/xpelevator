@@ -38,6 +38,8 @@ secrets.txt
 
 # vercel / cloudflare pages build output
 .vercel
+.open-next/
+:build
 
 # cloudflare wrangler local state
 .wrangler/
