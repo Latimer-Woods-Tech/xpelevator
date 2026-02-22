@@ -1,22 +1,17 @@
 // ── Prisma client with Neon HTTP adapter ────────────────────────────────────
 //
-// IMPORTANT: Must import from '@prisma/client/edge', NOT '@prisma/client'.
+// IMPORTANT: Must import from '@prisma/client', NOT '@prisma/client/edge'.
 //
-// Root cause (discovered via bundle analysis):
+// In Prisma v6 with driverAdapters previewFeature + adapter option:
 //   - @prisma/client (standard) resolves to wasm.js in CF Workers (workerd
-//     condition), which needs query_engine_bg.wasm loaded via dynamic import.
-//   - OpenNext/esbuild does NOT bundle .wasm files, so the dynamic import fails
-//     at runtime with "wasm module unexpectedly null" → 500 on every DB call.
-//
-// Solution: @prisma/client/edge always resolves to edge.js (runtime/edge.js)
-//   - edge.js has ZERO WebAssembly/wasm references
-//   - edge.js has driverAdapters in previewFeatures → accepts adapter option
-//   - edge.js is designed for Vercel Edge, CF Workers, Deno Deploy, etc.
-//   - All queries are routed through PrismaNeonHTTP adapter (Neon HTTP API)
+//     condition). With an adapter, Prisma uses DriverAdapterQueryEngine and
+//     the WASM module (query_engine_bg.wasm) is NOT loaded at all.
+//   - @prisma/client/edge throws PrismaClientValidationError when adapter
+//     option is passed ("imported via /edge endpoint").
 //
 // References:
 //   https://www.prisma.io/docs/orm/prisma-client/deployment/edge/deploy-to-cloudflare#neon
-import { PrismaClient } from '@prisma/client/edge';
+import { PrismaClient } from '@prisma/client';
 import { PrismaNeonHTTP } from '@prisma/adapter-neon';
 
 function createPrismaClient() {
