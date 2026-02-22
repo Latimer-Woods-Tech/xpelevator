@@ -72,6 +72,23 @@ export async function POST(request: Request) {
       return await endSession(sessionId, session);
     }
 
+    // ── 3.5. Enforce maxTurns ─────────────────────────────────────────────────
+    if (!isStartSignal) {
+      const script = session.scenario.script as Record<string, unknown> | null;
+      const maxTurns = typeof script?.maxTurns === 'number' ? script.maxTurns : undefined;
+      if (maxTurns && maxTurns > 0) {
+        // session.messages was loaded before this turn's agent message was saved,
+        // so prior agent turn count + 1 = current turn number.
+        const priorAgentTurns = session.messages.filter(
+          (m: { role: string }) => m.role === 'AGENT'
+        ).length;
+        if (priorAgentTurns + 1 >= maxTurns) {
+          console.log(`[Chat API] maxTurns (${maxTurns}) reached — auto-ending session`);
+          return await endSession(sessionId, session);
+        }
+      }
+    }
+
     // ── 4. Build history for AI ───────────────────────────────────────────────
     const systemPrompt = buildSessionSystemPrompt(
       session.scenario.name,

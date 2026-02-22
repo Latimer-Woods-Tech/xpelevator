@@ -20,11 +20,12 @@
 import NextAuth, { type DefaultSession } from 'next-auth';
 import GitHub from 'next-auth/providers/github';
 import Credentials from 'next-auth/providers/credentials';
+import prisma from '@/lib/prisma';
 
-// Extend the Session type to include the user.id field
+// Extend the Session type to include the user.id and optional dbUserId fields
 declare module 'next-auth' {
   interface Session {
-    user: { id: string } & DefaultSession['user'];
+    user: { id: string; dbUserId?: string } & DefaultSession['user'];
   }
 }
 
@@ -59,11 +60,43 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   },
 
   callbacks: {
-    // Expose the user id on session.user
-    session({ session, token }) {
-      if (token.sub) {
-        session.user.id = token.sub;
+    // Upsert a DB User row for OAuth sign-ins (Credentials have no email — skip).
+    // This populates the users table so dbUserId FK can be set on sessions.
+    async signIn({ user, account }) {
+      if (account?.provider !== 'credentials' && user.email) {
+        try {
+          await prisma.user.upsert({
+            where: { email: user.email },
+            update: { name: user.name ?? undefined },
+            create: { email: user.email, name: user.name ?? null },
+          });
+        } catch (err) {
+          // Non-fatal: log and continue sign-in
+          console.warn('[auth] User upsert failed:', err);
+        }
       }
+      return true;
+    },
+
+    // Cache the DB User id in the JWT on first sign-in so we avoid a DB
+    // lookup on every subsequent request.
+    async jwt({ token, account }) {
+      if (account && token.email) {
+        try {
+          const dbUser = await prisma.user.findUnique({ where: { email: token.email } });
+          if (dbUser) (token as Record<string, unknown>).dbUserId = dbUser.id;
+        } catch {
+          // Non-fatal
+        }
+      }
+      return token;
+    },
+
+    // Expose user.id (NextAuth sub) and user.dbUserId on the session object.
+    session({ session, token }) {
+      if (token.sub) session.user.id = token.sub;
+      const dbUserId = (token as Record<string, unknown>).dbUserId;
+      if (typeof dbUserId === 'string') session.user.dbUserId = dbUserId;
       return session;
     },
   },

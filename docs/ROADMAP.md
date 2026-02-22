@@ -2,172 +2,191 @@
 
 This document tracks the product roadmap, identifies gaps in the current plan, and defines what "done" looks like for each phase.
 
+> **Last updated**: February 21, 2026 — full architectural review. New open issues tracked in [BACKLOG.md](BACKLOG.md) as BL-045 through BL-057.
+
 ---
 
-## Current State (as of Phase 2 complete)
+## Current State (as of Sprint 5 complete)
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Architecture documented | ✅ Done | C4 diagrams in ARCHITECTURE.md |
-| Next.js scaffolded | ✅ Done | App Router, TS, Tailwind v4 |
-| Prisma schema | ✅ Done | 7 models, 3 enums |
-| Neon DB tables | ✅ Done | Schema applied, seed data loaded |
-| API routes | ✅ Done | jobs, criteria, simulations, scoring |
-| Admin UI | ✅ Done | Criteria CRUD (full) |
-| Simulate UI | ⚠️ Partial | Job + scenario selector; no active session UI |
-| Sessions UI | ✅ Done | List view with scores |
-| AI integration | ❌ Missing | Groq client not created |
-| Chat simulation | ❌ Missing | No streaming chat API or UI |
-| Phone simulation | ❌ Missing | Telnyx not integrated |
-| Authentication | ❌ Missing | No user identity |
-| Cloudflare deploy | ❌ Missing | No wrangler.toml, no CI/CD |
-| Error/loading UI | ⚠️ Partial | Only basic loading states |
+| Architecture documented | ✅ Done | C4 + Mermaid diagrams in ARCHITECTURE.md (updated Feb 21 2026) |
+| Next.js scaffolded | ✅ Done | App Router, TS, Tailwind v4, React 19 |
+| Prisma schema | ✅ Done | 10 models, 4 enums; migration baseline applied |
+| Neon DB tables | ✅ Done | 10 tables; seed data loaded |
+| API routes (full CRUD) | ✅ Done | jobs, scenarios, criteria, simulations, scoring, analytics, orgs, telnyx, auth |
+| Edge runtime | ✅ Done | All routes: `export const runtime = 'edge'`; Neon HTTP adapter |
+| Admin UI | ✅ Done | 4 tabs: Criteria, Job Titles, Scenarios, Job↔Criteria |
+| Simulate UI | ✅ Done | Creates session + redirects to active simulation |
+| Active chat session UI | ✅ Done | SSE streaming, [RESOLVED] detection, auto-scoring |
+| Active phone session UI | ✅ Done | Dial, transcript poll, hang-up, timer |
+| Sessions UI | ✅ Done | List with score bars; detail page with transcript + criteria breakdown |
+| Analytics dashboard | ✅ Done | Score trends, criteria heatmap, job/type breakdowns |
+| AI integration (Groq) | ✅ Done | Streaming; virtual customer; auto-scoring |
+| Phone simulation (Telnyx) | ✅ Done | Outbound call + full webhook flow |
+| Authentication (NextAuth v5) | ✅ Done | GitHub OAuth + Credentials; JWT; /admin protected |
+| Cloudflare config + CI/CD | ✅ Done | wrangler.toml, open-next.config.ts, GitHub Actions |
+| CF build passing | ❌ Broken | BL-045: `@opennextjs/cloudflare` exits code 1 |
+| All API routes auth-gated | ⚠️ Gap | BL-046: only /admin protected; all API data is world-readable |
+| Admin role enforcement | ⚠️ Gap | BL-047: any non-empty Credentials username gets admin access |
+| orgId multi-tenancy wired | ⚠️ Partial | BL-049: schema ready but no API filters by orgId yet |
+| User identity model clean | ⚠️ Partial | BL-048: dual user_id / db_user_id; User table never populated |
+| Telnyx webhook security | ❌ Missing | BL-051: no HMAC signature verification |
+| DB FK indexes | ❌ Missing | BL-052: no indexes on session_id, user_id, org_id columns |
 
 ---
 
 ## Coherence & Cohesion Review
 
-### Gap 1: No User Identity
-**Problem**: `SimulationSession.userId` is nullable `String`. There is no authentication. All employees share one anonymous session pool — there is no way to know *who* completed a simulation.
+## Coherence & Cohesion Review
 
-**Impact**: High. The core value proposition is tracking *employee* performance over time.
+> Gaps from the original Phase 2 review are listed here with their resolution status. New gaps found in the February 21, 2026 architectural review are in the **New Gaps** section below.
 
-**Fix**:
-- Phase 4: Add NextAuth.js with a simple email/password or SSO provider
-- Short term: Store username in `localStorage` and pass as `userId` on session create (acceptable MVP hack)
+### ✅ Gap 1: No User Identity — RESOLVED
+NextAuth v5 added in Phase 4/Sprint 5. GitHub OAuth + Credentials provider. JWT session. `userId` from `session.user.id` passed to simulations. `/admin` protected by middleware.
 
----
-
-### Gap 2: Simulate page doesn't start a real session
-**Problem**: The scenario card `onClick` calls `alert(...)` — a placeholder. Clicking a scenario does nothing real.
-
-**Impact**: Critical — blocks all user-facing functionality.
-
-**Fix**: On scenario select, POST to `/api/simulations`, then redirect to `/simulate/[sessionId]`.
+**Remaining issue**: Dual identity model (`userId` string + `dbUserId` FK) and no admin-role enforcement → BL-047, BL-048.
 
 ---
 
-### Gap 3: No active simulation UI
-**Problem**: `/simulate/[sessionId]` does not exist. There is no page to host the actual conversation.
-
-**Impact**: Critical — the core product experience is missing.
-
-**Fix**: Build chat UI with Server-Sent Events (SSE) for streaming AI responses.
+### ✅ Gap 2: Simulate page didn't start a real session — RESOLVED
+Scenario card now POSTs to `/api/simulations` and redirects to `/simulate/[sessionId]`.
 
 ---
 
-### Gap 4: JobCriteria join is invisible
-**Problem**: The `job_criteria` table correctly models "which criteria apply to which job title", but the Admin UI only manages global `criteria`. There is no UI to assign criteria to job titles.
-
-**Impact**: Medium. All sessions currently have no associated criteria for scoring. The scoring API would need to derive criteria from the job title.
-
-**Fix**:
-- Expose a "Job Criteria" tab in the Admin panel
-- OR: For MVP, make ALL active criteria apply to ALL job titles (simpler, eliminates the join complexity)
+### ✅ Gap 3: No active simulation UI — RESOLVED
+`/simulate/[sessionId]` fully implemented with:
+- Chat mode: SSE streaming, `[RESOLVED]`/`[END]` detection, auto-scoring
+- Phone mode: dial screen, transcript polling, hang-up, call timer
 
 ---
 
-### Gap 5: Scenario `script` JSONB has no defined shape
-**Problem**: `Scenario.script` is `Json @default("{}")` in Prisma. No TypeScript type or runtime schema validates it. The AI needs to read the script to know the customer persona and situation.
-
-**Impact**: Medium. The AI will produce generic interactions without a structured scenario script.
-
-**Fix**: Define a `ScenarioScript` interface:
-```ts
-interface ScenarioScript {
-  customerPersona: string;   // "Frustrated customer waiting 3 weeks for a refund"
-  customerObjective: string; // "Get refund processed today"
-  difficulty: 'easy' | 'medium' | 'hard';
-  hints?: string[];           // Behavioral cues for the AI
-  maxTurns?: number;          // End conversation after N exchanges
-}
-```
+### ✅ Gap 4: Job↔Criteria assignment was invisible — RESOLVED
+Admin panel now has a dedicated "Job↔Criteria" tab (Tab 4) for toggling criteria per job title. `/api/jobs/[id]/criteria` handles POST/DELETE.
 
 ---
 
-### Gap 6: Scoring is triggered externally, not automatically
-**Problem**: The `/api/scoring` endpoint creates `Score` records, but there is no mechanism to call it. Who scores the session? When?
-
-**Impact**: Medium. Scoring is the key output of the simulator.
-
-**Fix**:
-- **Auto-scoring**: After the conversation ends, call the AI with the full transcript + criteria list, ask it to score each criterion 1-10 with justification.
-- **Human scoring**: Show a post-session scoring form to a supervisor.
-- Recommended: Start with auto-scoring via AI (simpler UX, more scalable).
+### ✅ Gap 5: Scenario `script` JSONB had no defined shape — RESOLVED
+`ScenarioScript` interface defined in `src/types/index.ts`. `buildSessionSystemPrompt()` in `src/lib/ai.ts` parses and validates it at runtime with a safe fallback.
 
 ---
 
-### Gap 7: No `.env.example`
-**Problem**: Developers cloning the repo have no template for `.env`. The README mentions it but the file doesn't exist.
-
-**Fix**: Create `.env.example` with all variable names and dummy values. ✅ (done alongside this ROADMAP)
+### ✅ Gap 6: Scoring was not triggered automatically — RESOLVED
+Auto-scoring implemented: when a session ends (via `[RESOLVED]`, `[END]`, or Telnyx `call.hangup`), `scoreSession()` calls Groq with the full transcript + criteria list and inserts `Score` records with feedback text.
 
 ---
 
-### Gap 8: No loading/error states for failures
-**Problem**: If an API call fails (network error, Neon cold start timeout), most UI pages silently stop loading with no error message.
-
-**Fix**: Add `error` state to all `useEffect` data fetches and render an error card.
+### ✅ Gap 7: No `.env.example` — RESOLVED
+`.env.example` created and kept up to date.
 
 ---
+
+### ✅ Gap 8: No loading/error states — RESOLVED
+`error.tsx`, `not-found.tsx`, `loading.tsx` (×2) added. Retry buttons and error messages on simulate + sessions pages.
+
+---
+
+## New Gaps (February 21, 2026 Review)
+
+These are tracked as backlog items BL-045 through BL-057. See [BACKLOG.md](BACKLOG.md) for full detail and sprint assignments.
+
+| Gap | BL ID | Severity | Description |
+|-----|-------|----------|-------------|
+| CF build broken | BL-045 | 🔴 Critical | `@opennextjs/cloudflare` build exits code 1 — nothing can deploy |
+| API routes unprotected | BL-046 | 🔴 Critical | Only `/admin` is auth-gated; all API data is world-readable |
+| Any string = admin | BL-047 | 🔴 Critical | Credentials provider grants admin to any non-empty username |
+| Dual identity model | BL-048 | 🟠 High | `userId` string + `dbUserId` FK both exist; User table never populated |
+| orgId not wired | BL-049 | 🟠 High | Multi-tenant schema but single-tenant app; cross-org data leakage risk |
+| Wrong Groq model in webhook | BL-050 | 🟠 High | Telnyx webhook uses deprecated `llama3-70b-8192`; phone AI likely broken |
+| No Telnyx webhook auth | BL-051 | 🟠 High | Fabricated webhook events can corrupt session data |
+| Missing DB indexes | BL-052 | 🟡 Medium | No FK column indexes; queries will sequential-scan at volume |
+| maxTurns not enforced | BL-053 | 🟡 Medium | Conversations can run unbounded; Groq API cost risk |
+| Phone transcript polling | BL-054 | 🟡 Medium | 3s poll delay; extra DB reads; SSE would be cleaner |
+| `job_titles.name` global unique | BL-056 | 🟢 Low | Breaks multi-tenancy when two orgs share a job title name |
+| No cascade deletes | BL-057 | 🟢 Low | Direct SQL deletes leave orphaned chat_messages and scores |
+
+
 
 ## Phase Roadmap
 
-### Phase 3 — Core Interaction Loop (Current Priority)
+### Phase 3 — Core Interaction Loop ✅ Complete
 
 **Goal**: A user can select a job title + scenario, have a real chat conversation with an AI virtual customer, and see their score.
 
-**Tasks**:
-- [ ] `src/lib/ai.ts` — Groq client wrapper with typed prompt functions
-- [ ] `src/app/api/chat/route.ts` — POST message, GET SSE stream of AI response
-- [ ] `src/app/simulate/[sessionId]/page.tsx` — Chat UI
-- [ ] Update `src/app/simulate/page.tsx` — wire up scenario selection to create session + redirect
-- [ ] Auto-scoring at conversation end via AI
-- [ ] Short-term MVP: localStorage username as `userId`
-
-**Definition of Done**: An employee can complete a full chat simulation, see their score, and find the session in the Sessions list.
-
----
-
-### Phase 4 — Quality & Multi-mode
-
-**Goal**: Improve experience, add phone simulation, refine scoring.
-
-**Tasks**:
-- [ ] Phone simulation via Telnyx (webhook handler, call flow)
-- [ ] Scenario script management in Admin UI (edit `script` JSONB)
-- [ ] Job-Criteria assignment UI in Admin Panel
-- [ ] Real authentication (NextAuth.js)
-- [ ] Per-session score breakdown (criteria-by-criteria view)
-- [ ] Error/loading states across all pages
+**Delivered**:
+- [x] `src/lib/ai.ts` — Groq client (lazy dynamic import for CF Workers compat), streaming virtual customer, auto-scoring
+- [x] `POST /api/chat` — SSE streaming + [RESOLVED]/[END] detection + auto end-session
+- [x] `/simulate/[sessionId]/page.tsx` — Chat UI with streaming, optimistic messages
+- [x] Simulate page creates session + redirects to `/simulate/[sessionId]`
+- [x] Sessions list + detail page with transcript and per-criteria score breakdown
+- [x] Admin panel expanded: 4 tabs (Criteria, Job Titles, Scenarios, Job↔Criteria)
+- [x] All missing CRUD API routes (scenarios, job-criteria)
+- [x] Error/loading states, 404 page, global error boundary
+- [x] Username modal (MVP identity via localStorage)
 
 ---
 
-### Phase 5 — Deployment & Operations
+### Phase 4 — Quality & Multi-mode ✅ Complete
+
+**Goal**: Phone simulation, scenario authoring, real auth, full scoring view.
+
+**Delivered**:
+- [x] Phone simulation via Telnyx (outbound call, full webhook flow: answered→speak→gather→AI→loop→hangup)
+- [x] Phone simulation UI (dial screen, transcript polling, call timer, hang-up)
+- [x] Scenario script editor in Admin UI (JSONB with parse validation)
+- [x] Job-Criteria assignment UI in Admin
+- [x] NextAuth.js v5 (GitHub OAuth + Credentials, JWT, /admin middleware guard)
+- [x] Per-session score breakdown (criteria-by-criteria with feedback text)
+- [x] Score bar chart on sessions list
+
+---
+
+### Phase 5 — Deployment & Operations ✅ Mostly Complete (CF build broken)
 
 **Goal**: App running in production on Cloudflare Pages/Workers.
 
-**Tasks**:
-- [ ] `wrangler.toml` configuration
-- [ ] `@cloudflare/next-on-pages` adapter
-- [ ] Edge runtime for streaming API routes (required for Workers)
-- [ ] CI/CD via GitHub Actions (build → deploy on push to `main`)
-- [ ] Environment variables set in Cloudflare dashboard
-- [ ] Domain `xpelevator.com` → Cloudflare Pages custom domain
-- [ ] Neon connection string uses pooler endpoint
+**Delivered**:
+- [x] `wrangler.toml` + `open-next.config.ts` (`@opennextjs/cloudflare`)
+- [x] Edge runtime on all API routes; Neon HTTP adapter (`@prisma/adapter-neon`)
+- [x] GitHub Actions CI/CD (lint + typecheck + build on push to main)
+- [x] `prisma.config.ts` Migration workflow (`prisma migrate dev/deploy`)
+- [x] Analytics dashboard (`/analytics` + `/api/analytics`)
+- [ ] **BL-045**: CF build currently fails (see Backlog — Sprint 6 target)
+- [ ] Domain `xpelevator.com` → Cloudflare Pages custom domain (pending working build)
+- [ ] Neon pooler endpoint confirmed in production env vars
 
 ---
 
-### Phase 6 — Scale & Analytics
+### Phase 6 — Secure & Multi-Tenant (Current Sprint 6–7 Target)
 
-**Goal**: Multi-tenant, analytics dashboard, advanced AI features.
+**Goal**: API security hardened, multi-tenancy live, data integrity enforced.
 
 **Tasks**:
-- [ ] Organization/team model (multi-company SaaS)
-- [ ] Analytics dashboard (score trends, pass/fail rates by criteria)
-- [ ] AI-generated coaching feedback after sessions
-- [ ] Scenario authoring wizard
-- [ ] API for external LMS integration
+- [ ] **BL-045** Fix `@opennextjs/cloudflare` build failure
+- [ ] **BL-046** Auth guard on all API routes (not just /admin)
+- [ ] **BL-047** Admin role: verify `User.role === ADMIN` from DB before allowing admin access
+- [ ] **BL-048** Upsert `User` record on sign-in; use `dbUserId` as canonical session FK
+- [ ] **BL-049** Filter all API queries by `orgId` from session context
+- [ ] **BL-050** Fix Groq model name in Telnyx webhook
+- [ ] **BL-051** Telnyx webhook HMAC signature verification
+- [ ] **BL-052** DB indexes on FK columns (Prisma migration)
+- [ ] **BL-056** Scope `job_titles.name` unique constraint to `(orgId, name)`
+
+---
+
+### Phase 7 — Scale & Advanced Features
+
+**Goal**: Full multi-tenant SaaS, advanced AI coaching, LMS integration.
+
+**Tasks**:
+- [ ] Organization onboarding flow (create org, invite members)
+- [ ] Trainer/supervisor role: human post-session scoring and coaching notes
+- [ ] AI-generated coaching feedback (narrative summary after session ends)
+- [ ] Scenario authoring wizard (guided form → JSONB script generation)
+- [ ] Training progression tracking (required scenarios per role, certification gates)
+- [ ] Full seed data: all 9 job titles, 34 scenarios, 25 criteria (per ARCHITECTURE.md catalog)
+- [ ] LMS API for external integration (SCORM / xAPI)
+- [ ] Replace phone transcript poll with SSE (BL-054)
 
 ---
 
@@ -176,8 +195,13 @@ interface ScenarioScript {
 | Decision | Rationale | Date |
 |----------|-----------|------|
 | Neon Postgres over Railway/Supabase | Branching support for safe schema iteration | 2025 |
-| Groq over OpenAI | 10x faster inference, free tier, llama-3 quality | 2025 |
+| Groq over OpenAI | 10× faster inference, free tier, llama-3 quality | 2025 |
 | Next.js App Router | Server components reduce JS bundle, co-locate API | 2025 |
-| Cloudflare Pages over Vercel | Edge Workers needed for Telnyx webhook + Durable Objects for WebSockets | 2025 |
-| SSE over WebSocket | Simpler server-side (stateless Next.js routes), one-way stream is sufficient for AI chat | 2025 |
-| Skip authentication for MVP | Reduces scope; add NextAuth.js in Phase 4 | 2025 |
+| Cloudflare Pages over Vercel | Edge Workers for Telnyx webhook; no WebSocket cold-start | 2025 |
+| SSE over WebSocket | Stateless Workers compatible; one-way stream sufficient for AI chat | 2025 |
+| Skip authentication for MVP | Reduced scope; replaced with NextAuth.js in Phase 4 | 2025 |
+| `@opennextjs/cloudflare` over `@cloudflare/next-on-pages` | OpenNext CF is the recommended path; `next-on-pages` in maintenance mode | 2026 |
+| `@prisma/adapter-neon` (HTTP) over TCP | Only viable Prisma transport in CF Workers (no TCP) | 2026 |
+| Lazy dynamic `import('groq-sdk')` | `groq-sdk` is CJS-only; static ESM import crashes esbuild + CF Workers bundle | 2026 |
+| NextAuth v5 (beta) JWT strategy | No DB session storage needed; edge-compatible; GitHub + Credentials in same config | 2026 |
+| Dual `userId`/`dbUserId` (temporary) | MVP shipped quickly with string userId; `dbUserId` FK scaffolded for Phase 6 migration | 2026 |

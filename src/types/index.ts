@@ -1,6 +1,6 @@
 // ─── Enums / Union Types ──────────────────────────────────────────────────────
 
-export type SimulationType = 'PHONE' | 'CHAT';
+export type SimulationType = 'PHONE' | 'CHAT' | 'VOICE';
 export type SessionStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'ABANDONED';
 export type MessageRole = 'CUSTOMER' | 'AGENT';
 

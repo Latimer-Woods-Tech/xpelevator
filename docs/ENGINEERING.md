@@ -75,35 +75,73 @@ See [Database Management](#database-management) for details on the Neon branchin
 ```
 xpelevator/
 ├── prisma/
-│   └── schema.prisma         # Single source of truth for DB schema
+│   ├── schema.prisma           # Single source of truth for DB schema (10 models, 4 enums)
+│   ├── seed.ts                 # Idempotent seed: job titles, criteria, scenarios, job-criteria links
+│   ├── prisma.config.ts        # Prisma CLI config (replaces deprecated package.json#prisma)
+│   └── migrations/             # SQL migration history (prisma migrate)
 ├── src/
-│   ├── app/                  # Next.js App Router pages & API routes
-│   │   ├── page.tsx          # Home / landing page
-│   │   ├── layout.tsx        # Root layout (fonts, metadata)
-│   │   ├── globals.css       # Global CSS (Tailwind v4 imports)
-│   │   ├── admin/            # Admin panel (criteria CRUD)
-│   │   ├── sessions/         # Past simulation sessions
-│   │   ├── simulate/         # Simulation launcher & active session UI
-│   │   │   ├── page.tsx      # Job + scenario selector
-│   │   │   └── [sessionId]/  # Active simulation (chat/phone UI)
-│   │   └── api/              # Route handlers
-│   │       ├── jobs/         # GET/POST job titles
-│   │       ├── criteria/     # GET/POST + [id] PUT/DELETE criteria
-│   │       ├── simulations/  # GET/POST sessions
-│   │       ├── scoring/      # POST scores
-│   │       └── chat/         # POST/GET chat messages (SSE streaming)
-│   └── lib/
-│       ├── prisma.ts         # Prisma client singleton
-│       └── ai.ts             # Groq/AI client wrapper
+│   ├── auth.ts                 # NextAuth v5 config (GitHub + Credentials, JWT strategy)
+│   ├── middleware.ts            # Edge middleware — protects /admin routes
+│   ├── app/
+│   │   ├── page.tsx            # Home / landing page
+│   │   ├── layout.tsx          # Root layout (SessionProvider, fonts, metadata)
+│   │   ├── globals.css         # Tailwind v4 CSS
+│   │   ├── error.tsx           # Global error boundary
+│   │   ├── not-found.tsx       # 404 page
+│   │   ├── providers.tsx       # Client-side React context providers
+│   │   ├── admin/page.tsx      # Admin panel — 4 tabs: Criteria, Jobs, Scenarios, Job↔Criteria
+│   │   ├── analytics/page.tsx  # Analytics dashboard — score trends, heatmap, breakdowns
+│   │   ├── auth/signin/page.tsx # NextAuth sign-in page
+│   │   ├── sessions/
+│   │   │   ├── page.tsx        # Session list with score bars
+│   │   │   ├── loading.tsx     # Skeleton loader
+│   │   │   └── [id]/page.tsx   # Session detail: transcript + per-criteria scores
+│   │   ├── simulate/
+│   │   │   ├── page.tsx        # Job + scenario selector; triggers POST /api/simulations
+│   │   │   ├── loading.tsx     # Skeleton loader
+│   │   │   └── [sessionId]/page.tsx  # Active simulation: chat UI (SSE) + phone UI (poll)
+│   │   └── api/
+│   │       ├── analytics/      # GET — score trends, per-criteria stats, job/type breakdowns
+│   │       ├── auth/[...nextauth]/  # NextAuth v5 route handler
+│   │       ├── chat/           # POST (SSE stream) + GET (session loader)
+│   │       ├── criteria/       # GET + POST; [id]/: GET, PUT, DELETE
+│   │       ├── health/         # GET — DB connectivity probe
+│   │       ├── jobs/           # GET + POST; [id]/: GET, PUT, DELETE; [id]/criteria/: POST, DELETE
+│   │       ├── orgs/           # GET + POST; [id]/: GET, PUT, DELETE; [id]/members/: GET, POST
+│   │       ├── scenarios/      # GET + POST; [id]/: GET, PUT, DELETE
+│   │       ├── scoring/        # POST — create score records for a session
+│   │       ├── simulations/    # GET + POST
+│   │       └── telnyx/
+│   │           ├── call/       # POST — initiate outbound Telnyx call
+│   │           └── webhook/    # POST — receive Telnyx Call Control events
+│   ├── lib/
+│   │   ├── ai.ts               # Groq client (lazy dynamic import); virtual customer prompts; scoring
+│   │   ├── env.ts              # Env var validation (warn dev / throw prod)
+│   │   ├── prisma.ts           # Prisma client (Neon HTTP adapter, CF Workers compatible)
+│   │   └── telnyx.ts           # Telnyx helper: callSpeak, callGather, callHangup, encode/decodeClientState
+│   └── types/
+│       └── index.ts            # Shared TypeScript types + SSE event payload types
+├── tests/
+│   ├── unit/                   # Unit tests (vitest)
+│   ├── integration/api/        # API integration tests
+│   ├── ui/                     # React component tests (@testing-library)
+│   ├── e2e/                    # End-to-end simulation test
+│   └── mocks/prisma.ts         # Prisma mock for unit/integration tests
 ├── docs/
-│   ├── ARCHITECTURE.md       # C4 diagrams
-│   ├── ENGINEERING.md        # This file
-│   ├── ROADMAP.md            # Plan, gaps, priorities
-│   └── tech/                 # Per-technology reference docs
-├── .env                      # Local secrets (never commit)
-├── .env.example              # Template (commit this)
-├── next.config.ts            # Next.js configuration
-├── tailwind.config.ts        # (if needed — v4 uses CSS variables)
+│   ├── ARCHITECTURE.md         # C4 + Mermaid diagrams, scenario catalog, scoring rubric
+│   ├── BACKLOG.md              # Product & engineering backlog (BL-001 — BL-057)
+│   ├── ENGINEERING.md          # This file — setup, conventions, runbooks
+│   ├── ROADMAP.md              # Phase plan, gap analysis, ADR log
+│   └── tech/                   # Per-technology reference docs (Groq, Telnyx, Prisma, etc.)
+├── scripts/
+│   └── bundle-worker.js        # esbuild bundler for CF Worker output
+├── .env                        # Local secrets (never commit)
+├── .env.example                # Template (always keep updated)
+├── next.config.ts              # Next.js config (images.unoptimized, eslint skip on build)
+├── open-next.config.ts         # @opennextjs/cloudflare config (dummy cache/queue for now)
+├── prisma.config.ts            # Prisma CLI config (points to prisma/schema.prisma)
+├── wrangler.toml               # Cloudflare Pages deployment config
+├── vitest.config.ts            # Vitest + jsdom test runner config
 └── package.json
 ```
 
@@ -115,15 +153,16 @@ All secrets live in `.env` (never committed). Use `.env.example` as the template
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | ✅ | Neon Postgres connection string (pooled endpoint) |
-| `GROQ_API_KEY` | ✅ | Groq API key for AI virtual customer |
-| `GROK_API_KEY` | ⬜ | xAI Grok API key (alternative AI provider) |
+| `DATABASE_URL` | ✅ | Neon Postgres connection string (use **pooler** endpoint for app, direct for migrations) |
+| `GROQ_API_KEY` | ✅ | Groq API key for AI virtual customer responses and auto-scoring |
+| `AUTH_SECRET` | ✅ | NextAuth v5 secret — generate with `openssl rand -base64 32` |
+| `AUTH_GITHUB_ID` | ⬜ | GitHub OAuth App client ID (omit to disable GitHub login) |
+| `AUTH_GITHUB_SECRET` | ⬜ | GitHub OAuth App client secret |
 | `TELNYX_API_KEY` | ⬜ | Telnyx API key for phone simulations |
-| `TELNYX_CONNECTION_ID` | ⬜ | Telnyx SIP connection / call control app ID |
-| `CLOUDFLARE_API_TOKEN` | ⬜ | Cloudflare API token for Pages/Workers deployment |
+| `TELNYX_CONNECTION_ID` | ⬜ | Telnyx Call Control App (SIP connection) ID |
+| `TELNYX_FROM_NUMBER` | ⬜ | E.164 number that Telnyx dials **from** (e.g., `+14155551234`) |
+| `CLOUDFLARE_API_TOKEN` | ⬜ | Cloudflare API token — needed only for `wrangler` CLI deploys |
 | `CLOUDFLARE_ACCOUNT_ID` | ⬜ | Cloudflare account ID |
-| `NEXTAUTH_SECRET` | ⬜ | NextAuth.js secret (future: when auth is added) |
-| `NEXTAUTH_URL` | ⬜ | App URL for NextAuth callbacks |
 
 ### Neon Connection String Format
 ```
@@ -140,43 +179,36 @@ Use the **pooler** endpoint (port 5432) for all application connections. Use the
 - **Database**: `neondb`
 - **Region**: `us-east-1`
 - **Primary branch**: `main`
+- **Tables**: 10 (organizations, users, job_titles, scenarios, criteria, job_criteria, simulation_sessions, chat_messages, scores, _prisma_migrations)
 
 ### Workflow: Schema Changes
 
-Always use **Neon branches** to test schema changes before applying to production:
+The project is on **Prisma Migrate** (not `db push`). Always test on a Neon branch first.
 
 ```bash
-# 1. Create a branch in Neon console (or via MCP/API)
-# 2. Set DATABASE_URL to the branch connection string
-# 3. Test the schema change
-npx prisma db push
+# 1. Create a branch in Neon console (or MCP tool)
+# 2. Set DATABASE_URL to the branch connection string in .env
 
-# 4. Verify with introspection
-npx prisma db pull
+# 3. Edit prisma/schema.prisma
 
-# 5. After validation, re-set DATABASE_URL to main
-# 6. Apply to production
-npx prisma db push   # or coordinate with DBA
+# 4. Generate and apply migration on the branch
+npx prisma migrate dev --name <description>
+
+# 5. Test thoroughly, then reset DATABASE_URL to main
+
+# 6. Deploy migration to production
+npx prisma migrate deploy
 ```
 
-### Prisma Migrations (future)
-When the project matures, switch from `db push` to migration files:
-```bash
-npx prisma migrate dev --name <description>   # dev
-npx prisma migrate deploy                     # production
-```
+> **Do not use `prisma db push` on the production Neon branch** — it bypasses migration history.
 
 ### Seed Data
-Seed data was applied directly via Neon MCP SQL tool. For future use, add a `prisma/seed.ts` file:
-```ts
-// prisma/seed.ts
-import prisma from '../src/lib/prisma';
-// ... insert seed records
+
+```bash
+npm run seed        # runs tsx prisma/seed.ts — idempotent (safe to re-run)
 ```
-Then add to `package.json`:
-```json
-"prisma": { "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts" }
-```
+
+The seed file (`prisma/seed.ts`) inserts: 3 job titles (L1, L2, L3), 7 criteria, 6 scenarios with full JSONB persona scripts, and all job-criteria links.
 
 ---
 
@@ -252,10 +284,53 @@ export async function GET(request: Request) {
 
 ### Dynamic Routes
 
+```ts
+// src/app/api/criteria/[id]/route.ts
+export async function PUT(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;   // ⚠️ Next.js 15+: params is a Promise — always await it
+}
 ```
-/api/criteria/[id]/route.ts  →  export async function PUT(req, { params }: { params: Promise<{ id: string }> })
+
+### SSE (Server-Sent Events) Pattern
+
+Used by `/api/chat` for streaming AI responses:
+
+```ts
+export const runtime = 'edge';   // Required for CF Workers
+
+const readable = new ReadableStream({
+  async start(controller) {
+    const encoder = new TextEncoder();
+    for await (const chunk of streamResponse(messages)) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`));
+    }
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+    controller.close();
+  }
+});
+
+return new Response(readable, {
+  headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' }
+});
 ```
-> **Next.js 15+ note**: `params` in route handlers is now a `Promise`. Always `await params` before accessing properties.
+
+Client consumption (`/simulate/[sessionId]/page.tsx`):
+```ts
+const reader = res.body!.getReader();
+const decoder = new TextDecoder();
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  const lines = decoder.decode(value).split('\n\n').filter(Boolean);
+  for (const line of lines) {
+    const payload = JSON.parse(line.replace(/^data: /, ''));
+    if (payload.type === 'chunk') setStreamingText(prev => prev + payload.content);
+    if (payload.type === 'session_ended') handleSessionEnd(payload);
+  }
+}
 
 ---
 
@@ -285,33 +360,44 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`
 
 ## Deployment
 
-### Cloudflare Pages (target)
+### Cloudflare Pages (using `@opennextjs/cloudflare`)
 
 ```bash
-# Install Wrangler CLI
-npm install -g wrangler
+# Build for Cloudflare (replaces `next build` for deployment)
+npm run pages:build           # runs: npx @opennextjs/cloudflare build
 
-# Login
-wrangler login
+# Local preview (emulates CF Workers)
+npm run preview               # pages:build + bundle:worker + wrangler pages dev
 
-# Deploy (from project root)
-npx wrangler pages deploy .next --project-name xpelevator
+# Deploy to production
+npm run deploy                # pages:build + bundle:worker + wrangler pages deploy
 ```
 
-> **Note**: Cloudflare Pages supports Next.js via the `@cloudflare/next-on-pages` adapter. Requires `edge` runtime for API routes that run in Workers. See [tech/CLOUDFLARE.md](tech/CLOUDFLARE.md).
+> **Note**: The build currently fails (BL-045). The active issue is likely `groq-sdk` CJS/ESM interop or `next-auth` v5 beta + React 19 incompatibility during esbuild bundling for CF Workers. The `open-next.config.ts` uses `dummy` adapters for cache/queue — these will need real CF KV/Queue bindings for production ISR/caching.
 
 ### Environment Variables in Cloudflare
-Set via Cloudflare dashboard → Pages → Settings → Environment Variables, or:
+Set via Cloudflare dashboard → Pages → project → Settings → Environment variables (Production & Preview), or:
 ```bash
-wrangler pages secret put DATABASE_URL
+wrangler pages secret put DATABASE_URL --project-name xpelevator
+wrangler pages secret put GROQ_API_KEY --project-name xpelevator
+wrangler pages secret put AUTH_SECRET --project-name xpelevator
 ```
 
-### Build Settings
+### Build Settings (Cloudflare Dashboard)
 | Setting | Value |
 |---------|-------|
-| Build command | `npm run build` |
-| Build output | `.next` |
+| Framework preset | None (custom) |
+| Build command | `npm run pages:build` |
+| Build output directory | `.open-next/assets` |
 | Node.js version | 20.x |
+| `nodejs_compat` flag | ✅ Required (set in wrangler.toml) |
+
+### CI/CD (GitHub Actions)
+Workflow: `.github/workflows/ci.yml`
+- **lint** job: `npm run lint`
+- **typecheck** job: `npx tsc --noEmit`
+- **build** job: `npm run build` (uses dummy env vars)
+- Triggers on push/PR to `main`
 
 ---
 
@@ -328,24 +414,54 @@ npm run dev
 ### Prisma Errors
 
 **`Can't reach database server`**
-- Check `DATABASE_URL` in `.env`
-- Neon free tier suspends after inactivity — first connection may take 3-5 seconds (cold start)
+- Check `DATABASE_URL` in `.env` — strip trailing whitespace/CRLF (Windows)
+- Neon free tier suspends after inactivity — first connection takes 3-5s (cold start); retry
 
 **`Unknown field in Prisma query`**
 ```bash
-npx prisma generate   # regenerate client after schema changes
+npx prisma generate   # regenerate client after any schema change
 ```
 
 **`P2002 Unique constraint violation`**
-- Check for duplicate `name` field on `JobTitle` or `Criteria`
+- `JobTitle.name` has a global `@unique` — two orgs cannot share the same job title name until BL-056 is resolved
+- `Criteria` does not have a unique name constraint — duplicates allowed
+
+**Prisma client not found after schema change**
+```bash
+npx prisma generate
+```
+
+### NextAuth / Authentication Errors
+
+**`server configuration` error at `/api/auth/session`**
+- `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` are set to empty strings or partially set — either set both or set neither. The auth config guards against this but check `.env` values.
+
+**Session not persisting**
+- Verify `AUTH_SECRET` is set. Without it NextAuth cannot sign JWTs.
+- In dev: cookie is `authjs.session-token`; in prod (https): `__Secure-authjs.session-token`
+
+### Groq API Errors
+
+**`401 Unauthorized`**
+- `GROQ_API_KEY` is missing or has CRLF line endings (common on Windows). The client does `.replace(/\r/g, '')` but double-check.
+
+**Phone call opens but AI never speaks**
+- The Telnyx webhook uses the deprecated model `llama3-70b-8192` (BL-050). Groq may return a 404 or fail silently.
+
+### Cloudflare Build Failures (BL-045)
+
+If `npm run pages:build` (OpenNext CF) fails:
+1. Check for `groq-sdk` CJS interop errors in the bundler output — the lazy `import()` in `src/lib/ai.ts` should resolve this but verify the bundle error message
+2. Check for `next-auth` v5 beta issues — React 19 + next-auth v5 beta have known build incompatibilities
+3. Try `npm run build` (plain Next.js) first to isolate whether the issue is Next.js or the CF adapter
 
 ### TypeScript Errors in VS Code
-- Ghost errors from deleted files → reload VS Code window: `Ctrl+Shift+P` → "Developer: Reload Window"
+- Ghost errors from deleted files → reload VS Code: `Ctrl+Shift+P` → "Developer: Reload Window"
 
 ### Windows / WSL npm Issues
-- **Never** run `npm install` from WSL when the project is on a Windows NTFS drive
+- **Never** run `npm install` from WSL on a Windows NTFS drive
 - Use Windows cmd.exe or PowerShell for all npm/node commands
-- If `node_modules` appears corrupt: delete it from PowerShell (`Remove-Item -Recurse -Force node_modules`), then re-run `npm install` from cmd.exe
+- Corrupt `node_modules`: delete with PowerShell (`Remove-Item -Recurse -Force node_modules`), reinstall from cmd.exe
 
 ---
 

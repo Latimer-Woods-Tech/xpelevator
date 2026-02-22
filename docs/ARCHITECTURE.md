@@ -3,6 +3,8 @@
 ## Overview
 XPElevator is a **virtual customer simulator** for training employees on customer interactions. Users select a job title, which triggers training scenarios (phone calls and chat) with simulated customers, scored against updatable criteria.
 
+> **Last architecture review**: February 21, 2026. See [BACKLOG.md](BACKLOG.md) for open issues identified in this review.
+
 ## Tech Stack
 - **Frontend**: Next.js on Cloudflare Pages
 - **Backend**: Cloudflare Workers (API routes via Next.js)
@@ -10,6 +12,259 @@ XPElevator is a **virtual customer simulator** for training employees on custome
 - **Voice**: Telnyx (inbound/outbound calls, TTS/STT)
 - **AI**: Groq/Grok for dynamic customer responses
 - **Auth**: Cloudflare Access
+
+## System Diagrams (Current Build)
+
+The following Mermaid diagrams reflect the system as of the February 21, 2026 architectural review.
+
+### Container View
+
+```mermaid
+graph TB
+    subgraph Browser["Browser (React 19 / Next.js 15)"]
+        UI_HOME["/ Home"]
+        UI_SIM["Simulate\n/simulate\n/simulate/[sessionId]"]
+        UI_SESS["Sessions\n/sessions\n/sessions/[id]"]
+        UI_ADMIN["Admin\n/admin"]
+        UI_ANALYTICS["Analytics\n/analytics"]
+        UI_AUTH["Sign In\n/auth/signin"]
+    end
+
+    subgraph CF["Cloudflare Edge (Pages + Workers)"]
+        subgraph API["API Routes (Edge Runtime)"]
+            A_JOBS["/api/jobs + /api/jobs/[id] + /api/jobs/[id]/criteria"]
+            A_SCEN["/api/scenarios + /api/scenarios/[id]"]
+            A_CRIT["/api/criteria + /api/criteria/[id]"]
+            A_SIM["/api/simulations"]
+            A_CHAT["/api/chat  — SSE stream"]
+            A_SCORE["/api/scoring"]
+            A_ANALYTICS["/api/analytics"]
+            A_TELNYX_CALL["/api/telnyx/call"]
+            A_TELNYX_WH["/api/telnyx/webhook"]
+            A_AUTH["/api/auth/[...nextauth]"]
+            A_ORGS["/api/orgs"]
+        end
+        MW["Middleware\nProtects /admin only ⚠️ BL-046"]
+    end
+
+    subgraph External["External Services"]
+        NEON["Neon Postgres\n10 tables (aged-butterfly-52244878)"]
+        GROQ["Groq LLM\nllama-3.3-70b-versatile\n(webhook uses llama3-70b-8192 ⚠️ BL-050)"]
+        TELNYX["Telnyx\nCall Control / TTS / STT"]
+        GITHUB["GitHub OAuth\n(optional)"]
+    end
+
+    UI_SIM --> A_CHAT
+    UI_SIM --> A_TELNYX_CALL
+    UI_SIM --> A_SIM
+    UI_ADMIN --> A_JOBS
+    UI_ADMIN --> A_SCEN
+    UI_ADMIN --> A_CRIT
+    UI_ANALYTICS --> A_ANALYTICS
+    UI_AUTH --> A_AUTH
+    UI_SESS --> A_CHAT
+
+    A_CHAT --> NEON
+    A_CHAT --> GROQ
+    A_SIM --> NEON
+    A_ANALYTICS --> NEON
+    A_JOBS --> NEON
+    A_SCEN --> NEON
+    A_CRIT --> NEON
+    A_SCORE --> NEON
+    A_TELNYX_CALL --> TELNYX
+    A_TELNYX_WH --> NEON
+    A_TELNYX_WH --> GROQ
+    A_AUTH --> GITHUB
+
+    TELNYX -->|webhook POST| A_TELNYX_WH
+```
+
+### Database Schema
+
+```mermaid
+erDiagram
+    organizations {
+        uuid id PK
+        string name
+        string slug UK
+        OrgPlan plan
+        datetime created_at
+    }
+    users {
+        uuid id PK
+        uuid org_id FK
+        string email UK
+        string name
+        UserRole role
+        datetime created_at
+    }
+    job_titles {
+        uuid id PK
+        uuid org_id FK
+        string name UK
+        string description
+        datetime created_at
+    }
+    scenarios {
+        uuid id PK
+        uuid org_id FK
+        uuid job_title_id FK
+        string name
+        SimulationType type
+        jsonb script
+        datetime created_at
+    }
+    criteria {
+        uuid id PK
+        uuid org_id FK
+        string name
+        int weight
+        string category
+        bool active
+        datetime created_at
+        datetime updated_at
+    }
+    job_criteria {
+        uuid id PK
+        uuid job_title_id FK
+        uuid criteria_id FK
+    }
+    simulation_sessions {
+        uuid id PK
+        uuid org_id FK
+        string user_id
+        uuid db_user_id FK
+        uuid job_title_id FK
+        uuid scenario_id FK
+        SimulationType type
+        SessionStatus status
+        datetime started_at
+        datetime ended_at
+        datetime created_at
+    }
+    chat_messages {
+        uuid id PK
+        uuid session_id FK
+        MessageRole role
+        text content
+        datetime timestamp
+    }
+    scores {
+        uuid id PK
+        uuid session_id FK
+        uuid criteria_id FK
+        float score
+        text feedback
+        datetime scored_at
+    }
+
+    organizations ||--o{ users : has
+    organizations ||--o{ job_titles : owns
+    organizations ||--o{ scenarios : owns
+    organizations ||--o{ criteria : owns
+    organizations ||--o{ simulation_sessions : has
+    users ||--o{ simulation_sessions : runs
+    job_titles ||--o{ scenarios : has
+    job_titles ||--o{ job_criteria : links
+    job_titles ||--o{ simulation_sessions : defines
+    criteria ||--o{ job_criteria : links
+    criteria ||--o{ scores : "scored by"
+    scenarios ||--o{ simulation_sessions : "used in"
+    simulation_sessions ||--o{ chat_messages : contains
+    simulation_sessions ||--o{ scores : "evaluated by"
+```
+
+### Chat Simulation Flow
+
+```mermaid
+sequenceDiagram
+    participant U as Employee (Browser)
+    participant CF as Next.js / CF Worker
+    participant DB as Neon Postgres
+    participant AI as Groq LLM
+
+    U->>CF: GET /simulate
+    CF->>DB: GET /api/jobs + /api/scenarios
+    DB-->>CF: job titles + scenarios
+    CF-->>U: Job/Scenario selector UI
+
+    U->>CF: POST /api/simulations {jobTitleId, scenarioId, userId}
+    CF->>DB: INSERT simulation_session (PENDING→IN_PROGRESS)
+    DB-->>CF: session.id
+    CF-->>U: 302 → /simulate/{sessionId}
+
+    U->>CF: POST /api/chat {sessionId, content:"[START]"}
+    CF->>DB: Load session + scenario script + criteria
+    CF->>AI: buildSystemPrompt(persona, objective, difficulty)
+    AI-->>CF: stream tokens
+    CF-->>U: SSE chunks
+    CF->>DB: INSERT chat_message (CUSTOMER)
+
+    loop Each Agent Turn
+        U->>CF: POST /api/chat {sessionId, content: agentText}
+        CF->>DB: INSERT chat_message (AGENT)
+        CF->>AI: stream response
+        AI-->>CF: token stream (may contain [RESOLVED])
+        CF-->>U: SSE chunks
+        CF->>DB: INSERT chat_message (CUSTOMER)
+    end
+
+    CF->>CF: Detect [RESOLVED] or [END]
+    CF->>DB: UPDATE session COMPLETED + endedAt
+    CF->>AI: scoreSession(transcript, criteria)
+    AI-->>CF: scores per criterion
+    CF->>DB: INSERT scores
+    CF-->>U: SSE session_ended {scores}
+
+    U->>CF: GET /sessions/{sessionId}
+    CF->>DB: SELECT session + messages + scores + criteria
+    CF-->>U: Transcript + per-criteria breakdown
+```
+
+### Phone Simulation Flow (Telnyx)
+
+```mermaid
+sequenceDiagram
+    participant U as Employee (Browser)
+    participant CF as Next.js / CF Worker
+    participant TEL as Telnyx
+    participant AI as Groq LLM
+    participant DB as Neon Postgres
+
+    U->>CF: POST /api/telnyx/call {sessionId, phoneNumber}
+    CF->>TEL: calls.create {to, client_state: {sessionId, scenarioId}}
+    TEL-->>CF: 200 OK
+    CF-->>U: {callId}
+    U->>U: Show dial screen, start 3s poll
+
+    TEL->>CF: POST /api/telnyx/webhook {event: call.answered}
+    CF->>DB: Load scenario script
+    CF->>AI: Generate opening line
+    AI-->>CF: opening text
+    CF->>TEL: callSpeak + callGather
+
+    loop Phone Conversation
+        TEL->>CF: POST /api/telnyx/webhook {event: call.gather.ended, transcript}
+        CF->>DB: INSERT chat_message(AGENT, transcript)
+        CF->>AI: Generate customer reply
+        AI-->>CF: reply text
+        CF->>DB: INSERT chat_message(CUSTOMER, reply)
+        CF->>TEL: callSpeak + callGather
+    end
+
+    TEL->>CF: POST /api/telnyx/webhook {event: call.hangup}
+    CF->>DB: UPDATE session COMPLETED
+    CF->>AI: scoreSession
+    AI-->>CF: scores
+    CF->>DB: INSERT scores
+
+    Note over U,DB: Transcript updates via 3s poll (BL-054: replace with SSE)
+    U->>CF: GET /api/chat?sessionId=X
+    CF-->>U: messages[]
+```
+
+---
 
 ## C4 Context Diagram
 
@@ -55,14 +310,19 @@ XPElevator is a **virtual customer simulator** for training employees on custome
 
 ## Database Schema
 
-### Tables
-- **job_titles**: id, name, description, created_at
-- **scenarios**: id, job_title_id (FK), name, description, type (phone/chat), script (JSONB), created_at
-- **criteria**: id, name, description, weight (1-10), category, active, created_at, updated_at
+> **Live schema has 10 tables and 4 enums** (updated Feb 21 2026). The Mermaid ER diagram above reflects the current state.
+
+### Tables (10 total)
+- **organizations**: Multi-tenant org container (orgId on all tenant-scoped models)
+- **users**: Authenticated users with org membership and role (ADMIN | MEMBER)
+- **job_titles**: id, org_id (nullable = global), name, description, created_at
+- **scenarios**: id, org_id, job_title_id (FK), name, description, type (phone/chat), script (JSONB), created_at
+- **criteria**: id, org_id, name, description, weight (1-10), category, active, created_at, updated_at
 - **job_criteria**: id, job_title_id (FK), criteria_id (FK) — links criteria to jobs
-- **simulation_sessions**: id, user_id, job_title_id (FK), scenario_id (FK), type, status, started_at, ended_at
-- **chat_messages**: id, session_id (FK), role (customer/agent), content, timestamp
-- **scores**: id, session_id (FK), criteria_id (FK), score (numeric), feedback, scored_at
+- **simulation_sessions**: id, org_id, user_id (string), db_user_id (FK→users), job_title_id (FK), scenario_id (FK), type, status, started_at, ended_at
+- **chat_messages**: id, session_id (FK), role (CUSTOMER/AGENT), content, timestamp
+- **scores**: id, session_id (FK), criteria_id (FK), score (float), feedback, scored_at
+- **_prisma_migrations**: Prisma migration history (system table)
 
 ## Key Flows
 1. **Job Selection → Menu**: User picks job title → fetches linked scenarios → shows phone/chat options

@@ -86,13 +86,13 @@ export async function POST(request: Request) {
         });
 
         const script = (scenario?.script ?? {}) as Record<string, unknown>;
-        const persona = (script.persona as string | undefined) ?? 'a customer';
-        const objective = (script.objective as string | undefined) ?? 'make an inquiry';
+        const persona = (script.customerPersona as string | undefined) ?? 'a customer who needs help';
+        const objective = (script.customerObjective as string | undefined) ?? 'get help with their issue';
         const difficulty = (script.difficulty as string | undefined) ?? 'medium';
 
         // Generate AI opening line via Groq
         const opening = await (await getGroq()).chat.completions.create({
-          model: 'llama3-70b-8192',
+          model: 'llama-3.3-70b-versatile',
           messages: [
             {
               role: 'system',
@@ -109,8 +109,8 @@ export async function POST(request: Request) {
         const openingText = opening.choices[0]?.message?.content?.trim() ?? 'Hello?';
         const cleanOpening = openingText.replace('[RESOLVED]', '').trim();
 
-        // Save AI's opening message to DB
-        await saveMessage(state.sessionId, 'AGENT', cleanOpening);
+        // Save AI's opening message to DB (AI = CUSTOMER role; trainee = AGENT role)
+        await saveMessage(state.sessionId, 'CUSTOMER', cleanOpening);
 
         // Speak the opening line, then gather
         const newState = { ...state, turnCount: 1 };
@@ -163,8 +163,8 @@ export async function POST(request: Request) {
           break;
         }
 
-        // Save caller's turn to DB
-        await saveMessage(state.sessionId, 'CUSTOMER', transcript);
+        // Save caller's (trainee/AGENT) turn to DB
+        await saveMessage(state.sessionId, 'AGENT', transcript);
 
         // Load conversation history for context
         const messages = await prisma.chatMessage.findMany({
@@ -176,18 +176,20 @@ export async function POST(request: Request) {
           where: { id: state.scenarioId },
         });
         const script = (scenario?.script ?? {}) as Record<string, unknown>;
-        const persona = (script.persona as string | undefined) ?? 'a customer';
-        const objective = (script.objective as string | undefined) ?? 'make an inquiry';
+        const persona = (script.customerPersona as string | undefined) ?? 'a customer who needs help';
+        const objective = (script.customerObjective as string | undefined) ?? 'get help with their issue';
         const difficulty = (script.difficulty as string | undefined) ?? 'medium';
 
         // Build conversation for Groq
+        // AGENT = trainee speaking to AI customer → Groq 'user'
+        // CUSTOMER = AI virtual customer → Groq 'assistant'
         const groqMessages = messages.map((m: { role: string; content: string }) => ({
-          role: m.role === 'USER' ? ('user' as const) : ('assistant' as const),
+          role: m.role === 'AGENT' ? ('user' as const) : ('assistant' as const),
           content: m.content,
         }));
 
         const aiReply = await (await getGroq()).chat.completions.create({
-          model: 'llama3-70b-8192',
+          model: 'llama-3.3-70b-versatile',
           messages: [
             { role: 'system', content: buildSystemPrompt(persona, objective, difficulty) },
             ...groqMessages,
@@ -199,8 +201,8 @@ export async function POST(request: Request) {
         const isResolved = aiText.includes('[RESOLVED]');
         const cleanText = aiText.replace('[RESOLVED]', '').trim();
 
-        // Save AI reply to DB
-        await saveMessage(state.sessionId, 'AGENT', cleanText);
+        // Save AI reply to DB (AI = CUSTOMER role)
+        await saveMessage(state.sessionId, 'CUSTOMER', cleanText);
 
         if (isResolved) {
           // End the session

@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* ── Voice waveform visualizer ───────────────────────────────────────────────
+   Used by VoiceChatInterface: bars animate between 40% and 100% of their base
+   height, with per-bar timing offsets giving a natural LCD-style waveform. */
+@keyframes bar-wave {
+  0%   { transform: scaleY(0.35); }
+  100% { transform: scaleY(1.0);  }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

@@ -14,15 +14,24 @@ export async function POST(request: Request) {
     // Use the authenticated user's id if available; fall back to body for anonymous/guest sessions
     const userId: string | null = session?.user?.id ?? body.userId ?? null;
 
-    const newSession = await prisma.simulationSession.create({
+    // PrismaNeonHTTP does not support implicit transactions triggered by create+include.
+    // Create plain, then fetch relations separately (same pattern used in scenarios/route.ts).
+    // Resolve the DB User id if available (populated for OAuth users via auth.ts signIn callback)
+    const dbUserId: string | null = (session?.user as { dbUserId?: string } | undefined)?.dbUserId ?? null;
+
+    const created = await prisma.simulationSession.create({
       data: {
         jobTitleId,
         scenarioId,
-        type: type as 'PHONE' | 'CHAT',
+        type: type as 'PHONE' | 'CHAT' | 'VOICE',
         status: 'IN_PROGRESS',
         userId,
+        dbUserId,
         startedAt: new Date(),
       },
+    });
+    const newSession = await prisma.simulationSession.findUnique({
+      where: { id: created.id },
       include: { scenario: true, jobTitle: true },
     });
 
