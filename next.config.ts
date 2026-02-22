@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 import path from "path";
 
 const nextConfig: NextConfig = {
+  // Required for OpenNext/Cloudflare Pages: generates .next/standalone/ which
+  // OpenNext copies and bundles into the CF Worker.
+  output: "standalone",
   // Suppress "multiple lockfiles detected" warning when running inside a
   // monorepo root (WSL workspace). Points Next.js at the correct project root.
   outputFileTracingRoot: path.join(__dirname),
