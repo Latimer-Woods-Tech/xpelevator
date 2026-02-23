@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { sql } from '@/lib/db';
 import { requireAuth, getAuthOrNull, AuthError } from '@/lib/auth-api';
 
 
@@ -11,14 +11,36 @@ export async function GET() {
 
     // Multi-tenancy: show user's org criteria + global ones
     // If not authenticated, only show global criteria
-    const orgFilter = userOrgId
-      ? { OR: [{ orgId: userOrgId }, { orgId: null }] }
-      : { orgId: null };
+    const criteria = userOrgId
+      ? await sql`
+          SELECT 
+            id,
+            name,
+            description,
+            weight,
+            category,
+            active,
+            org_id as "orgId",
+            created_at as "createdAt"
+          FROM criteria
+          WHERE org_id = ${userOrgId} OR org_id IS NULL
+          ORDER BY name ASC
+        `
+      : await sql`
+          SELECT 
+            id,
+            name,
+            description,
+            weight,
+            category,
+            active,
+            org_id as "orgId",
+            created_at as "createdAt"
+          FROM criteria
+          WHERE org_id IS NULL
+          ORDER BY name ASC
+        `;
 
-    const criteria = await prisma.criteria.findMany({
-      where: orgFilter,
-      orderBy: { name: 'asc' }
-    });
     return NextResponse.json(criteria);
   } catch (error) {
     if (error instanceof AuthError) {
@@ -36,16 +58,26 @@ export async function POST(request: Request) {
     const userOrgId = session.user.orgId;
 
     const body = await request.json();
-    const criterion = await prisma.criteria.create({
-      data: {
-        name: body.name,
-        description: body.description,
-        weight: body.weight ?? 5,
-        category: body.category,
-        active: body.active ?? true,
-        orgId: userOrgId,  // Multi-tenancy: assign to user's org
-      }
-    });
+    const [criterion] = await sql`
+      INSERT INTO criteria (name, description, weight, category, active, org_id)
+      VALUES (
+        ${body.name},
+        ${body.description},
+        ${body.weight ?? 5},
+        ${body.category},
+        ${body.active ?? true},
+        ${userOrgId}
+      )
+      RETURNING 
+        id,
+        name,
+        description,
+        weight,
+        category,
+        active,
+        org_id as "orgId",
+        created_at as "createdAt"
+    `;
     return NextResponse.json(criterion, { status: 201 });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -55,3 +87,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to create criteria' }, { status: 500 });
   }
 }
+

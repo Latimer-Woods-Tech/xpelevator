@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { sql } from '@/lib/db';
 import { requireAuth, getAuthOrNull, AuthError } from '@/lib/auth-api';
 
 
@@ -11,20 +11,98 @@ export async function GET() {
 
     // Multi-tenancy: show user's org job titles + global ones (orgId is null)
     // If not authenticated, only show global job titles
-    const orgFilter = userOrgId
-      ? { OR: [{ orgId: userOrgId }, { orgId: null }] }
-      : { orgId: null };
+    const jobTitles = userOrgId
+      ? await sql`
+          SELECT 
+            jt.id,
+            jt.name,
+            jt.description,
+            jt.org_id as "orgId",
+            jt.created_at as "createdAt",
+            jt.updated_at as "updatedAt",
+            COALESCE(
+              json_agg(
+                DISTINCT jsonb_build_object(
+                  'id', s.id,
+                  'title', s.title,
+                  'persona', s.persona,
+                  'jobTitleId', s.job_title_id,
+                  'simulationType', s.simulation_type
+                )
+              ) FILTER (WHERE s.id IS NOT NULL),
+              '[]'
+            ) as scenarios,
+            COALESCE(
+              json_agg(
+                DISTINCT jsonb_build_object(
+                  'id', jc.id,
+                  'jobTitleId', jc.job_title_id,
+                  'criteriaId', jc.criteria_id,
+                  'weight', jc.weight,
+                  'criteria', jsonb_build_object(
+                    'id', c.id,
+                    'name', c.name,
+                    'description', c.description,
+                    'category', c.category
+                  )
+                )
+              ) FILTER (WHERE jc.id IS NOT NULL),
+              '[]'
+            ) as "jobCriteria"
+          FROM job_titles jt
+          LEFT JOIN scenarios s ON s.job_title_id = jt.id
+          LEFT JOIN job_criteria jc ON jc.job_title_id = jt.id
+          LEFT JOIN criteria c ON c.id = jc.criteria_id
+          WHERE jt.org_id = ${userOrgId} OR jt.org_id IS NULL
+          GROUP BY jt.id
+          ORDER BY jt.name ASC
+        `
+      : await sql`
+          SELECT 
+            jt.id,
+            jt.name,
+            jt.description,
+            jt.org_id as "orgId",
+            jt.created_at as "createdAt",
+            jt.updated_at as "updatedAt",
+            COALESCE(
+              json_agg(
+                DISTINCT jsonb_build_object(
+                  'id', s.id,
+                  'title', s.title,
+                  'persona', s.persona,
+                  'jobTitleId', s.job_title_id,
+                  'simulationType', s.simulation_type
+                )
+              ) FILTER (WHERE s.id IS NOT NULL),
+              '[]'
+            ) as scenarios,
+            COALESCE(
+              json_agg(
+                DISTINCT jsonb_build_object(
+                  'id', jc.id,
+                  'jobTitleId', jc.job_title_id,
+                  'criteriaId', jc.criteria_id,
+                  'weight', jc.weight,
+                  'criteria', jsonb_build_object(
+                    'id', c.id,
+                    'name', c.name,
+                    'description', c.description,
+                    'category', c.category
+                  )
+                )
+              ) FILTER (WHERE jc.id IS NOT NULL),
+              '[]'
+            ) as "jobCriteria"
+          FROM job_titles jt
+          LEFT JOIN scenarios s ON s.job_title_id = jt.id
+          LEFT JOIN job_criteria jc ON jc.job_title_id = jt.id
+          LEFT JOIN criteria c ON c.id = jc.criteria_id
+          WHERE jt.org_id IS NULL
+          GROUP BY jt.id
+          ORDER BY jt.name ASC
+        `;
 
-    const jobTitles = await prisma.jobTitle.findMany({
-      where: orgFilter,
-      include: {
-        scenarios: true,
-        jobCriteria: {
-          include: { criteria: true }
-        }
-      },
-      orderBy: { name: 'asc' }
-    });
     return NextResponse.json(jobTitles);
   } catch (error) {
     if (error instanceof AuthError) {
@@ -46,13 +124,17 @@ export async function POST(request: Request) {
     const userOrgId = session.user.orgId;
 
     const body = await request.json();
-    const jobTitle = await prisma.jobTitle.create({
-      data: {
-        name: body.name,
-        description: body.description,
-        orgId: userOrgId,  // Multi-tenancy: assign to user's org
-      }
-    });
+    const [jobTitle] = await sql`
+      INSERT INTO job_titles (name, description, org_id)
+      VALUES (${body.name}, ${body.description}, ${userOrgId})
+      RETURNING 
+        id,
+        name,
+        description,
+        org_id as "orgId",
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+    `;
     return NextResponse.json(jobTitle, { status: 201 });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -69,3 +151,4 @@ export async function POST(request: Request) {
     );
   }
 }
+
