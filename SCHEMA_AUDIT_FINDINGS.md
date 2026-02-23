@@ -1,14 +1,19 @@
 # Schema Mismatch Audit - February 23, 2026
 
 ## Summary
-Schema mismatch errors occur when SQL queries reference columns that don't exist in the database, or use incorrect column names.
+Schema mismatch errors and Prisma Client incompatibility issues on Cloudflare Workers runtime.
 
-## Error Classification
+## Error Classifications
 
-### Type: Runtime Database Schema Mismatch
+### Type 1: Runtime Database Schema Mismatch
 - **Severity:** HIGH (causes 500 errors in production)
 - **Detection:** Only at runtime when query executes
 - **Root Cause:** Code written assuming schema that doesn't match actual database
+
+### Type 2: Prisma Client Runtime Incompatibility
+- **Severity:** HIGH (causes 500 errors in production)
+- **Detection:** Only at runtime when Prisma Client methods are called
+- **Root Cause:** PrismaNeonHTTP adapter has compatibility issues with Cloudflare Workers
 
 ## Errors Found & Fixed
 
@@ -30,20 +35,33 @@ Schema mismatch errors occur when SQL queries reference columns that don't exist
 
 ---
 
-### ⚠️ NEEDS FIX: `/api/scenarios` Route
+### ✅ FIXED: `/api/scenarios` Route
 **File:** `src/app/api/scenarios/route.ts`
 
-**Issues Found (5 occurrences):**
+**Issues Fixed (10 occurrences):**
 
-1. **Line 27, 45, 63, 81, 145:** Uses `s.updated_at`
+1. **Lines 27, 45, 63, 81, 145:** Used `s.updated_at`
    - ❌ scenarios table has NO updated_at column
-   - ✅ Fix: Remove `updated_at` from queries
+   - ✅ Fixed: Removed `updated_at` from all queries
 
-2. **Line 25, 43, 61, 79, 124, 141:** Uses `s.simulation_type`
+2. **Lines 25, 43, 61, 79, 124, 141:** Used `s.simulation_type`
    - ❌ Column is named `type` not `simulation_type`
-   - ✅ Fix: Change to `s.type`
+   - ✅ Fixed: Changed to `s.type` in all queries
 
-**Estimated Impact:** HIGH - /api/scenarios endpoint will 500 error when accessed
+**Commit:** `359eaf7`
+
+---
+
+### ✅ FIXED: `/api/simulations` Route
+**File:** `src/app/api/simulations/route.ts`
+
+**Issue:** Prisma Client runtime incompatibility
+- ❌ Used `prisma.simulationSession.create()` and `prisma.simulationSession.findMany()`
+- ❌ Caused 500 errors on both POST and GET endpoints
+- ✅ Fixed: Converted to raw SQL using `@neondatabase/serverless`
+- ✅ Matches pattern used in `/api/jobs` and `/api/scenarios`
+
+**Commit:** `6e003e2`
 
 ---
 
@@ -70,22 +88,35 @@ Schema mismatch errors occur when SQL queries reference columns that don't exist
 4. **Enum values** - Using enum values not in schema
 5. **Foreign key names** - Wrong column names in JOINs
 6. **Table name typos** - Pluralization errors (scenario vs scenarios)
+7. **Prisma Client usage** - PrismaNeonHTTP adapter has runtime issues on Cloudflare Workers
 
 ---
 
 ## Prevention Strategies
 
-###  1. **Type-Safe Query Builder** (Recommended)
-Use Prisma Client instead of raw SQL:
+### 1. **Use Raw SQL with @neondatabase/serverless** (REQUIRED for Cloudflare Workers)
+Prisma Client with PrismaNeonHTTP adapter has compatibility issues. Use raw SQL instead:
 ```typescript
-// Instead of raw SQL:
-await sql`SELECT * FROM scenarios WHERE simulation_type = 'CHAT'`
+// ✅ CORRECT - Works on Cloudflare Workers:
+import { sql } from '@/lib/db';
+const jobs = await sql`SELECT id, name FROM job_titles WHERE org_id = ${orgId}`;
 
-// Use Prisma (type-safe):
-await prisma.scenario.findMany({ where: { type: 'CHAT' } })
+// ❌ WRONG - Causes 500 errors on Cloudflare Workers:
+import prisma from '@/lib/prisma';
+const jobs = await prisma.jobTitle.findMany({ where: { orgId } });
 ```
 
-### 2. **Database Schema Tests**
+### 2. **Always Use Actual Column Names**
+Reference the Prisma schema when writing SQL:
+```typescript
+// ✅ CORRECT - Uses actual DB column names:
+await sql`SELECT s.type, s.name FROM scenarios s WHERE s.org_id = ${orgId}`;
+
+// ❌ WRONG - Uses non-existent columns:
+await sql`SELECT s.simulation_type, s.title FROM scenarios s`;
+```
+
+### 3. **Database Schema Tests**
 Create tests that verify expected columns exist:
 ```typescript
 test('scenarios table has correct columns', async () => {
@@ -95,19 +126,20 @@ test('scenarios table has correct columns', async () => {
 });
 ```
 
-### 3. **Pre-deployment Validation**
+### 4. **Pre-deployment Validation**
 Run schema validation before each deployment:
 ```bash
 npm run validate-schema
 ```
 
-### 4. **Code Review Checklist**
+### 5. **Code Review Checklist**
 - [ ] All SQL column names match Prisma schema
 - [ ] No references to deleted/renamed columns
 - [ ] Table names use correct pluralization
 - [ ] Enum values match schema definition
+- [ ] Using `sql` from `@/lib/db`, NOT `prisma` from `@/lib/prisma`
 
-### 5. **Integration Tests**
+### 6. **Integration Tests**
 Test API endpoints against actual database:
 ```typescript
 test('GET /api/jobs returns valid data', async () => {
@@ -120,12 +152,19 @@ test('GET /api/jobs returns valid data', async () => {
 
 ---
 
-## Next Actions
+## Completed Actions
 
-1. **URGENT:** Fix `/api/scenarios` route (updated_at + simulation_type)
-2. **HIGH:** Run full API test suite to find other broken endpoints
-3. **MEDIUM:** Add schema validation to CI/CD pipeline
-4. **LOW:** Migrate from raw SQL to Prisma Client where possible
+- ✅ Fixed `/api/jobs` route (columns: title→name, persona→description, simulation_type→type, removed updated_at)
+- ✅ Fixed `/api/scenarios` route (changed simulation_type→type, removed updated_at)
+- ✅ Fixed `/api/simulations` route (converted from Prisma Client to raw SQL)
+- ✅ Created comprehensive audit documentation
+
+## Recommended Next Steps
+
+1. **HIGH:** Audit remaining API routes for Prisma Client usage
+2. **MEDIUM:** Add schema validation to CI/CD pipeline
+3. **MEDIUM:** Create integration tests for all API endpoints
+4. **LOW:** Add grep checks in CI/CD to catch common column name errors
 
 ---
 
