@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 
 
@@ -13,13 +13,25 @@ export async function GET(
     const userOrgId = session.user.orgId;
 
     const { id } = await params;
-    const scenario = await prisma.scenario.findUnique({
-      where: { id },
-      include: { jobTitle: { select: { id: true, name: true } } },
-    });
-    if (!scenario) {
+    const scenarios = await sql`
+      SELECT 
+        s.id,
+        s.name,
+        s.description,
+        s.type,
+        s.script,
+        s.job_title_id as "jobTitleId",
+        s.org_id as "orgId",
+        s.created_at as "createdAt",
+        json_build_object('id', jt.id, 'name', jt.name) as "jobTitle"
+      FROM scenarios s
+      LEFT JOIN job_titles jt ON jt.id = s.job_title_id
+      WHERE s.id = ${id}
+    `;
+    if (scenarios.length === 0) {
       return NextResponse.json({ error: 'Scenario not found' }, { status: 404 });
     }
+    const scenario: any = scenarios[0];
     // Multi-tenancy: verify user can access (same org or global)
     if (scenario.orgId && scenario.orgId !== userOrgId) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
@@ -46,30 +58,45 @@ export async function PUT(
     const { id } = await params;
 
     // Verify ownership: must belong to user's org or be global
-    const existing = await prisma.scenario.findUnique({ where: { id } });
-    if (!existing) {
+    const existingRows = await sql`
+      SELECT org_id as "orgId" FROM scenarios WHERE id = ${id}
+    `;
+    if (existingRows.length === 0) {
       return NextResponse.json({ error: 'Scenario not found' }, { status: 404 });
     }
+    const existing: any = existingRows[0];
     if (existing.orgId && existing.orgId !== userOrgId) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     const body = await request.json();
-    await prisma.scenario.update({
-      where: { id },
-      data: {
-        name: body.name,
-        description: body.description ?? null,
-        type: body.type,
-        script: body.script ?? {},
-      },
-    });
-    // PrismaNeonHTTP does not support implicit transactions;
-    // fetch relations separately after update.
-    const scenario = await prisma.scenario.findUnique({
-      where: { id },
-      include: { jobTitle: { select: { id: true, name: true } } },
-    });
+    await sql`
+      UPDATE scenarios
+      SET 
+        name = ${body.name},
+        description = ${body.description ?? null},
+        type = ${body.type},
+        script = ${JSON.stringify(body.script ?? {})}
+      WHERE id = ${id}
+    `;
+    
+    // Fetch updated scenario with relations
+    const scenarioRows = await sql`
+      SELECT 
+        s.id,
+        s.name,
+        s.description,
+        s.type,
+        s.script,
+        s.job_title_id as "jobTitleId",
+        s.org_id as "orgId",
+        s.created_at as "createdAt",
+        json_build_object('id', jt.id, 'name', jt.name) as "jobTitle"
+      FROM scenarios s
+      LEFT JOIN job_titles jt ON jt.id = s.job_title_id
+      WHERE s.id = ${id}
+    `;
+    const scenario: any = scenarioRows[0];
     return NextResponse.json(scenario);
   } catch (error) {
     if (error instanceof AuthError) {
@@ -92,15 +119,18 @@ export async function DELETE(
     const { id } = await params;
 
     // Verify ownership: must belong to user's org or be global
-    const existing = await prisma.scenario.findUnique({ where: { id } });
-    if (!existing) {
+    const existingRows = await sql`
+      SELECT org_id as "orgId" FROM scenarios WHERE id = ${id}
+    `;
+    if (existingRows.length === 0) {
       return NextResponse.json({ error: 'Scenario not found' }, { status: 404 });
     }
+    const existing: any = existingRows[0];
     if (existing.orgId && existing.orgId !== userOrgId) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    await prisma.scenario.delete({ where: { id } });
+    await sql`DELETE FROM scenarios WHERE id = ${id}`;
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     if (error instanceof AuthError) {
