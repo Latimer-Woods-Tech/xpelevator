@@ -25,6 +25,9 @@ const PUBLIC_ROUTES = [
   '/api/health',
   '/api/telnyx/webhook', // Has its own signature verification
   '/api/auth', // NextAuth handlers
+  '/api/jobs', // Public GET, protected POST
+  '/api/scenarios', // Public GET, protected POST
+  '/api/criteria', // Public GET, protected POST/PUT/DELETE
 ];
 
 export default function middleware(req: NextRequest) {

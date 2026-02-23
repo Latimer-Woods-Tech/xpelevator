@@ -1,5 +1,19 @@
 nohup: ignoring input
 
+┌─────────────────────────────┐
+│ OpenNext — Cloudflare build │
+└─────────────────────────────┘
+
+App directory: /mnt/c/Users/Ultimate Warrior/My project/xpelevator
+Next.js version : 15.5.12
+@opennextjs/cloudflare version: 1.16.5
+@opennextjs/aws version: 3.9.16
+
+┌─────────────────────────────────┐
+│ OpenNext — Building Next.js app │
+└─────────────────────────────────┘
+
+
 > xpelevator@0.1.0 build
 > next build
 
@@ -7,7 +21,7 @@ nohup: ignoring input
    - Environments: .env
 
    Creating an optimized production build ...
- ✓ Compiled successfully in 70s
+ ✓ Compiled successfully in 22.6s
    Skipping linting
    Checking validity of types ...
    Collecting page data ...
@@ -58,3 +72,27 @@ Route (app)                                 Size  First Load JS
 ○  (Static)   prerendered as static content
 ƒ  (Dynamic)  server-rendered on demand
 
+
+┌──────────────────────────────┐
+│ OpenNext — Generating bundle │
+└──────────────────────────────┘
+
+Bundling middleware function...
+Bundling static assets...
+Bundling cache assets...
+Building server function: default...
+Applying code patches: 10.471s
+# copyPackageTemplateFiles
+[35m⚙️ Bundling the OpenNext server...
+[0m
+▲ [WARNING] Comparison with -0 using the "===" operator will also match 0 [equals-negative-zero]
+
+    .open-next/server-functions/default/.next/server/chunks/253.js:1:4495:
+      1 │ ....unsigned){if(h<0)h+=e;else if(-0===h)return 0}return h}}a.expor...
+        ╵                                   ~~
+
+  Floating-point equality is defined such that 0 and -0 are equal, so "x === -0" returns true for both 0 and -0. You need to use "Object.is(x, -0)" instead to test for -0.
+
+[35mWorker saved in `.open-next/worker.js` 🚀
+[0m
+OpenNext build complete.

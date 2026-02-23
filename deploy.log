@@ -1,0 +1,16 @@
+nohup: ignoring input
+Uploading... (59/59)
+✨ Success! Uploaded 0 files (59 already uploaded) (0.36 sec)
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mComparison with -0 using the "===" operator will also match 0[0m [equals-negative-zero]
+
+    ../server-functions/default/handler.mjs:136:25465:
+[37m      136 │ ...gned){if(h<0)h+=e;else if(h===[32m-0[37m)return 0}return h}}a.exports=...
+          ╵                                  [32m~~[0m
+
+  Floating-point equality is defined such that 0 and -0 are equal, so "x === -0" returns true for both 0 and -0. You need to use "Object.is(x, -0)" instead to test for -0.
+
+
+✨ Uploading Worker bundle
+🌎 Deploying...
+✨ Deployment complete! Take a peek over at https://76587d6b.xpelevator.pages.dev
