@@ -301,12 +301,17 @@ export async function GET(request: Request) {
         ) as "jobTitle",
         COALESCE(
           json_agg(
-            json_build_object(
+            DISTINCT jsonb_build_object(
               'id', m.id,
               'role', m.role,
               'content', m.content,
               'timestamp', m.timestamp
-            ) ORDER BY m.timestamp
+            ) ORDER BY jsonb_build_object(
+              'id', m.id,
+              'role', m.role,
+              'content', m.content,
+              'timestamp', m.timestamp
+            )
           ) FILTER (WHERE m.id IS NOT NULL),
           '[]'
         ) as messages,
@@ -389,12 +394,17 @@ async function phoneTranscriptStream(sessionId: string): Promise<Response> {
               ) as "jobTitle",
               COALESCE(
                 json_agg(
-                  json_build_object(
+                  DISTINCT jsonb_build_object(
                     'id', m.id,
                     'role', m.role,
                     'content', m.content,
                     'timestamp', m.timestamp
-                  ) ORDER BY m.timestamp
+                  ) ORDER BY jsonb_build_object(
+                    'id', m.id,
+                    'role', m.role,
+                    'content', m.content,
+                    'timestamp', m.timestamp
+                  )
                 ) FILTER (WHERE m.id IS NOT NULL),
                 '[]'
               ) as messages,
@@ -409,7 +419,7 @@ async function phoneTranscriptStream(sessionId: string): Promise<Response> {
                         'id', c.id,
                         'name', c.name
                       )
-                    )
+                    ) ORDER BY sc.scored_at
                   )
                   FROM scores sc
                   LEFT JOIN criteria c ON c.id = sc.criteria_id
