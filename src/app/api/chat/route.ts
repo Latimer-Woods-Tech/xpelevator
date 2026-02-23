@@ -325,7 +325,7 @@ export async function GET(request: Request) {
                   'weight', c.weight,
                   'category', c.category
                 )
-              ) ORDER BY sc.created_at
+              ) ORDER BY sc.scored_at
             )
             FROM scores sc
             LEFT JOIN criteria c ON c.id = sc.criteria_id
@@ -519,7 +519,7 @@ async function endSession(
   if (scores.length > 0) {
     for (const s of scores) {
       await sql`
-        INSERT INTO scores (id, session_id, criteria_id, score, feedback, created_at)
+        INSERT INTO scores (id, session_id, criteria_id, score, feedback, scored_at)
         VALUES (gen_random_uuid(), ${sessionId}, ${s.criteriaId}, ${s.score}, ${s.justification}, NOW())
       `;
     }
