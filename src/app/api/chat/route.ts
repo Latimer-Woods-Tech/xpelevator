@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
 import { sql } from '@/lib/db';
 import { buildSessionSystemPrompt, streamNextCustomerMessage, scoreSession } from '@/lib/ai';
 import { requireAuth, AuthError } from '@/lib/auth-api';

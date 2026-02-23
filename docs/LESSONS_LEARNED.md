@@ -1,6 +1,6 @@
 # XPElevator — Lessons Learned
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-23
 > Maintained by: Engineering team
 > Purpose: Prevent recurring issues — consult before starting new features or debugging.
 
@@ -27,12 +27,15 @@ Before starting a new feature, scan the relevant category tables for patterns th
 
 | Issue | Root Cause | Fix Pattern | Prevention Rule |
 |---|---|---|---|
+| **Prisma Client fails in Cloudflare Workers runtime** (BL-072) | PrismaNeonHTTP adapter has runtime incompatibility with Cloudflare Workers edge environment; all `prisma.*` calls fail with 500 errors in production but work fine locally in Node.js | Replace all Prisma Client calls with raw SQL using `@neondatabase/serverless`; change imports from `@/lib/prisma` to `@/lib/db` and use template literal SQL queries | Never use Prisma Client in Cloudflare Workers/Pages deployments; use raw SQL via Neon's HTTP client; test on actual Cloudflare runtime, not just local Node |
+| **Auth helper breaks all API routes** (BL-073) | `requireAuth()` in `src/lib/auth-api.ts` used `prisma.user.findUnique()`; when called at start of every authenticated route, this caused ALL API endpoints to fail with 500 errors | Convert auth helper to use raw SQL: `SELECT id, role, org_id FROM users WHERE email = $1` | Auth helpers are called by EVERY route — they must use edge-compatible code; validate auth paths work in production before testing business logic |
 | **WASM client import** (BL-058) | `prisma.ts` imported `@prisma/client/wasm`; Node.js rejects `.wasm` extension, all DB writes silently no-op | Import from `@prisma/client`; reserve WASM import for Cloudflare Workers build only | After initial setup, execute an explicit DB write and verify it persists before moving on |
 | **Implicit transaction with Neon HTTP adapter** (BL-059) | `create({ include: {...} })` triggers an implicit multi-statement transaction; Neon HTTP transport does not support transactions, throws opaque error | Split into `create()` then `findUnique()` as two separate calls | With Neon HTTP adapter, never use `create+include` or any implicit transaction pattern; use only single-statement operations |
 | **Schema enum not regenerated** (BL-067) | Added `VOICE` to `SimulationType` enum but skipped `npx prisma generate`; generated client still had stale type definitions | Run `npx prisma generate` then restart dev server | Make `prisma generate` + dev server restart a mandatory post-schema-change step; do not test until both are done |
 | **Missing FK indexes** (BL-052) | PostgreSQL does not auto-index foreign key columns; `session_id`, `user_id` etc. caused sequential scans on every transcript query | Add explicit `@@index` declarations in Prisma schema for all FK columns | Add FK indexes as a standard checklist item whenever a relation is created |
 | **Global unique instead of scoped unique** (BL-056) | `job_titles.name` had `@unique` globally; in multi-tenant context, organisations legitimately share names | Change to `@@unique([orgId, name])` | In multi-tenant schemas, always scope unique constraints to `(orgId, fieldName)` |
 | **Missing cascade deletes** (BL-057) | No `onDelete: Cascade` on Session→Messages, Session→Scores, JobTitle→Scenarios; SQL deletes leave orphaned rows | Add `onDelete: Cascade` to all parent→child relations in schema | Define cascade behaviour at schema creation time, not retroactively |
+| **Column name mismatches in raw SQL** (BL-074) | Used `sc.created_at` when scores table has `scored_at`; used `s.simulation_type` when column is `type`; used `jt.updated_at` when job_titles has no such column | Always reference Prisma schema when writing SQL; use actual database column names (snake_case) not Prisma field names (camelCase) | Before writing any SQL query, check `prisma/schema.prisma` for exact column names; never assume column names match field names |
 
 ---
 
@@ -91,6 +94,9 @@ Before starting a new feature, scan the relevant category tables for patterns th
 
 | Common Mistake | Rule |
 |---|---|
+| **Using Prisma Client in Cloudflare Workers** | **NEVER use `prisma.*` in edge runtime — use raw SQL via `@neondatabase/serverless`** |
+| **Schema column names vs Prisma field names in SQL** | **Always check `schema.prisma` for actual column names (snake_case) before writing SQL** |
+| **Auth helpers with Prisma calls** | **Auth helpers run on EVERY route — must use edge-compatible raw SQL only** |
 | Importing Prisma WASM client in Node.js dev | Import `@prisma/client`; WASM only for Workers build |
 | Skipping `prisma generate` after schema change | Always run generate + restart before testing |
 | Using `create+include` with Neon HTTP adapter | One Prisma operation per HTTP call; no implicit transactions |
@@ -109,6 +115,8 @@ Before starting a new feature, scan the relevant category tables for patterns th
 
 ## Checklist: Before Merging a New Feature
 
+- [ ] **All API routes and server components use raw SQL (`@neondatabase/serverless`), NOT Prisma Client**
+- [ ] All SQL queries use actual database column names from `schema.prisma` (snake_case), not Prisma field names
 - [ ] All Prisma relations have `@@index` on FK columns and `onDelete` behaviour defined
 - [ ] `npx prisma generate` has been run and dev server restarted after any schema change
 - [ ] No `create({ include })` patterns used with the Neon HTTP adapter
@@ -122,3 +130,129 @@ Before starting a new feature, scan the relevant category tables for patterns th
 - [ ] New page components exceeding ~150 lines or containing async state have been refactored into hooks and sub-components
 - [ ] Cloudflare build (`npx @opennextjs/cloudflare build`) has been verified after any dependency change
 - [ ] DB writes introduced during setup have been verified with an explicit read-back query
+
+---
+
+## Prisma Client Migration Status
+
+**Context:** Prisma Client is incompatible with Cloudflare Workers runtime. All production code must use raw SQL via `@neondatabase/serverless`.
+
+### ✅ COMPLETED (Cloudflare-compatible)
+
+**API Routes:**
+- `src/app/api/jobs/route.ts` - Job title listing (GET, POST)
+- `src/app/api/scenarios/route.ts` - Scenario listing (GET, POST)
+- `src/app/api/simulations/route.ts` - Session creation and listing
+- `src/app/api/chat/route.ts` - Chat interactions (GET, POST)
+
+**Core Libraries:**
+- `src/lib/auth-api.ts` - Authentication helper (requireAuth function)
+- `src/lib/db.ts` - Raw SQL client wrapper
+
+### ⚠️ NEEDS MIGRATION (High Priority - Production Routes)
+
+**API Routes Still Using Prisma Client:**
+1. `src/app/api/analytics/route.ts` - Session analytics/reporting
+2. `src/app/api/scoring/route.ts` - Manual score adjustments
+3. `src/app/api/criteria/[id]/route.ts` - Criteria CRUD
+4. `src/app/api/jobs/[id]/route.ts` - Job title details/edit
+5. `src/app/api/jobs/[id]/criteria/route.ts` - Job-criteria associations
+6. `src/app/api/scenarios/[id]/route.ts` - Scenario details/edit
+7. `src/app/api/orgs/route.ts` - Organization management
+8. `src/app/api/orgs/[id]/route.ts` - Organization details
+9. `src/app/api/orgs/[id]/members/route.ts` - Member management
+10. `src/app/api/telnyx/call/route.ts` - Voice call initiation
+11. `src/app/api/telnyx/webhook/route.ts` - Voice call webhooks
+
+**Server Components:**
+12. `src/app/sessions/[id]/page.tsx` - Session detail page (SSR)
+
+**Auth System:**
+13. `src/auth.ts` - NextAuth callbacks (signIn, session, jwt)
+
+**Impact:** All these routes will fail with 500 errors in production until migrated.
+
+### 📚 TEST/DEV FILES (Lower Priority)
+
+**Testing Infrastructure:**
+- `tests/integration/helpers/db.ts` - Test database helpers
+- `tests/integration/api/*.test.ts` - Integration tests (8 files)
+- `validate.mjs` - Local validation script
+
+**Database Seeding:**
+- `prisma/seed.ts` - Initial data population
+
+**Impact:** These can continue using Prisma Client for local development/testing. Only production runtime code needs migration.
+
+### 🔄 Migration Pattern
+
+**Before (Prisma Client - fails in Cloudflare Workers):**
+```typescript
+import prisma from '@/lib/prisma';
+
+const jobs = await prisma.jobTitle.findMany({
+  where: { orgId },
+  include: { scenarios: true }
+});
+```
+
+**After (Raw SQL - works in Cloudflare Workers):**
+```typescript
+import { sql } from '@/lib/db';
+
+const jobs = await sql`
+  SELECT 
+    jt.*,
+    COALESCE(
+      json_agg(
+        json_build_object('id', s.id, 'name', s.name)
+      ) FILTER (WHERE s.id IS NOT NULL),
+      '[]'
+    ) as scenarios
+  FROM job_titles jt
+  LEFT JOIN scenarios s ON s.job_title_id = jt.id
+  WHERE jt.org_id = ${orgId}
+  GROUP BY jt.id
+`;
+```
+
+**Key Conversions:**
+- `findUnique` → `SELECT ... WHERE ... LIMIT 1`
+- `findMany` → `SELECT ... WHERE ...`
+- `create` → `INSERT INTO ... VALUES (...) RETURNING *`
+- `update` → `UPDATE ... SET ... WHERE ... RETURNING *`
+- `delete` → `DELETE FROM ... WHERE ... RETURNING *`
+- `include` → `LEFT JOIN` + `json_build_object()` + `json_agg()`
+- Relations (one-to-many) → `COALESCE(json_agg(...), '[]')`
+- Relations (one-to-one) → `json_build_object(...)`
+
+**Common Pitfalls:**
+- ❌ Using Prisma field names (`jobTitleId`) → ✅ Use DB column names (`job_title_id`)
+- ❌ Using `created_at` on scores table → ✅ Use `scored_at`
+- ❌ Using `simulation_type` column → ✅ Use `type`
+- ❌ Assuming `updated_at` exists on all tables → ✅ Only `criteria` table has it
+
+---
+
+### Migration Priority Order
+
+1. **CRITICAL (blocking core features):**
+   - `src/auth.ts` - Blocks all authenticated routes if it fails
+   - `src/app/api/analytics/route.ts` - Used by main dashboard
+
+2. **HIGH (user-facing features):**
+   - `src/app/api/scoring/route.ts` - Manual scoring
+   - `src/app/sessions/[id]/page.tsx` - Session review page
+   - `src/app/api/scenarios/[id]/route.ts` - Scenario editing
+
+3. **MEDIUM (admin features):**
+   - `src/app/api/jobs/[id]/route.ts` - Job title management
+   - `src/app/api/jobs/[id]/criteria/route.ts` - Criteria assignment
+   - `src/app/api/criteria/[id]/route.ts` - Criteria editing
+   - `src/app/api/orgs/*` - Organization management (3 files)
+
+4. **LOW (future features):**
+   - `src/app/api/telnyx/*` - Voice calling (2 files)
+
+
+
