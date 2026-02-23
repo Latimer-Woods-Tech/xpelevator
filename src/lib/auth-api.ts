@@ -12,7 +12,7 @@
 
 import { auth } from '@/auth';
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { sql } from '@/lib/db';
 
 export type UserRole = 'ADMIN' | 'MEMBER';
 
@@ -76,10 +76,20 @@ export async function requireAuth(
   let dbUser: { id: string; role: string; orgId: string | null } | null = null;
 
   if (session.user.email) {
-    dbUser = await prisma.user.findUnique({
-      where: { email: session.user.email },
-      select: { id: true, role: true, orgId: true },
-    });
+    const users = await sql`
+      SELECT id, role, org_id as "orgId"
+      FROM users
+      WHERE email = ${session.user.email}
+      LIMIT 1
+    `;
+    if (users.length > 0) {
+      const user = users[0];
+      dbUser = {
+        id: user.id as string,
+        role: user.role as string,
+        orgId: user.orgId as string | null,
+      };
+    }
   }
 
   const userRole = (dbUser?.role as UserRole) ?? 'MEMBER';
