@@ -112,6 +112,23 @@ Schema mismatch errors and Prisma Client incompatibility issues on Cloudflare Wo
 
 ---
 
+### ✅ FIXED: Auth API Helper
+**File:** `src/lib/auth-api.ts`
+
+**Issue:** Prisma Client runtime incompatibility in requireAuth() function
+- ❌ Used `prisma.user.findUnique()` to look up user by email
+- ❌ Caused ALL authenticated API routes to fail with 500 errors
+- ❌ Critical blocker - affected every route that called `requireAuth()`
+
+**Fix Applied:**
+- ✅ Converted to raw SQL query: `SELECT id, role, org_id FROM users WHERE email = $1`
+- ✅ Changed import from `@/lib/prisma` to `@/lib/db`
+- ✅ All authentication lookups now use `@neondatabase/serverless`
+
+**Commit:** `9d79ae8`
+
+---
+
 ### ⚠️ NEEDS FIX: Remaining Routes Still Use Prisma Client
 
 **Medium Priority (Additional Features):**
