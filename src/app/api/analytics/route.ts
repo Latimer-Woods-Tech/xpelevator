@@ -1,6 +1,6 @@
 
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 
 // Minimal types needed for the callback annotations below
@@ -32,16 +32,50 @@ export async function GET() {
       : { orgId: null };
 
     // Fetch all completed sessions with scores and criteria
-    const rawSessions = await prisma.simulationSession.findMany({
-      where: { status: 'COMPLETED', ...orgFilter },
-      include: {
-        jobTitle: true,
-        scenario: true,
-        scores: { include: { criteria: true } },
-      },
-      orderBy: { endedAt: 'asc' },
-    });
-    const sessions = rawSessions as unknown as SessionFull[];
+    const rawSessions = await sql`
+      SELECT 
+        ss.id,
+        ss.type,
+        ss.job_title_id as "jobTitleId",
+        ss.scenario_id as "scenarioId",
+        ss.ended_at as "endedAt",
+        ss.created_at as "createdAt",
+        json_build_object(
+          'id', jt.id,
+          'name', jt.name
+        ) as "jobTitle",
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'score', sc.score,
+              'criteriaId', sc.criteria_id,
+              'criteria', json_build_object(
+                'name', c.name,
+                'weight', c.weight
+              )
+            ) ORDER BY sc.scored_at
+          ) FILTER (WHERE sc.id IS NOT NULL),
+          '[]'
+        ) as scores
+      FROM simulation_sessions ss
+      LEFT JOIN job_titles jt ON jt.id = ss.job_title_id
+      LEFT JOIN scores sc ON sc.session_id = ss.id
+      LEFT JOIN criteria c ON c.id = sc.criteria_id
+      WHERE ss.status = 'COMPLETED'
+        AND (${userOrgId ? sql`ss.org_id = ${userOrgId} OR ss.org_id IS NULL` : sql`ss.org_id IS NULL`})
+      GROUP BY ss.id, jt.id
+      ORDER BY ss.ended_at ASC NULLS FIRST
+    `;
+    const sessions = rawSessions.map((row: any) => ({
+      id: row.id,
+      type: row.type,
+      jobTitleId: row.jobTitleId,
+      scenarioId: row.scenarioId,
+      endedAt: row.endedAt ? new Date(row.endedAt) : null,
+      createdAt: new Date(row.createdAt),
+      jobTitle: row.jobTitle,
+      scores: row.scores,
+    })) as unknown as SessionFull[];
 
     // ── Summary ───────────────────────────────────────────────────────────────
     const totalSessions = sessions.length;
