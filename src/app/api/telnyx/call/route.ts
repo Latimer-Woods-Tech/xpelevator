@@ -18,7 +18,7 @@
  *   - Session must exist and be of type PHONE
  */
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { sql } from '@/lib/db';
 import { initiateCall, encodeClientState } from '@/lib/telnyx';
 
 
@@ -35,14 +35,24 @@ export async function POST(request: Request) {
     }
 
     // Verify the session exists and is a PHONE type
-    const session = await prisma.simulationSession.findUnique({
-      where: { id: sessionId },
-      include: { scenario: true, jobTitle: true },
-    });
+    const sessionRows = await sql`
+      SELECT 
+        ss.id,
+        ss.type,
+        ss.scenario_id as "scenarioId",
+        ss.job_title_id as "jobTitleId",
+        json_build_object('id', s.id, 'name', s.name) as scenario,
+        json_build_object('id', jt.id, 'name', jt.name) as "jobTitle"
+      FROM simulation_sessions ss
+      LEFT JOIN scenarios s ON s.id = ss.scenario_id
+      LEFT JOIN job_titles jt ON jt.id = ss.job_title_id
+      WHERE ss.id = ${sessionId}
+    `;
 
-    if (!session) {
+    if (sessionRows.length === 0) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
+    const session: any = sessionRows[0];
     if (session.type !== 'PHONE') {
       return NextResponse.json({ error: 'Session is not a PHONE type' }, { status: 400 });
     }
@@ -66,13 +76,13 @@ export async function POST(request: Request) {
     const result = await initiateCall({ to, from: callerNumber, clientState });
 
     // Update session to IN_PROGRESS and store call metadata
-    await prisma.simulationSession.update({
-      where: { id: sessionId },
-      data: {
-        status: 'IN_PROGRESS',
-        startedAt: new Date(),
-      },
-    });
+    await sql`
+      UPDATE simulation_sessions
+      SET 
+        status = 'IN_PROGRESS',
+        started_at = NOW()
+      WHERE id = ${sessionId}
+    `;
 
     return NextResponse.json({
       callControlId: result.data.call_control_id,

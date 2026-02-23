@@ -14,7 +14,7 @@
  */
 import { NextResponse } from 'next/server';
 import { getGroq } from '@/lib/ai';
-import prisma from '@/lib/prisma';
+import { sql } from '@/lib/db';
 import {
   callSpeak,
   callGather,
@@ -89,9 +89,10 @@ export async function POST(request: Request) {
         if (!state) break;
 
         // Load scenario script for the opening line
-        const scenario = await prisma.scenario.findUnique({
-          where: { id: state.scenarioId },
-        });
+        const scenarioRows = await sql`
+          SELECT id, script FROM scenarios WHERE id = ${state.scenarioId}
+        `;
+        const scenario: any = scenarioRows[0] ?? null;
 
         const script = (scenario?.script ?? {}) as Record<string, unknown>;
         const persona = (script.customerPersona as string | undefined) ?? 'a customer who needs help';
@@ -134,10 +135,10 @@ export async function POST(request: Request) {
         if (!state) break;
 
         // Check if conversation was flagged as resolved (session ended by AI)
-        const session = await prisma.simulationSession.findUnique({
-          where: { id: state.sessionId },
-          select: { status: true },
-        });
+        const sessionRows = await sql`
+          SELECT status FROM simulation_sessions WHERE id = ${state.sessionId}
+        `;
+        const session: any = sessionRows[0] ?? null;
         if (session?.status === 'COMPLETED') {
           await callHangup(call_control_id);
           break;
@@ -175,14 +176,17 @@ export async function POST(request: Request) {
         await saveMessage(state.sessionId, 'AGENT', transcript);
 
         // Load conversation history for context
-        const messages = await prisma.chatMessage.findMany({
-          where: { sessionId: state.sessionId },
-          orderBy: { timestamp: 'asc' },
-        });
+        const messages = await sql`
+          SELECT role, content
+          FROM chat_messages
+          WHERE session_id = ${state.sessionId}
+          ORDER BY timestamp ASC
+        `;
 
-        const scenario = await prisma.scenario.findUnique({
-          where: { id: state.scenarioId },
-        });
+        const scenarioRows = await sql`
+          SELECT script FROM scenarios WHERE id = ${state.scenarioId}
+        `;
+        const scenario: any = scenarioRows[0] ?? null;
         const script = (scenario?.script ?? {}) as Record<string, unknown>;
         const persona = (script.customerPersona as string | undefined) ?? 'a customer who needs help';
         const objective = (script.customerObjective as string | undefined) ?? 'get help with their issue';
@@ -214,10 +218,11 @@ export async function POST(request: Request) {
 
         if (isResolved) {
           // End the session
-          await prisma.simulationSession.update({
-            where: { id: state.sessionId },
-            data: { status: 'COMPLETED', endedAt: new Date() },
-          });
+          await sql`
+            UPDATE simulation_sessions
+            SET status = 'COMPLETED', ended_at = NOW()
+            WHERE id = ${state.sessionId}
+          `;
           // TODO: trigger scoring (same as chat route — POST /api/scoring)
         }
 
@@ -236,13 +241,11 @@ export async function POST(request: Request) {
       // ── Call hung up — finalize session ─────────────────────────────────────
       case 'call.hangup': {
         if (!state?.sessionId) break;
-        await prisma.simulationSession.updateMany({
-          where: {
-            id: state.sessionId,
-            status: { not: 'COMPLETED' }, // don't overwrite COMPLETED
-          },
-          data: { status: 'ABANDONED', endedAt: new Date() },
-        });
+        await sql`
+          UPDATE simulation_sessions
+          SET status = 'ABANDONED', ended_at = NOW()
+          WHERE id = ${state.sessionId} AND status != 'COMPLETED'
+        `;
         break;
       }
 
@@ -270,7 +273,8 @@ Do not break character. Do not mention that you are an AI.`;
 }
 
 async function saveMessage(sessionId: string, role: 'CUSTOMER' | 'AGENT', content: string) {
-  await prisma.chatMessage.create({
-    data: { sessionId, role, content },
-  });
+  await sql`
+    INSERT INTO chat_messages (id, session_id, role, content, timestamp)
+    VALUES (gen_random_uuid(), ${sessionId}, ${role}, ${content}, NOW())
+  `;
 }
