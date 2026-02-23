@@ -195,7 +195,7 @@ export async function POST(request: Request) {
         // Build conversation for Groq
         // AGENT = trainee speaking to AI customer → Groq 'user'
         // CUSTOMER = AI virtual customer → Groq 'assistant'
-        const groqMessages = messages.map((m: { role: string; content: string }) => ({
+        const groqMessages = (messages as any).map((m: { role: string; content: string }) => ({
           role: m.role === 'AGENT' ? ('user' as const) : ('assistant' as const),
           content: m.content,
         }));
