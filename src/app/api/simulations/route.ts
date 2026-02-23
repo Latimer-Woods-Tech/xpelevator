@@ -21,10 +21,10 @@ export async function POST(request: Request) {
     // Create session using raw SQL (compatible with Cloudflare Workers)
     const created = await sql`
       INSERT INTO simulation_sessions (
-        job_title_id, scenario_id, type, status,
+        id, job_title_id, scenario_id, type, status,
         user_id, db_user_id, org_id, started_at
       ) VALUES (
-        ${jobTitleId}, ${scenarioId}, ${type}, 'IN_PROGRESS',
+        gen_random_uuid(), ${jobTitleId}, ${scenarioId}, ${type}, 'IN_PROGRESS',
         ${userId}, ${dbUserId}, ${orgId}, NOW()
       )
       RETURNING 
