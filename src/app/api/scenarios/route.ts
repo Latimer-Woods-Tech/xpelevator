@@ -22,9 +22,8 @@ export async function GET(request: Request) {
               s.*,
               s.org_id as "orgId",
               s.job_title_id as "jobTitleId",
-              s.simulation_type as "simulationType",
+              s.type as "simulationType",
               s.created_at as "createdAt",
-              s.updated_at as "updatedAt",
               jsonb_build_object(
                 'id', jt.id,
                 'name', jt.name
@@ -40,9 +39,8 @@ export async function GET(request: Request) {
               s.*,
               s.org_id as "orgId",
               s.job_title_id as "jobTitleId",
-              s.simulation_type as "simulationType",
+              s.type as "simulationType",
               s.created_at as "createdAt",
-              s.updated_at as "updatedAt",
               jsonb_build_object(
                 'id', jt.id,
                 'name', jt.name
@@ -58,9 +56,8 @@ export async function GET(request: Request) {
               s.*,
               s.org_id as "orgId",
               s.job_title_id as "jobTitleId",
-              s.simulation_type as "simulationType",
+              s.type as "simulationType",
               s.created_at as "createdAt",
-              s.updated_at as "updatedAt",
               jsonb_build_object(
                 'id', jt.id,
                 'name', jt.name
@@ -76,9 +73,8 @@ export async function GET(request: Request) {
               s.*,
               s.org_id as "orgId",
               s.job_title_id as "jobTitleId",
-              s.simulation_type as "simulationType",
+              s.type as "simulationType",
               s.created_at as "createdAt",
-              s.updated_at as "updatedAt",
               jsonb_build_object(
                 'id', jt.id,
                 'name', jt.name
@@ -121,7 +117,7 @@ export async function POST(request: Request) {
         job_title_id,
         name,
         description,
-        simulation_type,
+        type,
         script,
         org_id
       )
@@ -138,11 +134,10 @@ export async function POST(request: Request) {
         job_title_id as "jobTitleId",
         name,
         description,
-        simulation_type as "simulationType",
+        type as "simulationType",
         script,
         org_id as "orgId",
-        created_at as "createdAt",
-        updated_at as "updatedAt"
+        created_at as "createdAt"
     `;
 
     // Fetch job title separately
