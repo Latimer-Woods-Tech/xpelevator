@@ -518,7 +518,7 @@ async function endSession(
   let scores: Array<{ criteriaId: string; score: number; justification: string }> = [];
   if (transcript.length >= 2) {
     try {
-      scores = await scoreSession(transcript, criteria);
+      scores = await scoreSession(transcript, criteria as any);
     } catch (err) {
       console.error('[chat] Auto-scoring failed:', err);
     }
