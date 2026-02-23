@@ -31,6 +31,11 @@ const PUBLIC_ROUTES = [
 ];
 
 export default function middleware(req: NextRequest) {
+  // TESTING MODE: Bypass all auth checks if DISABLE_AUTH is set
+  if (process.env.DISABLE_AUTH === 'true') {
+    return NextResponse.next();
+  }
+
   const { pathname } = req.nextUrl;
 
   // Allow public routes

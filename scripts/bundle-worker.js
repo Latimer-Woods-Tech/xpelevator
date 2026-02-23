@@ -70,7 +70,29 @@ if (src.includes(INJECT_AFTER)) {
   );
 }
 
-// ── 3. Write output ────────────────────────────────────────────────────────
-fs.mkdirSync(path.dirname(DEST), { recursive: true });
+// ── 3. Patch Prisma fs.readdir in handler.mjs ────────────────────────────────
+// Prisma's library runtime includes platform detection code that calls fs.readdir
+// even when using driver adapters. Replace this with a stub to prevent runtime errors.
+const HANDLER_PATH = path.resolve(__dirname, "../.open-next/server-functions/default/handler.mjs");
+if (fs.existsSync(HANDLER_PATH)) {
+  let handler = fs.readFileSync(HANDLER_PATH, "utf8");
+  
+  // Replace fs.readdir calls with a stub that returns empty array
+  // The readdir call is in a try-catch, so returning [] is safe
+  if (handler.includes("mi.default.readdir")) {
+    handler = handler.replace(
+      /mi\.default\.readdir\(([^)]+)\)/g,
+      '(async () => { throw { code: "ENOENT" }; })()'
+    );
+    fs.writeFileSync(HANDLER_PATH, handler, "utf8");
+    console.log("✅ Patched Prisma fs.readdir calls in handler.mjs");
+  }
+} else {
+  console.warn("⚠️  handler.mjs not found – Prisma fs.readdir calls may fail at runtime");
+}
+
+// ── 4. Write output ────────────────────────────────────────────────────────
+fs.mkdirSync(path.dirname(DEST), { recursive: true});
 fs.writeFileSync(DEST, src, "utf8");
 console.log(`✅ _worker.js written to ${DEST}`);
+

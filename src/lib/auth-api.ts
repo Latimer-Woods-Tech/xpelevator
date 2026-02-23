@@ -50,6 +50,22 @@ export async function requireAuth(
   _request?: Request,
   requiredRole?: UserRole
 ): Promise<AuthResult> {
+  // TESTING MODE: Bypass auth if DISABLE_AUTH is set
+  if (process.env.DISABLE_AUTH === 'true') {
+    return {
+      session: {
+        user: {
+          id: 'test-user-id',
+          email: 'test@example.com',
+          name: 'Test User',
+          dbUserId: undefined,
+          role: 'ADMIN', // Grant admin access in test mode
+          orgId: null,
+        },
+      },
+    };
+  }
+
   const session = await auth();
 
   if (!session?.user?.id) {

@@ -1,0 +1,97 @@
+
+┌─────────────────────────────┐
+│ OpenNext — Cloudflare build │
+└─────────────────────────────┘
+
+App directory: /mnt/c/Users/Ultimate Warrior/My project/xpelevator
+Next.js version : 15.5.12
+@opennextjs/cloudflare version: 1.16.5
+@opennextjs/aws version: 3.9.16
+
+┌─────────────────────────────────┐
+│ OpenNext — Building Next.js app │
+└─────────────────────────────────┘
+
+
+> xpelevator@0.1.0 build
+> next build
+
+   ▲ Next.js 15.5.12
+   - Environments: .env
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 79s
+   Skipping linting
+   Checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/21) ...
+   Generating static pages (5/21) 
+   Generating static pages (10/21) 
+   Generating static pages (15/21) 
+ ✓ Generating static pages (21/21)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                 Size  First Load JS
+┌ ƒ /                                      168 B         106 kB
+├ ○ /_not-found                            170 B         102 kB
+├ ○ /admin                               5.34 kB         111 kB
+├ ○ /analytics                           2.22 kB         108 kB
+├ ƒ /api/analytics                         170 B         102 kB
+├ ƒ /api/auth/[...nextauth]                170 B         102 kB
+├ ƒ /api/chat                              170 B         102 kB
+├ ƒ /api/criteria                          170 B         102 kB
+├ ƒ /api/criteria/[id]                     170 B         102 kB
+├ ƒ /api/health                            170 B         102 kB
+├ ƒ /api/jobs                              170 B         102 kB
+├ ƒ /api/jobs/[id]                         170 B         102 kB
+├ ƒ /api/jobs/[id]/criteria                170 B         102 kB
+├ ƒ /api/orgs                              170 B         102 kB
+├ ƒ /api/orgs/[id]                         170 B         102 kB
+├ ƒ /api/orgs/[id]/members                 170 B         102 kB
+├ ƒ /api/scenarios                         170 B         102 kB
+├ ƒ /api/scenarios/[id]                    170 B         102 kB
+├ ƒ /api/scoring                           170 B         102 kB
+├ ƒ /api/simulations                       170 B         102 kB
+├ ƒ /api/telnyx/call                       170 B         102 kB
+├ ƒ /api/telnyx/webhook                    170 B         102 kB
+├ ○ /auth/signin                         1.67 kB         107 kB
+├ ○ /sessions                            1.55 kB         107 kB
+├ ƒ /sessions/[id]                         168 B         106 kB
+├ ○ /simulate                            2.13 kB         111 kB
+└ ƒ /simulate/[sessionId]                7.15 kB         113 kB
++ First Load JS shared by all             102 kB
+  ├ chunks/255-ebd51be49873d76c.js         46 kB
+  ├ chunks/4bd1b696-c023c6e3521b1417.js  54.2 kB
+  └ other shared chunks (total)          1.92 kB
+
+
+ƒ Middleware                             33.3 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+
+┌──────────────────────────────┐
+│ OpenNext — Generating bundle │
+└──────────────────────────────┘
+
+Bundling middleware function...
+Bundling static assets...
+Bundling cache assets...
+Building server function: default...
+Applying code patches: 11.390s
+# copyPackageTemplateFiles
+[35m⚙️ Bundling the OpenNext server...
+[0m
+▲ [WARNING] Comparison with -0 using the "===" operator will also match 0 [equals-negative-zero]
+
+    .open-next/server-functions/default/.next/server/chunks/253.js:1:4495:
+      1 │ ....unsigned){if(h<0)h+=e;else if(-0===h)return 0}return h}}a.expor...
+        ╵                                   ~~
+
+  Floating-point equality is defined such that 0 and -0 are equal, so "x === -0" returns true for both 0 and -0. You need to use "Object.is(x, -0)" instead to test for -0.
+
+[35mWorker saved in `.open-next/worker.js` 🚀
+[0m
+OpenNext build complete.
