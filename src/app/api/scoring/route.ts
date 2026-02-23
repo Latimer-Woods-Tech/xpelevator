@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 
 
@@ -16,10 +16,17 @@ export async function POST(request: Request) {
     const { sessionId, scores } = body;
 
     // Verify session exists and user has access
-    const session = await prisma.simulationSession.findUnique({
-      where: { id: sessionId },
-      select: { id: true, userId: true, orgId: true },
-    });
+    const sessionResult = await sql`
+      SELECT id, user_id as "userId", org_id as "orgId"
+      FROM simulation_sessions
+      WHERE id = ${sessionId}
+      LIMIT 1
+    `;
+    const session = sessionResult.length > 0 ? {
+      id: sessionResult[0].id as string,
+      userId: sessionResult[0].userId as string | null,
+      orgId: sessionResult[0].orgId as string | null,
+    } : null;
     if (!session) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
@@ -32,25 +39,24 @@ export async function POST(request: Request) {
     }
 
     // scores: [{ criteriaId, score, feedback }]
-    // PrismaNeonHTTP does not support transactions; create scores in parallel.
+    // Create scores in parallel
     const createdScores = await Promise.all(
-      scores.map((s: { criteriaId: string; score: number; feedback?: string }) =>
-        prisma.score.create({
-          data: {
-            sessionId,
-            criteriaId: s.criteriaId,
-            score: s.score,
-            feedback: s.feedback
-          }
-        })
-      )
+      scores.map(async (s: { criteriaId: string; score: number; feedback?: string }) => {
+        const result = await sql`
+          INSERT INTO scores (id, session_id, criteria_id, score, feedback, scored_at)
+          VALUES (gen_random_uuid(), ${sessionId}, ${s.criteriaId}, ${s.score}, ${s.feedback ?? null}, NOW())
+          RETURNING id, session_id as "sessionId", criteria_id as "criteriaId", score, feedback, scored_at as "scoredAt"
+        `;
+        return result[0];
+      })
     );
 
     // Mark session as completed
-    await prisma.simulationSession.update({
-      where: { id: sessionId },
-      data: { status: 'COMPLETED', endedAt: new Date() }
-    });
+    await sql`
+      UPDATE simulation_sessions
+      SET status = 'COMPLETED', ended_at = NOW()
+      WHERE id = ${sessionId}
+    `;
 
     return NextResponse.json(createdScores, { status: 201 });
   } catch (error) {
