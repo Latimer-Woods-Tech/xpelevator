@@ -63,6 +63,50 @@ Schema mismatch errors and Prisma Client incompatibility issues on Cloudflare Wo
 
 **Commit:** `6e003e2`
 
+**Additional Fix:** Missing UUID generation
+- ❌ `simulation_sessions.id` column lacks DEFAULT value in database
+- ✅ Fixed: Added `gen_random_uuid()` in INSERT query
+
+**Commit:** `422f09e`
+
+---
+
+### ✅ FIXED: `/api/chat` GET Handler
+**File:** `src/app/api/chat/route.ts`
+
+**Issue:** Prisma Client runtime incompatibility
+- ❌ Used `prisma.simulationSession.findUnique()` with complex includes
+- ❌ Caused 500 errors on GET /api/chat?sessionId=...
+- ✅ Fixed: Converted GET handler to raw SQL with json_build_object for relations
+
+**Commit:** `1dad949`
+
+---
+
+### ⚠️  NEEDS FIX: Multiple Routes Still Use Prisma Client
+
+**High Priority (Core Functionality):**
+1. `/api/chat` - POST handler (main chat interaction)
+2. `/api/chat` - phoneTranscriptStream helper function
+3. `/api/chat` - endSession helper function
+4. `/api/scoring` - Manual scoring endpoints
+5. `/api/analytics` - Session analytics
+
+**Medium Priority (Additional Features):**
+6. `/api/orgs` - Organization management
+7. `/api/orgs/[id]` - Organization details
+8. `/api/orgs/[id]/members` - Member management
+9. `/api/jobs/[id]` - Job title details
+10. `/api/jobs/[id]/criteria` - Criteria management
+11. `/api/scenarios/[id]` - Scenario details
+12. `/api/criteria/[id]` - Criteria details
+
+**Low Priority (Voice Features):**
+13. `/api/telnyx/call` - Voice call initiation
+14. `/api/telnyx/webhook` - Voice webhooks
+
+**Impact:** Users will encounter 500 errors when using chat, scoring, or analytics features.
+
 ---
 
 ## Schema Reference

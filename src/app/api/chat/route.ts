@@ -31,26 +31,62 @@ export async function POST(request: Request) {
 
     // ── 1. Load session ───────────────────────────────────────────────────────
     console.log('[Chat API] Loading session:', sessionId);
-    const session = await prisma.simulationSession.findUnique({
-      where: { id: sessionId },
-      include: {
-        scenario: true,
-        jobTitle: {
-          include: {
-            jobCriteria: {
-              where: { criteria: { active: true } },
-              include: { criteria: true },
-            },
-          },
-        },
-        messages: { orderBy: { timestamp: 'asc' } },
-      },
-    });
+    const sessionResult = await sql`
+      SELECT 
+        ss.id,
+        ss.org_id as "orgId",
+        ss.user_id as "userId",
+        ss.status,
+        ss.type,
+        json_build_object(
+          'id', s.id,
+          'name', s.name,
+          'script', s.script
+        ) as scenario,
+        json_build_object(
+          'id', jt.id,
+          'jobCriteria', COALESCE(
+            (
+              SELECT json_agg(
+                json_build_object(
+                  'criteria', json_build_object(
+                    'id', c.id,
+                    'name', c.name,
+                    'description', c.description,
+                    'weight', c.weight
+                  )
+                )
+              )
+              FROM job_criteria jc
+              LEFT JOIN criteria c ON c.id = jc.criteria_id
+              WHERE jc.job_title_id = jt.id AND c.active = true
+            ),
+            '[]'
+          )
+        ) as "jobTitle",
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'role', m.role,
+              'content', m.content
+            ) ORDER BY m.timestamp
+          ) FILTER (WHERE m.id IS NOT NULL),
+          '[]'
+        ) as messages
+      FROM simulation_sessions ss
+      LEFT JOIN scenarios s ON s.id = ss.scenario_id
+      LEFT JOIN job_titles jt ON jt.id = ss.job_title_id
+      LEFT JOIN chat_messages m ON m.session_id = ss.id
+      WHERE ss.id = ${sessionId}
+      GROUP BY ss.id, s.id, jt.id
+    `;
 
-    if (!session) {
+    if (sessionResult.length === 0) {
       console.error('[Chat API] Session not found:', sessionId);
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
+    
+    const session = sessionResult[0];
 
     // Multi-tenancy: verify user can access this session
     const canAccess =
@@ -71,13 +107,10 @@ export async function POST(request: Request) {
     // ── 2. Save agent message ─────────────────────────────────────────────────
     const isStartSignal = content.trim() === '[START]';
     if (!isStartSignal) {
-      await prisma.chatMessage.create({
-        data: {
-          sessionId,
-          role: 'AGENT',
-          content: content.trim(),
-        },
-      });
+      await sql`
+        INSERT INTO chat_messages (id, session_id, role, content, timestamp)
+        VALUES (gen_random_uuid(), ${sessionId}, 'AGENT', ${content.trim()}, NOW())
+      `;
     }
 
     // ── 3. Check for end signal ───────────────────────────────────────────────
@@ -139,13 +172,10 @@ export async function POST(request: Request) {
           const cleanedResponse = fullResponse.replace(/\[RESOLVED\]\s*$/i, '').trim();
 
           // Save the full AI message to DB
-          await prisma.chatMessage.create({
-            data: {
-              sessionId,
-              role: 'CUSTOMER',
-              content: cleanedResponse,
-            },
-          });
+          await sql`
+            INSERT INTO chat_messages (id, session_id, role, content, timestamp)
+            VALUES (gen_random_uuid(), ${sessionId}, 'CUSTOMER', ${cleanedResponse}, NOW())
+          `;
 
           if (isResolved) {
             // Customer signalled resolution — auto-end the session
@@ -153,23 +183,46 @@ export async function POST(request: Request) {
             controller.enqueue(encoder.encode(sessionEndingEvent));
 
             // Reload session with the newly-saved message included
-            const refreshed = await prisma.simulationSession.findUnique({
-              where: { id: sessionId },
-              include: {
-                scenario: true,
-                jobTitle: {
-                  include: {
-                    jobCriteria: {
-                      where: { criteria: { active: true } },
-                      include: { criteria: true },
-                    },
-                  },
-                },
-                messages: { orderBy: { timestamp: 'asc' } },
-              },
-            });
-            if (refreshed) {
-              await endSession(sessionId, refreshed);
+            const refreshedResult = await sql`
+              SELECT 
+                ss.id,
+                json_build_object(
+                  'jobCriteria', COALESCE(
+                    (
+                      SELECT json_agg(
+                        json_build_object(
+                          'criteria', json_build_object(
+                            'id', c.id,
+                            'name', c.name,
+                            'description', c.description,
+                            'weight', c.weight
+                          )
+                        )
+                      )
+                      FROM job_criteria jc
+                      LEFT JOIN criteria c ON c.id = jc.criteria_id
+                      LEFT JOIN job_titles jt ON jt.id = jc.job_title_id
+                      WHERE jt.id = ss.job_title_id AND c.active = true
+                    ),
+                    '[]'
+                  )
+                ) as "jobTitle",
+                COALESCE(
+                  json_agg(
+                    json_build_object(
+                      'role', m.role,
+                      'content', m.content
+                    ) ORDER BY m.timestamp
+                  ) FILTER (WHERE m.id IS NOT NULL),
+                  '[]'
+                ) as messages
+              FROM simulation_sessions ss
+              LEFT JOIN chat_messages m ON m.session_id = ss.id
+              WHERE ss.id = ${sessionId}
+              GROUP BY ss.id
+            `;
+            if (refreshedResult.length > 0) {
+              await endSession(sessionId, refreshedResult[0]);
             }
             const sessionEndedEvent = `data: ${JSON.stringify({ type: 'session_ended' })}\n\n`;
             controller.enqueue(encoder.encode(sessionEndedEvent));
@@ -323,21 +376,62 @@ async function phoneTranscriptStream(sessionId: string): Promise<Response> {
 
       try {
         for (let i = 0; i < MAX_ITERATIONS; i++) {
-          const session = await prisma.simulationSession.findUnique({
-            where: { id: sessionId },
-            include: {
-              scenario: true,
-              jobTitle: true,
-              messages: { orderBy: { timestamp: 'asc' } },
-              scores: { include: { criteria: true } },
-            },
-          });
+          const sessionResult = await sql`
+            SELECT 
+              ss.id,
+              ss.status,
+              json_build_object(
+                'id', s.id,
+                'name', s.name
+              ) as scenario,
+              json_build_object(
+                'id', jt.id,
+                'name', jt.name
+              ) as "jobTitle",
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', m.id,
+                    'role', m.role,
+                    'content', m.content,
+                    'timestamp', m.timestamp
+                  ) ORDER BY m.timestamp
+                ) FILTER (WHERE m.id IS NOT NULL),
+                '[]'
+              ) as messages,
+              COALESCE(
+                (
+                  SELECT json_agg(
+                    json_build_object(
+                      'id', sc.id,
+                      'score', sc.score,
+                      'feedback', sc.feedback,
+                      'criteria', json_build_object(
+                        'id', c.id,
+                        'name', c.name
+                      )
+                    )
+                  )
+                  FROM scores sc
+                  LEFT JOIN criteria c ON c.id = sc.criteria_id
+                  WHERE sc.session_id = ss.id
+                ),
+                '[]'
+              ) as scores
+            FROM simulation_sessions ss
+            LEFT JOIN scenarios s ON s.id = ss.scenario_id
+            LEFT JOIN job_titles jt ON jt.id = ss.job_title_id
+            LEFT JOIN chat_messages m ON m.session_id = ss.id
+            WHERE ss.id = ${sessionId}
+            GROUP BY ss.id, s.id, jt.id
+          `;
 
-          if (!session) {
+          if (sessionResult.length === 0) {
             send({ type: 'error', message: 'Session not found' });
             break;
           }
 
+          const session = sessionResult[0];
           const isTerminal =
             session.status === 'COMPLETED' ||
             session.status === 'CANCELLED' ||
@@ -376,7 +470,7 @@ async function phoneTranscriptStream(sessionId: string): Promise<Response> {
 
 async function endSession(
   sessionId: string,
-  session: Awaited<ReturnType<typeof prisma.simulationSession.findUnique>> & {
+  session: {
     messages: Array<{ role: string; content: string }>;
     jobTitle: {
       jobCriteria: Array<{
@@ -388,19 +482,23 @@ async function endSession(
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 
   // Mark session COMPLETED
-  await prisma.simulationSession.update({
-    where: { id: sessionId },
-    data: { status: 'COMPLETED', endedAt: new Date() },
-  });
+  await sql`
+    UPDATE simulation_sessions 
+    SET status = 'COMPLETED', ended_at = NOW()
+    WHERE id = ${sessionId}
+  `;
 
   // Collect criteria for this job title (or all active criteria as fallback)
   const jobCriteria = session.jobTitle.jobCriteria.map(
     (jc: { criteria: { id: string; name: string; description: string | null; weight: number } }) => jc.criteria
   );
-  const criteria =
-    jobCriteria.length > 0
-      ? jobCriteria
-      : await prisma.criteria.findMany({ where: { active: true } });
+  
+  let criteria;
+  if (jobCriteria.length > 0) {
+    criteria = jobCriteria;
+  } else {
+    criteria = await sql`SELECT id, name, description, weight FROM criteria WHERE active = true`;
+  }
 
   // Auto-score using AI
   const transcript = session.messages.map((m: { role: string; content: string }) => ({
@@ -419,26 +517,69 @@ async function endSession(
 
   // Save scores
   if (scores.length > 0) {
-    await prisma.score.createMany({
-      data: scores.map(s => ({
-        sessionId,
-        criteriaId: s.criteriaId,
-        score: s.score,
-        feedback: s.justification,
-      })),
-    });
+    for (const s of scores) {
+      await sql`
+        INSERT INTO scores (id, session_id, criteria_id, score, feedback, created_at)
+        VALUES (gen_random_uuid(), ${sessionId}, ${s.criteriaId}, ${s.score}, ${s.justification}, NOW())
+      `;
+    }
   }
 
   // Return final session state
-  const finalSession = await prisma.simulationSession.findUnique({
-    where: { id: sessionId },
-    include: {
-      messages: { orderBy: { timestamp: 'asc' } },
-      scores: { include: { criteria: true } },
-      scenario: true,
-      jobTitle: true,
-    },
-  });
+  const finalSessionResult = await sql`
+    SELECT 
+      ss.id,
+      ss.org_id as "orgId",
+      ss.user_id as "userId",
+      ss.status,
+      ss.type,
+      json_build_object(
+        'id', s.id,
+        'name', s.name
+      ) as scenario,
+      json_build_object(
+        'id', jt.id,
+        'name', jt.name
+      ) as "jobTitle",
+      COALESCE(
+        json_agg(
+          json_build_object(
+            'id', m.id,
+            'role', m.role,
+            'content', m.content,
+            'timestamp', m.timestamp
+          ) ORDER BY m.timestamp
+        ) FILTER (WHERE m.id IS NOT NULL),
+        '[]'
+      ) as messages,
+      COALESCE(
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', sc.id,
+              'score', sc.score,
+              'feedback', sc.feedback,
+              'criteria', json_build_object(
+                'id', c.id,
+                'name', c.name,
+                'description', c.description,
+                'weight', c.weight
+              )
+            )
+          )
+          FROM scores sc
+          LEFT JOIN criteria c ON c.id = sc.criteria_id
+          WHERE sc.session_id = ss.id
+        ),
+        '[]'
+      ) as scores
+    FROM simulation_sessions ss
+    LEFT JOIN scenarios s ON s.id = ss.scenario_id
+    LEFT JOIN job_titles jt ON jt.id = ss.job_title_id
+    LEFT JOIN chat_messages m ON m.session_id = ss.id
+    WHERE ss.id = ${sessionId}
+    GROUP BY ss.id, s.id, jt.id
+  `;
 
-  return NextResponse.json({ session: finalSession, ended: true });
+  return NextResponse.json({ session: finalSessionResult[0], ended: true });
 }
