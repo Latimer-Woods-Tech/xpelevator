@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import prisma from '@/lib/prisma';
+import { sql } from '@/lib/db';
 
 
 interface Props {
@@ -10,17 +10,70 @@ interface Props {
 export default async function SessionDetailPage({ params }: Props) {
   const { id } = await params;
 
-  const session = await prisma.simulationSession.findUnique({
-    where: { id },
-    include: {
-      scenario: true,
-      jobTitle: true,
-      messages: { orderBy: { timestamp: 'asc' } },
-      scores: { include: { criteria: true } },
-    },
-  });
+  const sessionResult = await sql`
+    SELECT 
+      ss.id,
+      ss.user_id as "userId",
+      ss.org_id as "orgId",
+      ss.status,
+      ss.type,
+      ss.started_at as "startedAt",
+      ss.ended_at as "endedAt",
+      ss.created_at as "createdAt",
+      json_build_object(
+        'id', s.id,
+        'name', s.name,
+        'description', s.description
+      ) as scenario,
+      json_build_object(
+        'id', jt.id,
+        'name', jt.name
+      ) as "jobTitle",
+      COALESCE(
+        json_agg(
+          DISTINCT jsonb_build_object(
+            'id', m.id,
+            'role', m.role,
+            'content', m.content,
+            'timestamp', m.timestamp
+          ) ORDER BY jsonb_build_object(
+            'id', m.id,
+            'role', m.role,
+            'content', m.content,
+            'timestamp', m.timestamp
+          )
+        ) FILTER (WHERE m.id IS NOT NULL),
+        '[]'
+      ) as messages,
+      COALESCE(
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', sc.id,
+              'score', sc.score,
+              'feedback', sc.feedback,
+              'criteria', json_build_object(
+                'name', c.name
+              )
+            )
+          )
+          FROM scores sc
+          LEFT JOIN criteria c ON c.id = sc.criteria_id
+          WHERE sc.session_id = ss.id
+        ),
+        '[]'
+      ) as scores
+    FROM simulation_sessions ss
+    LEFT JOIN scenarios s ON s.id = ss.scenario_id
+    LEFT JOIN job_titles jt ON jt.id = ss.job_title_id
+    LEFT JOIN chat_messages m ON m.session_id = ss.id
+    WHERE ss.id = ${id}
+    GROUP BY ss.id, s.id, jt.id
+  `;
 
-  if (!session) notFound();
+  if (sessionResult.length === 0) notFound();
+
+  const session: any = sessionResult[0];
 
   const totalScore =
     session.scores.length > 0
