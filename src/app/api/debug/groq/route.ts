@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getGroq } from '@/lib/ai';
+import { getGroqClient } from '@/lib/groq-fetch';
 
 // Test endpoint to diagnose Groq API issues
 // GET /api/debug/groq
@@ -13,10 +13,10 @@ export async function GET(request: NextRequest) {
   
   try {
     console.log('[Debug Groq] Starting Groq API test call...');
-    const groq = await getGroq();
+    const client = getGroqClient();
     
     console.log('[Debug Groq] Groq client initialized, making test API call...');
-    const completion = await groq.chat.completions.create({
+    const completion = await client.chatCompletion({
       model: 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: 'Say "test successful" and nothing else.' }],
       temperature: 0.5,
@@ -27,7 +27,6 @@ export async function GET(request: NextRequest) {
     result.success = true;
     result.response = completion.choices[0]?.message?.content || '(empty response)';
     result.model = completion.model;
-    result.usage = completion.usage;
     
   } catch (error) {
     console.error('[Debug Groq] API call failed:', error);

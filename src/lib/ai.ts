@@ -1,43 +1,10 @@
-// groq-sdk is a CJS package with a dual CJS/ESM export — static ESM import can
-// fail in the esbuild + Cloudflare Workers bundle (produces "handler is not a
-// function" at runtime). Dynamic import() sidesteps that problem by deferring
-// the resolution until the first AI call, at which point the CF runtime has
-// fully initialised and the CJS interop shim works correctly.
-
+// Use fetch-based Groq client (Cloudflare Workers compatible)
+import { getGroqClient } from './groq-fetch';
+import type { ChatMessage } from './groq-fetch';
 import type { ScenarioScript, ScoreResult } from '@/types';
-import type Groq from 'groq-sdk'; // type-only — no runtime import
 
 // Re-export so callers that import from '@/lib/ai' still get these types
-export type { ScenarioScript, ScoreResult };
-
-// ─── Client (lazy dynamic import: avoids CF Worker bundle crash) ─────────────
-
-let _groq: Groq | null = null;
-
-export async function getGroq(): Promise<Groq> {
-  if (!_groq) {
-    // CRITICAL: Import polyfill BEFORE groq-sdk so http.Agent is available
-    await import('./http-agent-polyfill');
-    
-    const { default: GroqClass } = await import('groq-sdk');
-    const apiKey = process.env.GROQ_API_KEY?.replace(/\r/g, '');
-    if (!apiKey) {
-      console.error('[AI] GROQ_API_KEY is not set in environment variables');
-      console.error('[AI] Available env vars:', Object.keys(process.env).filter(k => k.includes('GROQ') || k.includes('API')));
-      throw new Error('GROQ_API_KEY environment variable is not set');
-    }
-    console.log('[AI] Initializing Groq client with key:', apiKey.substring(0, 10) + '...');
-    _groq = new GroqClass({ apiKey }) as Groq;
-  }
-  return _groq;
-}
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-export type ChatMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
+export type { ScenarioScript, ScoreResult, ChatMessage };
 
 // ─── System Prompts ──────────────────────────────────────────────────────────
 
@@ -80,7 +47,8 @@ Begin the conversation by describing your issue or reason for calling.`;
  * Generate text (non-streaming) from the Groq API.
  */
 export async function generateResponse(messages: ChatMessage[]): Promise<string> {
-  const completion = await (await getGroq()).chat.completions.create({
+  const client = getGroqClient();
+  const completion = await client.chatCompletion({
     model: 'llama-3.3-70b-versatile',
     messages,
     temperature: 0.75,
@@ -96,21 +64,17 @@ export async function* streamResponse(
   messages: ChatMessage[]
 ): AsyncGenerator<string> {
   try {
-    const stream = await (await getGroq()).chat.completions.create({
+    const client = getGroqClient();
+    let hasYielded = false;
+    
+    for await (const chunk of client.chatCompletionStream({
       model: 'llama-3.3-70b-versatile',
       messages,
       temperature: 0.75,
       max_tokens: 400,
-      stream: true,
-    });
-
-    let hasYielded = false;
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content;
-      if (delta) {
-        hasYielded = true;
-        yield delta;
-      }
+    })) {
+      hasYielded = true;
+      yield chunk;
     }
 
     if (!hasYielded) {
