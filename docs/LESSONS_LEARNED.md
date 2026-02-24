@@ -1,6 +1,6 @@
 # XPElevator — Lessons Learned
 
-> Last updated: 2026-02-23
+> Last updated: 2026-02-24
 > Maintained by: Engineering team
 > Purpose: Prevent recurring issues — consult before starting new features or debugging.
 
@@ -43,6 +43,7 @@ Before starting a new feature, scan the relevant category tables for patterns th
 
 | Issue | Root Cause | Fix Pattern | Prevention Rule |
 |---|---|---|---|
+| **groq-sdk fails in Cloudflare Workers** (BL-075) | `groq-sdk@0.9.1` requires Node.js `http.Agent.maxCachedSessions` API which doesn't exist in Cloudflare Workers runtime; all AI calls throw `TypeError: Cannot read properties of undefined (reading 'maxCachedSessions')` in production; polyfills fail because OpenNext bundles/optimizes code at build time, making runtime patches ineffective | Replace `groq-sdk` with custom fetch-based client (`src/lib/groq-fetch.ts`) using native `fetch()` API; implement both non-streaming (`chatCompletion`) and streaming (`chatCompletionStream`) methods; remove `groq-sdk` from dependencies | Before adding ANY NPM package to Cloudflare Workers project, verify it has zero Node.js runtime dependencies; prefer packages explicitly marked as edge-compatible; when in doubt, build a minimal fetch-based wrapper instead |
 | **Deprecated Groq model name** (BL-050) | `llama3-70b-8192` was removed by Groq; calls silently errored | Update to `llama-3.3-70b-versatile` | Store model name in an env var; monitor Groq deprecation notices; never hard-code model strings |
 | **Inverted CUSTOMER/AGENT roles** (BL-060) | Telnyx webhook saved AI messages as `AGENT` and trainee speech as `CUSTOMER`; scoring and replay used wrong roles | Swap role assignments to match logical ownership | Write a unit test asserting role assignment for both message directions immediately after implementing any message-storage pathway |
 | **Wrong script field names** (BL-061) | Webhook accessed `script.persona` / `script.objective` (undefined) instead of `script.customerPersona` / `script.customerObjective`; AI had no persona context | Correct field names to match `ScenarioScript` type | Use typed property access (`script.customerPersona` via the TypeScript type) — never access scenario fields via untyped string keys |
@@ -95,6 +96,7 @@ Before starting a new feature, scan the relevant category tables for patterns th
 | Common Mistake | Rule |
 |---|---|
 | **Using Prisma Client in Cloudflare Workers** | **NEVER use `prisma.*` in edge runtime — use raw SQL via `@neondatabase/serverless`** |
+| **Using NPM packages with Node.js dependencies in Cloudflare Workers** | **Verify packages are edge-compatible before installing; runtime polyfills don't work because bundlers inline code at build time** |
 | **Schema column names vs Prisma field names in SQL** | **Always check `schema.prisma` for actual column names (snake_case) before writing SQL** |
 | **Auth helpers with Prisma calls** | **Auth helpers run on EVERY route — must use edge-compatible raw SQL only** |
 | Importing Prisma WASM client in Node.js dev | Import `@prisma/client`; WASM only for Workers build |
@@ -116,6 +118,7 @@ Before starting a new feature, scan the relevant category tables for patterns th
 ## Checklist: Before Merging a New Feature
 
 - [ ] **All API routes and server components use raw SQL (`@neondatabase/serverless`), NOT Prisma Client**
+- [ ] **All NPM packages used in API routes are verified edge-compatible (no Node.js runtime dependencies like `http`, `fs`, `crypto`)**
 - [ ] All SQL queries use actual database column names from `schema.prisma` (snake_case), not Prisma field names
 - [ ] All Prisma relations have `@@index` on FK columns and `onDelete` behaviour defined
 - [ ] `npx prisma generate` has been run and dev server restarted after any schema change
@@ -130,6 +133,108 @@ Before starting a new feature, scan the relevant category tables for patterns th
 - [ ] New page components exceeding ~150 lines or containing async state have been refactored into hooks and sub-components
 - [ ] Cloudflare build (`npx @opennextjs/cloudflare build`) has been verified after any dependency change
 - [ ] DB writes introduced during setup have been verified with an explicit read-back query
+
+---
+
+## Groq SDK Migration Status
+
+**Context:** `groq-sdk@0.9.1` requires Node.js `http.Agent` API which is unavailable in Cloudflare Workers. All AI calls failed with `TypeError: Cannot read properties of undefined (reading 'maxCachedSessions')` in production.
+
+### ✅ MIGRATION COMPLETE (2026-02-24)
+
+**All Groq API calls successfully migrated to fetch-based client.**
+
+**Replaced groq-sdk with custom implementation:**
+- Created `src/lib/groq-fetch.ts` - Minimal Groq API client using native `fetch()`
+  - `GroqFetchClient.chatCompletion()` - Non-streaming requests
+  - `GroqFetchClient.chatCompletionStream()` - Server-Sent Events streaming
+  - Zero Node.js dependencies, 100% Cloudflare Workers compatible
+
+**Files Migrated:**
+- `src/lib/ai.ts` - Core AI functions (generateResponse, streamResponse, scoreTranscript) [commits 8eb4ff4, d3f0b77]
+- `src/app/api/debug/groq/route.ts` - Diagnostic endpoint [commit 8eb4ff4]
+- `src/app/api/telnyx/webhook/route.ts` - Voice call AI responses [commit 85f50af]
+
+**Dependencies Updated:**
+- ❌ Removed `groq-sdk@0.9.1` from package.json [commit 93bc093]
+- ✅ Using native Web APIs: `fetch()`, `ReadableStream`, `TextDecoder`
+
+**Migration Timeline:**
+- **Feb 24 01:30 UTC**: Discovered runtime error in production
+- **Feb 24 01:40-01:55**: Attempted 4 polyfill strategies (all failed - bundler optimizes checks at build time)
+- **Feb 24 01:55-02:00**: Created fetch-based client, migrated all code
+- **Feb 24 02:06 UTC**: Verified working in production
+
+**Failed Polyfill Attempts (Documented for Future Reference):**
+1. Conditional polyfill (`if (!global.process?.versions?.node)`) - Never activated in Workers
+2. Aggressive `globalThis.http.Agent` polyfill - Still undefined at runtime
+3. Dynamic polyfill import before groq-sdk - Bundler inlined checks before polyfill executed
+4. Timing-based polyfill inside async function - Same bundler optimization issue
+
+**Root Cause:** OpenNext/esbuild bundles and optimizes code at build time. `http.Agent.maxCachedSessions` checks are inlined into bundled code, so runtime polyfills cannot patch them. The only solution is to avoid Node.js APIs entirely.
+
+### 🔄 Migration Pattern
+
+**Before (groq-sdk - fails in Cloudflare Workers):**
+```typescript
+import { getGroq } from '@/lib/ai';
+
+const groq = await getGroq();
+const completion = await groq.chat.completions.create({
+  model: 'llama-3.3-70b-versatile',
+  messages: [{ role: 'user', content: 'Hello' }],
+  temperature: 0.75,
+  max_tokens: 400,
+  stream: true,
+});
+
+for await (const chunk of completion) {
+  const delta = chunk.choices[0]?.delta?.content;
+  if (delta) yield delta;
+}
+```
+
+**After (fetch-based client - works in Cloudflare Workers):**
+```typescript
+import { getGroqClient } from '@/lib/groq-fetch';
+
+const client = getGroqClient();
+
+// Non-streaming
+const completion = await client.chatCompletion({
+  model: 'llama-3.3-70b-versatile',
+  messages: [{ role: 'user', content: 'Hello' }],
+  temperature: 0.75,
+  max_tokens: 400,
+});
+
+// Streaming
+for await (const chunk of client.chatCompletionStream({
+  model: 'llama-3.3-70b-versatile',
+  messages: [{ role: 'user', content: 'Hello' }],
+  temperature: 0.75,
+  max_tokens: 400,
+})) {
+  yield chunk; // Already just the text content
+}
+```
+
+**Key Conversions:**
+- `await getGroq()` → `getGroqClient()` (synchronous singleton)
+- `groq.chat.completions.create()` → `client.chatCompletion()`
+- `stream: true` → `client.chatCompletionStream()`
+- `chunk.choices[0]?.delta?.content` → `chunk` (pre-extracted)
+- Manual SSE parsing using `ReadableStream` + `TextDecoder`
+
+**Production Validation:**
+```bash
+$ curl https://xpelevator.com/api/debug/groq
+{
+  "success": true,
+  "response": "test successful",
+  "model": "llama-3.3-70b-versatile"
+}
+```
 
 ---
 
