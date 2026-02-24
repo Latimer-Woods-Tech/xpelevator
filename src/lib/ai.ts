@@ -4,9 +4,6 @@
 // the resolution until the first AI call, at which point the CF runtime has
 // fully initialised and the CJS interop shim works correctly.
 
-// Polyfill http.Agent for groq-sdk in Cloudflare Workers
-import './http-agent-polyfill';
-
 import type { ScenarioScript, ScoreResult } from '@/types';
 import type Groq from 'groq-sdk'; // type-only — no runtime import
 
@@ -19,6 +16,9 @@ let _groq: Groq | null = null;
 
 export async function getGroq(): Promise<Groq> {
   if (!_groq) {
+    // CRITICAL: Import polyfill BEFORE groq-sdk so http.Agent is available
+    await import('./http-agent-polyfill');
+    
     const { default: GroqClass } = await import('groq-sdk');
     const apiKey = process.env.GROQ_API_KEY?.replace(/\r/g, '');
     if (!apiKey) {
