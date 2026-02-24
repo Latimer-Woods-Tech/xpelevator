@@ -6,6 +6,7 @@
 
 | Document | Purpose |
 |----------|---------|
+| [USER_GUIDE.md](USER_GUIDE.md) | **End-user documentation** — how to use XPElevator, start simulations, review scores, admin features |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design: C4 diagrams, Mermaid flow diagrams, DB schema, scenario catalog, scoring rubric, API reference |
 | [ENGINEERING.md](ENGINEERING.md) | Developer guide: setup, project structure, conventions, deployment, debugging runbooks |
 | [BACKLOG.md](BACKLOG.md) | Product & engineering backlog — all open issues, sprint assignments, completed history |
