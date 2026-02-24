@@ -143,6 +143,8 @@ export async function POST(request: Request) {
       session.scenario.name,
       session.scenario.script
     );
+    console.log('[Chat API] System prompt length:', systemPrompt.length);
+    console.log('[Chat API] System prompt preview:', systemPrompt.substring(0, 150) + '...');
 
     // Include the just-saved agent message in history (skip [START] signal)
     const history = [
@@ -152,6 +154,8 @@ export async function POST(request: Request) {
       })),
       ...(isStartSignal ? [] : [{ role: 'AGENT' as const, content: content.trim() }]),
     ];
+    console.log('[Chat API] Conversation history length:', history.length);
+    console.log('[Chat API] Is start signal:', isStartSignal);
 
     // ── 5. Stream AI response ─────────────────────────────────────────────────
     const encoder = new TextEncoder();

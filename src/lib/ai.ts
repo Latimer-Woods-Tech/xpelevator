@@ -17,7 +17,12 @@ export async function getGroq(): Promise<Groq> {
   if (!_groq) {
     const { default: GroqClass } = await import('groq-sdk');
     const apiKey = process.env.GROQ_API_KEY?.replace(/\r/g, '');
-    if (!apiKey) throw new Error('GROQ_API_KEY environment variable is not set');
+    if (!apiKey) {
+      console.error('[AI] GROQ_API_KEY is not set in environment variables');
+      console.error('[AI] Available env vars:', Object.keys(process.env).filter(k => k.includes('GROQ') || k.includes('API')));
+      throw new Error('GROQ_API_KEY environment variable is not set');
+    }
+    console.log('[AI] Initializing Groq client with key:', apiKey.substring(0, 10) + '...');
     _groq = new GroqClass({ apiKey }) as Groq;
   }
   return _groq;
@@ -109,6 +114,8 @@ export async function* streamResponse(
     }
   } catch (error) {
     console.error('[AI] Groq API error:', error);
+    console.error('[AI] Error details:', error instanceof Error ? error.message : String(error));
+    console.error('[AI] Error stack:', error instanceof Error ? error.stack : 'N/A');
     yield "I apologize, but I'm experiencing technical difficulties. As a customer, I'm having trouble with my account. Could you help me?";
   }
 }
