@@ -13,7 +13,7 @@
  * Event reference: https://developers.telnyx.com/docs/call-control/receiving-webhooks
  */
 import { NextResponse } from 'next/server';
-import { getGroq } from '@/lib/ai';
+import { getGroqClient } from '@/lib/groq-fetch';
 import { sql } from '@/lib/db';
 import {
   callSpeak,
@@ -100,7 +100,8 @@ export async function POST(request: Request) {
         const difficulty = (script.difficulty as string | undefined) ?? 'medium';
 
         // Generate AI opening line via Groq
-        const opening = await (await getGroq()).chat.completions.create({
+        const client = getGroqClient();
+        const opening = await client.chatCompletion({
           model: 'llama-3.3-70b-versatile',
           messages: [
             {
@@ -200,7 +201,8 @@ export async function POST(request: Request) {
           content: m.content,
         }));
 
-        const aiReply = await (await getGroq()).chat.completions.create({
+        const client = getGroqClient();
+        const aiReply = await client.chatCompletion({
           model: 'llama-3.3-70b-versatile',
           messages: [
             { role: 'system', content: buildSystemPrompt(persona, objective, difficulty) },
