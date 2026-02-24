@@ -27,7 +27,6 @@
     "@neondatabase/serverless": "^1.0.2",
     "@prisma/adapter-neon": "^6.19.2",
     "@prisma/client": "^6.9.0",
-    "groq-sdk": "^0.9.1",
     "next": "^15.5.12",
     "next-auth": "^5.0.0-beta.28",
     "react": "19.2.3",
