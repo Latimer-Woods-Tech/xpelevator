@@ -18,6 +18,7 @@
  *   - Session must exist and be of type PHONE
  */
 import { NextResponse } from 'next/server';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { sql } from '@/lib/db';
 import { initiateCall, encodeClientState } from '@/lib/telnyx';
 
@@ -65,10 +66,21 @@ export async function POST(request: Request) {
       scenarioName: session.scenario.name,
     });
 
-    const callerNumber = from ?? process.env.TELNYX_FROM_NUMBER ?? '';
+    // Resolve TELNYX_FROM_NUMBER at request time — process.env is inlined at
+    // build time by webpack and won't carry CF runtime secrets.
+    let callerNumber = from;
+    if (!callerNumber) {
+      try {
+        const { env } = getCloudflareContext();
+        callerNumber = (env as Record<string, string | undefined>).TELNYX_FROM_NUMBER;
+      } catch {
+        // local dev — fall through
+      }
+      callerNumber ??= process.env.TELNYX_FROM_NUMBER?.replace(/\r/g, '');
+    }
     if (!callerNumber) {
       return NextResponse.json(
-        { error: 'No from number — set TELNYX_FROM_NUMBER in .env' },
+        { error: 'No from number — set TELNYX_FROM_NUMBER in .env or as a Cloudflare secret' },
         { status: 400 }
       );
     }

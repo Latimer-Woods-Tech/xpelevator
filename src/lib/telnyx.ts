@@ -10,14 +10,52 @@
  * Telnyx Call Control docs: https://developers.telnyx.com/docs/call-control
  */
 
+import { getCloudflareContext } from '@opennextjs/cloudflare';
+
 const TELNYX_BASE = 'https://api.telnyx.com/v2';
 
+/**
+ * Resolve Telnyx env vars at REQUEST time (not build time).
+ *
+ * process.env.* is inlined by webpack at build time — runtime secrets set via
+ * `wrangler pages secret put` are never visible through it in CF Workers.
+ * getCloudflareContext().env is a true runtime binding that always carries the
+ * real secret. process.env is kept as a fallback for local `next dev`.
+ */
+function getTelnyxEnv(): { apiKey: string; connectionId: string; webhookUrl: string } {
+  let apiKey: string | undefined;
+  let connectionId: string | undefined;
+  let webhookUrl: string | undefined;
+
+  // 1. Cloudflare runtime bindings (production)
+  try {
+    const { env } = getCloudflareContext();
+    const cfEnv = env as Record<string, string | undefined>;
+    apiKey = cfEnv.TELNYX_API_KEY;
+    connectionId = cfEnv.TELNYX_CONNECTION_ID;
+    webhookUrl = cfEnv.TELNYX_WEBHOOK_URL;
+  } catch {
+    // Not in a CF Worker context (local dev) — fall through
+  }
+
+  // 2. process.env fallback for local development
+  apiKey ??= process.env.TELNYX_API_KEY?.replace(/\r/g, '');
+  connectionId ??= process.env.TELNYX_CONNECTION_ID?.replace(/\r/g, '');
+  webhookUrl ??= process.env.TELNYX_WEBHOOK_URL?.replace(/\r/g, '');
+
+  return {
+    apiKey: apiKey ?? '',
+    connectionId: connectionId ?? '',
+    webhookUrl: webhookUrl ?? '',
+  };
+}
+
 function telnyxHeaders() {
-  const key = process.env.TELNYX_API_KEY;
-  if (!key) throw new Error('TELNYX_API_KEY is not set');
+  const { apiKey } = getTelnyxEnv();
+  if (!apiKey) throw new Error('TELNYX_API_KEY is not set');
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${key}`,
+    Authorization: `Bearer ${apiKey}`,
   };
 }
 
@@ -31,10 +69,10 @@ export async function initiateCall(params: {
     method: 'POST',
     headers: telnyxHeaders(),
     body: JSON.stringify({
-      connection_id: process.env.TELNYX_CONNECTION_ID,
+      connection_id: getTelnyxEnv().connectionId || undefined,
       to: params.to,
       from: params.from,
-      webhook_url: process.env.TELNYX_WEBHOOK_URL,
+      webhook_url: getTelnyxEnv().webhookUrl || undefined,
       client_state: params.clientState,
     }),
   });
