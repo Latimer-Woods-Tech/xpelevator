@@ -176,7 +176,7 @@ export async function scoreSession(
     .join('\n');
 
   const criteriaList = criteria
-    .map((c, i) => `${i + 1}. ${c.name}${c.description ? ` — ${c.description}` : ''}`)
+    .map((c, i) => `${i + 1}. ${c.name} [importance: ${c.weight}/10]${c.description ? ` — ${c.description}` : ''}`)
     .join('\n');
 
   const prompt = `You are evaluating a customer service training session. Score the AGENT's performance.
@@ -184,12 +184,13 @@ export async function scoreSession(
 CONVERSATION TRANSCRIPT:
 ${transcriptText}
 
-SCORE THE AGENT ON THESE CRITERIA (each 1–10):
+SCORE THE AGENT ON THESE CRITERIA (each 1–10, importance weight shown):
 ${criteriaList}
 
 Rules:
 - Score ONLY the agent's messages — not the customer's behaviour
 - 1–4 = Poor, 5–6 = Adequate, 7–8 = Good, 9–10 = Excellent
+- Give proportionally more detailed justification for higher-importance criteria
 - Be objective and specific in justifications
 
 Respond ONLY with a valid JSON array, no extra text:

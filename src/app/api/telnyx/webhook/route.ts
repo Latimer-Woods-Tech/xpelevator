@@ -14,6 +14,7 @@
  */
 import { NextResponse } from 'next/server';
 import { getGroqClient } from '@/lib/groq-fetch';
+import { buildSessionSystemPrompt, scoreSession } from '@/lib/ai';
 import { sql } from '@/lib/db';
 import {
   callSpeak,
@@ -95,18 +96,16 @@ export async function POST(request: Request) {
         const scenario: any = scenarioRows[0] ?? null;
 
         const script = (scenario?.script ?? {}) as Record<string, unknown>;
-        const persona = (script.customerPersona as string | undefined) ?? 'a customer who needs help';
-        const objective = (script.customerObjective as string | undefined) ?? 'get help with their issue';
-        const difficulty = (script.difficulty as string | undefined) ?? 'medium';
 
         // Generate AI opening line via Groq
+        const systemPromptOpening = buildSessionSystemPrompt(state.scenarioName, script);
         const client = getGroqClient();
         const opening = await client.chatCompletion({
           model: 'llama-3.3-70b-versatile',
           messages: [
             {
               role: 'system',
-              content: buildSystemPrompt(persona, objective, difficulty),
+              content: systemPromptOpening,
             },
             {
               role: 'user',
@@ -189,9 +188,6 @@ export async function POST(request: Request) {
         `;
         const scenario: any = scenarioRows[0] ?? null;
         const script = (scenario?.script ?? {}) as Record<string, unknown>;
-        const persona = (script.customerPersona as string | undefined) ?? 'a customer who needs help';
-        const objective = (script.customerObjective as string | undefined) ?? 'get help with their issue';
-        const difficulty = (script.difficulty as string | undefined) ?? 'medium';
 
         // Build conversation for Groq
         // AGENT = trainee speaking to AI customer → Groq 'user'
@@ -201,11 +197,12 @@ export async function POST(request: Request) {
           content: m.content,
         }));
 
+        const systemPromptGather = buildSessionSystemPrompt(state.scenarioName, script);
         const client = getGroqClient();
         const aiReply = await client.chatCompletion({
           model: 'llama-3.3-70b-versatile',
           messages: [
-            { role: 'system', content: buildSystemPrompt(persona, objective, difficulty) },
+            { role: 'system', content: systemPromptGather },
             ...groqMessages,
           ],
           max_tokens: 150,
@@ -219,13 +216,47 @@ export async function POST(request: Request) {
         await saveMessage(state.sessionId, 'CUSTOMER', cleanText);
 
         if (isResolved) {
-          // End the session
+          // Mark session completed
           await sql`
             UPDATE simulation_sessions
             SET status = 'COMPLETED', ended_at = NOW()
             WHERE id = ${state.sessionId}
           `;
-          // TODO: trigger scoring (same as chat route — POST /api/scoring)
+          // Load criteria for this job title (fallback: all active criteria)
+          const criteriaRows = await sql`
+            SELECT c.id, c.name, c.description, c.weight
+            FROM job_criteria jc
+            JOIN criteria c ON c.id = jc.criteria_id
+            WHERE jc.job_title_id = ${state.jobTitleId} AND c.active = true
+          `;
+          let scoringCriteria = criteriaRows as any[];
+          if (scoringCriteria.length === 0) {
+            const globalCriteria = await sql`SELECT id, name, description, weight FROM criteria WHERE active = true`;
+            scoringCriteria = globalCriteria as any[];
+          }
+          // Load full transcript
+          const allMessages = await sql`
+            SELECT role, content FROM chat_messages
+            WHERE session_id = ${state.sessionId}
+            ORDER BY timestamp ASC
+          `;
+          const transcript = (allMessages as any[]).map((m: any) => ({
+            role: m.role as 'CUSTOMER' | 'AGENT',
+            content: m.content,
+          }));
+          if (transcript.length >= 2 && scoringCriteria.length > 0) {
+            try {
+              const scores = await scoreSession(transcript, scoringCriteria);
+              for (const s of scores) {
+                await sql`
+                  INSERT INTO scores (id, session_id, criteria_id, score, feedback, scored_at)
+                  VALUES (gen_random_uuid(), ${state.sessionId}, ${s.criteriaId}, ${s.score}, ${s.justification}, NOW())
+                `;
+              }
+            } catch (err) {
+              console.error('[telnyx] Auto-scoring failed:', err);
+            }
+          }
         }
 
         const newState: TelnyxClientState = {
@@ -266,13 +297,7 @@ export async function POST(request: Request) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(persona: string, objective: string, difficulty: string): string {
-  return `You are ${persona}. Your goal is to ${objective}.
-Difficulty level: ${difficulty}.
-Respond naturally as this customer would on a phone call. Keep your responses concise (1–3 sentences).
-When your issue is fully resolved or your goal is achieved, append [RESOLVED] at the end of your final message.
-Do not break character. Do not mention that you are an AI.`;
-}
+
 
 async function saveMessage(sessionId: string, role: 'CUSTOMER' | 'AGENT', content: string) {
   await sql`

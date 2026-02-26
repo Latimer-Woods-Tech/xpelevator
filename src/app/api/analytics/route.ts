@@ -81,10 +81,9 @@ export async function GET() {
     const totalSessions = sessions.length;
 
     const allScores: ScoreFull[] = sessions.flatMap((s: SessionFull) => s.scores);
-    const overallAvg =
-      allScores.length > 0
-        ? allScores.reduce((sum: number, s: ScoreFull) => sum + s.score, 0) / allScores.length
-        : null;
+    const totalWeightedScore = allScores.reduce((sum: number, s: ScoreFull) => sum + s.score * s.criteria.weight, 0);
+    const totalWeight = allScores.reduce((sum: number, s: ScoreFull) => sum + s.criteria.weight, 0);
+    const overallAvg = totalWeight > 0 ? totalWeightedScore / totalWeight : null;
 
     // ── Score trend (daily average for last 60 days) ──────────────────────────
     const now = new Date();
@@ -97,10 +96,9 @@ export async function GET() {
       if (date < cutoff) continue;
 
       const day = date.toISOString().slice(0, 10); // YYYY-MM-DD
-      const sessionAvg =
-        session.scores.length > 0
-          ? session.scores.reduce((sum: number, s: ScoreFull) => sum + s.score, 0) / session.scores.length
-          : null;
+      const sessionWeightedScore = session.scores.reduce((sum: number, s: ScoreFull) => sum + s.score * s.criteria.weight, 0);
+      const sessionWeight = session.scores.reduce((sum: number, s: ScoreFull) => sum + s.criteria.weight, 0);
+      const sessionAvg = sessionWeight > 0 ? sessionWeightedScore / sessionWeight : null;
       if (sessionAvg === null) continue;
 
       const existing = trendMap.get(day) ?? { sum: 0, count: 0 };
@@ -113,28 +111,28 @@ export async function GET() {
     // ── Per job-title breakdown ───────────────────────────────────────────────
     const jobMap = new Map<
       string,
-      { name: string; sessions: number; scoreSum: number; scoreCount: number }
+      { name: string; sessions: number; weightedScoreSum: number; weightSum: number }
     >();
     for (const session of sessions) {
       const key = session.jobTitleId;
       const existing = jobMap.get(key) ?? {
         name: session.jobTitle.name,
         sessions: 0,
-        scoreSum: 0,
-        scoreCount: 0,
+        weightedScoreSum: 0,
+        weightSum: 0,
       };
       existing.sessions += 1;
       for (const s of session.scores) {
-        existing.scoreSum += s.score;
-        existing.scoreCount += 1;
+        existing.weightedScoreSum += s.score * s.criteria.weight;
+        existing.weightSum += s.criteria.weight;
       }
       jobMap.set(key, existing);
     }
     const byJobTitle = Array.from(jobMap.values())
-      .map(({ name, sessions: count, scoreSum, scoreCount }) => ({
+      .map(({ name, sessions: count, weightedScoreSum, weightSum }) => ({
         name,
         sessions: count,
-        avg: scoreCount > 0 ? scoreSum / scoreCount : null,
+        avg: weightSum > 0 ? weightedScoreSum / weightSum : null,
       }))
       .sort((a, b) => b.sessions - a.sessions);
 
@@ -169,7 +167,8 @@ export async function GET() {
     const chatSessions = sessions.filter((s: SessionFull) => s.type === 'CHAT');
     const typeAvg = (arr: SessionFull[]) => {
       const sc: ScoreFull[] = arr.flatMap((s: SessionFull) => s.scores);
-      return sc.length > 0 ? sc.reduce((sum: number, s: ScoreFull) => sum + s.score, 0) / sc.length : null;
+      const wSum = sc.reduce((sum: number, s: ScoreFull) => sum + s.criteria.weight, 0);
+      return wSum > 0 ? sc.reduce((sum: number, s: ScoreFull) => sum + s.score * s.criteria.weight, 0) / wSum : null;
     };
     const byType = [
       { type: 'PHONE', sessions: phoneSessions.length, avg: typeAvg(phoneSessions) },
