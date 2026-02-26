@@ -41,3 +41,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy .open-next/assets --project-name=xpelevator
+
+      - name: Set production secrets
+        run: |
+          echo "${{ secrets.GROQ_API_KEY }}" | wrangler pages secret put GROQ_API_KEY --project-name=xpelevator
+          echo "${{ secrets.DATABASE_URL }}" | wrangler pages secret put DATABASE_URL --project-name=xpelevator
+          echo "${{ secrets.AUTH_SECRET }}" | wrangler pages secret put AUTH_SECRET --project-name=xpelevator
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
