@@ -16,13 +16,39 @@ const blankScenario = {
   jobTitleId: '',
   type: 'CHAT' as 'PHONE' | 'CHAT' | 'VOICE',
   description: '',
-  script: JSON.stringify({
-    customerPersona: '',
-    customerObjective: '',
-    difficulty: 'medium',
-    hints: [],
-  }, null, 2),
+  customerPersona: '',
+  customerObjective: '',
+  difficulty: 'medium' as 'easy' | 'medium' | 'hard',
+  hints: [] as string[],
 };
+
+// ─── Tooltip ─────────────────────────────────────────────────────────────────
+
+function Tooltip({ text }: { text: string }) {
+  return (
+    <span className="relative inline-block ml-1 group cursor-help align-middle">
+      <span className="text-slate-500 hover:text-blue-400 text-xs transition-colors">ⓘ</span>
+      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 bg-slate-700 text-white text-xs rounded-lg px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 border border-slate-600 shadow-xl leading-relaxed whitespace-normal">
+        {text}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-700" />
+      </span>
+    </span>
+  );
+}
+
+// ─── Tab Intro Banner ────────────────────────────────────────────────────────
+
+function TabIntro({ icon, title, description }: { icon: string; title: string; description: string }) {
+  return (
+    <div className="flex items-start gap-3 bg-blue-950/40 border border-blue-800/30 rounded-xl px-5 py-4 mb-6">
+      <span className="text-2xl">{icon}</span>
+      <div>
+        <div className="font-semibold text-blue-200 text-sm">{title}</div>
+        <div className="text-slate-400 text-xs mt-0.5 leading-relaxed">{description}</div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Criteria Tab ────────────────────────────────────────────────────────────
 
@@ -64,6 +90,11 @@ function CriteriaTab() {
 
   return (
     <div>
+      <TabIntro
+        icon="📋"
+        title="Scoring Criteria"
+        description="Criteria are the skills you want to measure in each simulation — things like Empathy, Product Knowledge, or Problem-Solving. Each criterion has a weight (importance) from 1–10. After a session ends, the AI rates the employee on every criterion linked to their job title."
+      />
       <div className="flex justify-end mb-6">
         <button
           onClick={() => { setShowForm(!showForm); setEditingId(null); setForm(blankCriteria); }}
@@ -75,22 +106,44 @@ function CriteriaTab() {
 
       {showForm && (
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 mb-6">
-          <h3 className="font-semibold mb-4">{editingId ? 'Edit Criteria' : 'New Criteria'}</h3>
+          <h3 className="font-semibold mb-4">{editingId ? 'Edit Criteria' : 'New Scoring Criteria'}</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input placeholder="Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-              className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
-            <input placeholder="Category" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
-              className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
-            <input placeholder="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-              className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400 md:col-span-2" />
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Criteria Name <span className="text-red-400">*</span>
+                <Tooltip text="A short, clear name for what you're measuring. E.g. 'Empathy', 'Product Knowledge', 'Communication'." />
+              </label>
+              <input placeholder="e.g. Empathy" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Category
+                <Tooltip text="Group similar criteria together (e.g. 'Soft Skills', 'Technical', 'Process'). Optional — helps organise long lists." />
+              </label>
+              <input placeholder="e.g. Soft Skills" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs text-slate-400 mb-1">
+                Description
+                <Tooltip text="Explain exactly what this criterion measures so the AI scores consistently. E.g. 'Employee acknowledged the customer's frustration before jumping to a solution.'" />
+              </label>
+              <input placeholder="What does this criterion measure?" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
+            </div>
             <div className="flex items-center gap-4">
-              <span className="text-sm text-slate-300">Weight (1-10):</span>
+              <label className="text-xs text-slate-400 whitespace-nowrap">
+                Importance (Weight)
+                <Tooltip text="How much this criterion counts toward the final score. 10 = most important, 1 = least. Example: Problem-Solving might be 10, while Greeting Tone might be 4." />
+              </label>
               <input type="range" min="1" max="10" value={form.weight} onChange={e => setForm({ ...form, weight: +e.target.value })} className="flex-1" />
-              <span className="text-blue-400 font-bold w-6 text-center">{form.weight}</span>
+              <span className="text-blue-400 font-bold w-8 text-center text-lg">{form.weight}</span>
             </div>
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} />
               Active
+              <Tooltip text="Inactive criteria won't be scored. Use this to pause a criterion without deleting it." />
             </label>
           </div>
           <button onClick={save} disabled={!form.name}
@@ -191,6 +244,11 @@ function JobTitlesTab() {
 
   return (
     <div>
+      <TabIntro
+        icon="👔"
+        title="Job Titles"
+        description="Job Titles represent the roles your employees are being trained for — e.g. 'Customer Support Representative' or 'Sales Associate'. Each job title has its own set of scoring criteria (managed in the Job ↔ Criteria tab) so simulations are scored appropriately for that role."
+      />
       <div className="flex justify-end mb-6">
         <button
           onClick={() => { setShowForm(!showForm); setEditingId(null); setForm(blankJob); }}
@@ -204,12 +262,24 @@ function JobTitlesTab() {
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 mb-6">
           <h3 className="font-semibold mb-4">{editingId ? 'Edit Job Title' : 'New Job Title'}</h3>
           <div className="grid grid-cols-1 gap-4">
-            <input placeholder="Job Title (e.g., Sales Representative)" value={form.name}
-              onChange={e => setForm({ ...form, name: e.target.value })}
-              className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
-            <input placeholder="Description (optional)" value={form.description}
-              onChange={e => setForm({ ...form, description: e.target.value })}
-              className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Job Title Name <span className="text-red-400">*</span>
+                <Tooltip text="The name of the role your employees will train for. E.g. 'Customer Support Rep', 'Sales Associate', 'Billing Specialist'." />
+              </label>
+              <input placeholder="e.g. Customer Support Representative" value={form.name}
+                onChange={e => setForm({ ...form, name: e.target.value })}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Description
+                <Tooltip text="A brief note about what this role involves. Shown to admins only — helps distinguish similar roles." />
+              </label>
+              <input placeholder="What does this role involve? (optional)" value={form.description}
+                onChange={e => setForm({ ...form, description: e.target.value })}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
+            </div>
           </div>
           <button onClick={save} disabled={!form.name}
             className="mt-4 bg-green-600 hover:bg-green-500 disabled:bg-slate-600 px-6 py-2 rounded-lg text-sm font-medium transition-colors">
@@ -252,7 +322,6 @@ function ScenariosTab() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(blankScenario);
   const [showForm, setShowForm] = useState(false);
-  const [scriptError, setScriptError] = useState('');
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -265,20 +334,14 @@ function ScenariosTab() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const validateScript = (val: string) => {
-    try { JSON.parse(val); setScriptError(''); return true; }
-    catch { setScriptError('Invalid JSON'); return false; }
-  };
-
   const save = async () => {
-    if (!validateScript(form.script)) return;
-    const body = {
-      name: form.name,
-      jobTitleId: form.jobTitleId,
-      type: form.type,
-      description: form.description,
-      script: JSON.parse(form.script),
+    const script = {
+      customerPersona: form.customerPersona,
+      customerObjective: form.customerObjective,
+      difficulty: form.difficulty,
+      hints: form.hints.filter(h => h.trim()),
     };
+    const body = { name: form.name, jobTitleId: form.jobTitleId, type: form.type, description: form.description, script };
     if (editingId) {
       await fetch(`/api/scenarios/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     } else {
@@ -293,22 +356,34 @@ function ScenariosTab() {
   };
 
   const startEdit = (s: Scenario) => {
+    const script = ((s.script || {}) as { customerPersona?: string; customerObjective?: string; difficulty?: string; hints?: string[] });
     setEditingId(s.id);
     setForm({
       name: s.name,
       jobTitleId: s.jobTitleId ?? '',
       type: s.type,
       description: s.description || '',
-      script: JSON.stringify(s.script, null, 2),
+      customerPersona: script.customerPersona || '',
+      customerObjective: script.customerObjective || '',
+      difficulty: (script.difficulty as 'easy' | 'medium' | 'hard') || 'medium',
+      hints: script.hints || [],
     });
     setShowForm(true);
-    setScriptError('');
   };
+
+  const addHint = () => setForm(f => ({ ...f, hints: [...f.hints, ''] }));
+  const updateHint = (i: number, val: string) => setForm(f => ({ ...f, hints: f.hints.map((h, idx) => idx === i ? val : h) }));
+  const removeHint = (i: number) => setForm(f => ({ ...f, hints: f.hints.filter((_, idx) => idx !== i) }));
 
   const jobName = (id: string) => jobs.find(j => j.id === id)?.name || '—';
 
   return (
     <div>
+      <TabIntro
+        icon="🎭"
+        title="Scenarios"
+        description="A scenario is a specific customer situation that employees practise — e.g. 'Angry customer with a late delivery'. Fill in plain-English descriptions below; no coding or JSON required. The AI uses these details to play a realistic virtual customer."
+      />
       <div className="flex items-center justify-between mb-6 gap-4">
         <select
           value={filterJobId}
@@ -319,7 +394,7 @@ function ScenariosTab() {
           {jobs.map(j => <option key={j.id} value={j.id}>{j.name}</option>)}
         </select>
         <button
-          onClick={() => { setShowForm(!showForm); setEditingId(null); setForm(blankScenario); setScriptError(''); }}
+          onClick={() => { setShowForm(!showForm); setEditingId(null); setForm(blankScenario); }}
           className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
         >
           {showForm ? 'Cancel' : '+ Add Scenario'}
@@ -328,45 +403,147 @@ function ScenariosTab() {
 
       {showForm && (
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 mb-6">
-          <h3 className="font-semibold mb-4">{editingId ? 'Edit Scenario' : 'New Scenario'}</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <input placeholder="Scenario Name" value={form.name}
-              onChange={e => setForm({ ...form, name: e.target.value })}
-              className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
-            <select value={form.jobTitleId} onChange={e => setForm({ ...form, jobTitleId: e.target.value })}
-              className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
-              <option value="">Select Job Title</option>
-              {jobs.map(j => <option key={j.id} value={j.id}>{j.name}</option>)}
-            </select>
-            <input placeholder="Description (optional)" value={form.description}
-              onChange={e => setForm({ ...form, description: e.target.value })}
-              className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
-            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value as 'PHONE' | 'CHAT' | 'VOICE' })}
-              className="bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
-              <option value="CHAT">Chat</option>
-              <option value="PHONE">Phone</option>
-              <option value="VOICE">Voice</option>
-            </select>
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-sm text-slate-300">Scenario Script (JSON)</label>
-              {scriptError && <span className="text-xs text-red-400">{scriptError}</span>}
+          <h3 className="font-semibold mb-1">{editingId ? 'Edit Scenario' : 'New Scenario'}</h3>
+          <p className="text-xs text-slate-400 mb-5">Fill in the fields below to define how the AI customer will behave. No technical knowledge required.</p>
+
+          {/* Basic info */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Scenario Name <span className="text-red-400">*</span>
+                <Tooltip text="A short title that describes the situation being practised. E.g. 'Late Delivery Complaint' or 'Billing Dispute'." />
+              </label>
+              <input placeholder="e.g. Late Delivery Complaint" value={form.name}
+                onChange={e => setForm({ ...form, name: e.target.value })}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
             </div>
-            <textarea
-              rows={12}
-              value={form.script}
-              onChange={e => { setForm({ ...form, script: e.target.value }); validateScript(e.target.value); }}
-              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-green-400 font-mono text-xs placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              spellCheck={false}
-            />
-            <p className="text-xs text-slate-500 mt-1">
-              Fields: customerPersona, customerObjective, difficulty (easy/medium/hard), hints (array)
-            </p>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Job Title <span className="text-red-400">*</span>
+                <Tooltip text="Which role this scenario is designed for. Employees will see scenarios that match their assigned job title." />
+              </label>
+              <select value={form.jobTitleId} onChange={e => setForm({ ...form, jobTitleId: e.target.value })}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
+                <option value="">— Select Job Title —</option>
+                {jobs.map(j => <option key={j.id} value={j.id}>{j.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Short Description
+                <Tooltip text="A one-line summary shown on the scenario selection screen. E.g. 'Customer wants a refund on a damaged item'." />
+              </label>
+              <input placeholder="One-line summary (optional)" value={form.description}
+                onChange={e => setForm({ ...form, description: e.target.value })}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Simulation Type
+                <Tooltip text="Chat: typed conversation. Voice: use your microphone in the browser. Phone: receive a real phone call via Telnyx." />
+              </label>
+              <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value as 'PHONE' | 'CHAT' | 'VOICE' })}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
+                <option value="CHAT">💬 Chat (text conversation)</option>
+                <option value="VOICE">🎙️ Voice (browser microphone)</option>
+                <option value="PHONE">📞 Phone (real phone call)</option>
+              </select>
+            </div>
           </div>
-          <button onClick={save} disabled={!form.name || !form.jobTitleId || !!scriptError}
-            className="mt-4 bg-green-600 hover:bg-green-500 disabled:bg-slate-600 px-6 py-2 rounded-lg text-sm font-medium transition-colors">
-            {editingId ? 'Update' : 'Create'}
+
+          {/* AI Customer behaviour */}
+          <div className="border-t border-slate-700 pt-5 mb-5">
+            <h4 className="text-sm font-medium text-slate-200 mb-4">🤖 AI Customer Behaviour</h4>
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  Who is the customer?
+                  <Tooltip text="Describe the customer's personality and emotional state. The AI will play this character throughout the simulation. E.g. 'A frustrated customer who paid for express shipping but received the item 2 weeks late. They are upset but polite.'" />
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. A frustrated customer who paid for express shipping but received the item 2 weeks late. They are upset but willing to cooperate."
+                  value={form.customerPersona}
+                  onChange={e => setForm({ ...form, customerPersona: e.target.value })}
+                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 text-sm resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  What does the customer want?
+                  <Tooltip text="The outcome the customer is trying to achieve. The AI won't fully reveal this upfront — the employee needs to uncover and resolve it. E.g. 'A full refund or guaranteed reshipping with compensation.'" />
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. A full refund, or guaranteed re-shipment within 48 hours with a discount code as compensation."
+                  value={form.customerObjective}
+                  onChange={e => setForm({ ...form, customerObjective: e.target.value })}
+                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 text-sm resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  Difficulty
+                  <Tooltip text="Easy: the customer is cooperative and accepts the first reasonable solution. Medium: they're mildly frustrated and may ask follow-up questions. Hard: they're very upset, may push back, and only de-escalate if handled exceptionally well." />
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['easy', 'medium', 'hard'] as const).map(level => (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => setForm({ ...form, difficulty: level })}
+                      className={`py-2 rounded-lg text-sm font-medium border transition-all capitalize ${
+                        form.difficulty === level
+                          ? level === 'easy' ? 'bg-green-700 border-green-500 text-white'
+                          : level === 'medium' ? 'bg-yellow-700 border-yellow-500 text-white'
+                          : 'bg-red-700 border-red-500 text-white'
+                          : 'bg-slate-800 border-slate-600 text-slate-400 hover:border-slate-400'
+                      }`}
+                    >
+                      {level === 'easy' ? '😊 Easy' : level === 'medium' ? '😐 Medium' : '😠 Hard'}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  {form.difficulty === 'easy' && 'Easy: Cooperative customer, accepts first reasonable solution.'}
+                  {form.difficulty === 'medium' && 'Medium: Mildly frustrated, needs reassurance before agreeing.'}
+                  {form.difficulty === 'hard' && 'Hard: Very upset, challenges solutions, only de-escalates if handled well.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Hints */}
+          <div className="border-t border-slate-700 pt-5">
+            <label className="block text-xs text-slate-400 mb-3">
+              Background Hints (optional)
+              <Tooltip text="Extra facts the AI knows about this customer's situation — things like order numbers, account history, or policy details. These help the AI give realistic, specific responses. Employees won't see these hints." />
+            </label>
+            <div className="space-y-2 mb-3">
+              {form.hints.map((hint, i) => (
+                <div key={i} className="flex gap-2">
+                  <input
+                    value={hint}
+                    onChange={e => updateHint(i, e.target.value)}
+                    placeholder={`Hint ${i + 1} — e.g. Order #12345 placed 3 weeks ago`}
+                    className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white placeholder-slate-500 text-sm"
+                  />
+                  <button onClick={() => removeHint(i)} className="text-red-400 hover:text-red-300 px-2 text-sm">✕</button>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={addHint}
+              className="text-blue-400 hover:text-blue-300 text-sm border border-blue-800 hover:border-blue-600 px-4 py-1.5 rounded-lg transition-colors"
+            >
+              + Add Hint
+            </button>
+          </div>
+
+          <button onClick={save} disabled={!form.name || !form.jobTitleId}
+            className="mt-6 bg-green-600 hover:bg-green-500 disabled:bg-slate-600 px-6 py-2 rounded-lg text-sm font-medium transition-colors">
+            {editingId ? 'Update Scenario' : 'Create Scenario'}
           </button>
         </div>
       )}
@@ -458,6 +635,11 @@ function JobCriteriaTab() {
 
   return (
     <div>
+      <TabIntro
+        icon="🔗"
+        title="Link Criteria to Job Titles"
+        description="This is where you decide which scoring criteria apply to each job title. For example, a Sales role might be scored on 'Closing' and 'Upselling', while a Support role focuses on 'Empathy' and 'Problem Solving'. Tick or untick criteria for the selected job title — changes save instantly."
+      />
       <div className="mb-6">
         <label className="block text-sm text-slate-400 mb-2">Select a Job Title to manage its scoring criteria:</label>
         <select
@@ -471,7 +653,7 @@ function JobCriteriaTab() {
       </div>
 
       {!selectedJobId ? (
-        <p className="text-slate-500 text-center py-12">Select a job title above to manage its criteria.</p>
+        <p className="text-slate-500 text-center py-12">👆 Select a job title above to choose which criteria are scored for that role.</p>
       ) : loading ? (
         <p className="text-slate-400">Loading criteria links...</p>
       ) : (
@@ -636,6 +818,11 @@ function OrgsTab() {
 
   return (
     <div>
+      <TabIntro
+        icon="🏢"
+        title="Organizations"
+        description="Organizations let you group users under a single tenant — useful if you host XPElevator for multiple companies or departments. Each org has its own members, plan level, and isolated session data. Expand an org to add or remove members."
+      />
       <div className="flex justify-end mb-6">
         <button
           onClick={() => setShowForm(!showForm)}
@@ -815,7 +1002,17 @@ export default function AdminPage() {
           &larr; Back to Home
         </Link>
 
-        <h1 className="text-3xl font-bold mb-8">Admin</h1>
+        <div className="flex items-start justify-between mb-8">
+          <h1 className="text-3xl font-bold">Admin Panel</h1>
+          <a
+            href="https://github.com/adrper79-dot/xpelevator/blob/main/docs/USER_GUIDE.md#admin-panel"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 border border-blue-800 hover:border-blue-600 px-4 py-2 rounded-lg transition-colors"
+          >
+            <span>📖</span> User Guide
+          </a>
+        </div>
 
         {/* Tab bar */}
         <div className="flex gap-1 bg-slate-800/60 p-1 rounded-xl mb-8 border border-slate-700/50">

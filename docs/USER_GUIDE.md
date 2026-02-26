@@ -1,7 +1,7 @@
 # XPElevator User Guide
 
-**Version:** 1.0  
-**Last Updated:** February 23, 2026
+**Version:** 1.1  
+**Last Updated:** February 26, 2026
 
 ## Table of Contents
 
@@ -357,9 +357,11 @@ Access from: **Home → Analytics** or **Analytics** in the navigation
 
 **Access:** Home → Admin Panel (requires ADMIN role)
 
-The admin panel has four tabs for managing the simulation platform:
+The admin panel has five tabs for managing the simulation platform. Every tab includes a **blue intro banner** that explains what the tab is for, and every form field has an **ⓘ tooltip** — hover over it for a plain-English explanation of that field.
 
-### Tab 1: Criteria Management
+A **User Guide** shortcut button in the top-right of the admin page links directly to this section.
+
+### Tab 1: Scoring Criteria
 
 **Purpose:** Define what aspects of performance are scored
 
@@ -405,65 +407,76 @@ The admin panel has four tabs for managing the simulation platform:
 - **Name** (required) - e.g., "Customer Support Rep", "Sales Associate"
 - **Description** - What this role entails
 
-**Assigning criteria to job titles:**
-1. Click **Assign Criteria** on a job title
-2. Check the criteria that apply to this role
-3. Click **Save**
-4. Only checked criteria will be scored for simulations in this role
+### Tab 2: Job Titles Management
 
-**Example job titles:**
-- Customer Support Representative
-- Technical Support Specialist
-- Sales Development Representative
-- Account Manager
-- Billing Specialist
+**Purpose:** Define roles that employees will simulate
+
+**Actions:**
+- ➕ **Add Job Title** - Create new roles
+- ✏️ **Edit** - Update role information
+- 🗑️ **Delete** - Remove roles
+
+**Job title fields:**
+- **Name** (required) — e.g., "Customer Support Rep", "Sales Associate"  
+  *Hover the ⓘ icon next to the field for an example.*
+- **Description** — What this role entails (admin-only note)
+
+**After creating job titles:** Go to the **Job ↔ Criteria** tab to choose which scoring criteria apply to each role.
 
 ### Tab 3: Scenarios Management
 
 **Purpose:** Create realistic customer interaction scenarios
 
 **Actions:**
-- ➕ **Add Scenario** - Create new training situations
-- ✏️ **Edit** - Modify existing scenarios
-- 🗑️ **Delete** - Remove scenarios
-- 📋 **View Script** - See scenario configuration
+- ➕ **Add Scenario** — Create new training situations
+- ✏️ **Edit** — Modify existing scenarios
+- 🗑️ **Delete** — Remove scenarios
 
-**Scenario fields:**
-- **Name** (required) - Brief scenario title
-- **Job Title** (required) - Which role this scenario belongs to
-- **Type** (required) - PHONE, CHAT, or VOICE
-- **Description** - What the scenario involves
-- **Script (JSON)** - AI customer configuration
+**Scenario fields — Basic Info:**
 
-**Script configuration:**
+| Field | Required | What to enter |
+|-------|----------|---------------|
+| Scenario Name | ✅ | Short title for the situation, e.g. "Late Delivery Complaint" |
+| Job Title | ✅ | Which role this scenario is for |
+| Short Description | — | One-line summary shown on the scenario picker |
+| Simulation Type | ✅ | Chat, Voice, or Phone |
 
-The script is a JSON object that defines how the AI customer behaves:
+**AI Customer Behaviour — plain-English fields (no JSON required):**
 
-```json
-{
-  "customerPersona": "Frustrated customer, item not delivered",
-  "customerObjective": "Get refund or reship product",
-  "difficulty": "medium",
-  "hints": [
-    "Customer is upset but willing to work with you",
-    "Order #12345 placed 2 weeks ago",
-    "Customer prefers phone contact"
-  ]
-}
-```
+#### "Who is the customer?"
+Describe the customer's personality and emotional state. The AI plays this character throughout the simulation.
 
-**Script fields explained:**
-- **customerPersona** - Who the customer is and their emotional state
-- **customerObjective** - What the customer wants to achieve
-- **difficulty** - `easy`, `medium`, `hard` (affects AI behavior)
-- **hints** - Background information for realistic responses
+> **Example:** *A frustrated customer who paid for express shipping but received the item 2 weeks late. They are upset but willing to cooperate once you acknowledge the issue.*
+
+#### "What does the customer want?"
+The outcome the customer is trying to achieve. The employee needs to uncover and resolve this.
+
+> **Example:** *A full refund, or guaranteed re-shipment within 48 hours with a discount code as compensation.*
+
+#### Difficulty
+Click one of three visual buttons:
+- 😊 **Easy** — Cooperative customer, accepts the first reasonable solution.
+- 😐 **Medium** — Mildly frustrated, needs some reassurance before agreeing.
+- 😠 **Hard** — Very upset, challenges solutions, only de-escalates if handled exceptionally well.
+
+#### Background Hints *(optional)*
+Extra facts the AI knows — e.g. order numbers, policy details, account history. These help the AI give realistic, specific responses. **Employees won't see these hints.**
+
+Click **+ Add Hint** to add as many hints as you need. Each hint is a plain sentence.
+
+> **Example hints:**
+> - Order #12345 placed 3 weeks ago via the website
+> - Express shipping fee was $19.99
+> - Company policy allows reshipping free of charge once
+
+**Hover over any ⓘ icon** next to a field label for a quick reminder of what that field does.
 
 **Creating effective scenarios:**
-1. Base on real customer situations
-2. Include clear objectives
-3. Vary difficulty levels
-4. Provide enough hints for realistic AI responses
-5. Match scenario type to training goals
+1. Base on real customer interactions your team faces
+2. Write the persona in first-person emotional language
+3. Make the objective something the employee can realistically resolve
+4. Use hints for any specific facts you want the AI to reference
+5. Start with Easy/Medium difficulty for new trainees; add Hard scenarios as skills improve
 
 **Example scenarios:**
 
@@ -475,7 +488,15 @@ The script is a JSON object that defines how the AI customer behaves:
 | Technical Support Issue | VOICE | Medium | Customer can't access account |
 | Upsell Opportunity | PHONE | Medium | Existing customer interested in upgrade |
 
-### Tab 4: Organizations Management
+### Tab 4: Job ↔ Criteria
+
+**Purpose:** Link scoring criteria to specific job titles
+
+Select a job title from the dropdown, then click criteria cards to toggle them on or off. A green **Linked** badge means that criterion will be scored for simulations in that role. Changes save instantly — no Save button needed.
+
+> **Tip:** Hover over any criterion card to see its description and weight.
+
+### Tab 5: Organizations Management
 
 **Purpose:** Manage multi-tenant organization settings (if enabled)
 
@@ -737,6 +758,7 @@ Default limits (may vary by organization):
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1 | Feb 26, 2026 | Replaced JSON scenario editor with plain-English form; added tooltips and tab intro banners; updated admin panel docs |
 | 1.0 | Feb 23, 2026 | Initial user guide |
 
 ---
