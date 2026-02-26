@@ -1,6 +1,6 @@
 # XPElevator — Lessons Learned
 
-> Last updated: 2026-02-26
+> Last updated: 2026-02-26 (sprint 11 audit)
 > Maintained by: Engineering team
 > Purpose: Prevent recurring issues — consult before starting new features or debugging.
 
@@ -36,6 +36,7 @@ Before starting a new feature, scan the relevant category tables for patterns th
 | **Global unique instead of scoped unique** (BL-056) | `job_titles.name` had `@unique` globally; in multi-tenant context, organisations legitimately share names | Change to `@@unique([orgId, name])` | In multi-tenant schemas, always scope unique constraints to `(orgId, fieldName)` |
 | **Missing cascade deletes** (BL-057) | No `onDelete: Cascade` on Session→Messages, Session→Scores, JobTitle→Scenarios; SQL deletes leave orphaned rows | Add `onDelete: Cascade` to all parent→child relations in schema | Define cascade behaviour at schema creation time, not retroactively |
 | **Column name mismatches in raw SQL** (BL-074) | Used `sc.created_at` when scores table has `scored_at`; used `s.simulation_type` when column is `type`; used `jt.updated_at` when job_titles has no such column | Always reference Prisma schema when writing SQL; use actual database column names (snake_case) not Prisma field names (camelCase) | Before writing any SQL query, check `prisma/schema.prisma` for exact column names; never assume column names match field names |
+| **INSERT missing `gen_random_uuid()`** (BL-078) | All `id` columns are `TEXT NOT NULL` with **no DB DEFAULT** — the database will not auto-generate IDs. Every `INSERT INTO ... VALUES (...)` must supply `gen_random_uuid()` explicitly. 4 POST routes were missing this, causing 500 errors on every create operation | Add `gen_random_uuid()` as the first value in the `VALUES` clause of every INSERT: `INSERT INTO criteria (id, name, ...) VALUES (gen_random_uuid(), ...)` | After writing any new INSERT statement, grep the VALUES clause for `gen_random_uuid()` — even if other tables have it, never assume. Keep a pre-merge grep: `grep -rn "INSERT INTO" src/app/api/ \| grep -v gen_random_uuid` |
 
 ---
 
@@ -49,6 +50,9 @@ Before starting a new feature, scan the relevant category tables for patterns th
 | **Wrong script field names** (BL-061) | Webhook accessed `script.persona` / `script.objective` (undefined) instead of `script.customerPersona` / `script.customerObjective`; AI had no persona context | Correct field names to match `ScenarioScript` type | Use typed property access (`script.customerPersona` via the TypeScript type) — never access scenario fields via untyped string keys |
 | **Wrong Groq history role mapping** (BL-062) | History mapped with `m.role === 'USER'` but DB stores `'AGENT'`/`'CUSTOMER'`; all history resolved to `assistant`, stripping user context | Map using correct DB role constants | Use `MessageRole` enum constants when mapping roles; add a role-mapping unit test |
 | **Unbounded session turns** (BL-053) | `ScenarioScript.maxTurns` defined in type but never checked; sessions run indefinitely, consuming unbounded Groq calls and DB rows | Count agent turns before each Groq call; end session when `maxTurns` is reached | Always implement resource limits (turn cap, token budget, timeout) alongside the resource that consumes them |
+| **Schema field stored but never used in AI logic** (BL-079) | `criteria.weight` (1–10) was saved to the DB and shown in the admin UI, but the `scoreSession()` prompt never mentioned it — all criteria were treated as equally important regardless of weight | Include `[importance: X/10]` per criterion in the scoring prompt; compute all averages as weighted means `sum(score×weight)/sum(weight)` | When adding a data field to a schema, trace its full lifecycle (store → prompt → aggregate → display); if any step is missing, the field is misleading to users |
+| **Dead code: exported function never imported** (BL-087) | `getNextCustomerMessage()` was exported from `src/lib/ai.ts` but never imported anywhere in the codebase; misleads future developers into thinking it's the active call path | Remove unused exports or add a `@deprecated` JSDoc comment | After adding any exported function, verify at least one import site exists within a week; use `grep -rn "getNextCustomerMessage" src/` |
+| **Feature divergence: phone path missing chat-path fixes** (BL-081/BL-082) | Chat route (`/api/chat`) received `buildSessionSystemPrompt` + `scoreSession` wiring, but the Telnyx webhook maintained a separate local 4-line stub `buildSystemPrompt` that was never updated. Phone sessions had a `// TODO` score comment — scoring never actually ran | The webhook must import and call the same shared functions from `@/lib/ai`: `buildSessionSystemPrompt` for prompts and `scoreSession` on resolve | Any feature added to the chat path must be simultaneously mirrored in the Telnyx webhook; treat them as a pair; add a checklist item: "phone ↔ chat parity" |
 
 ---
 
@@ -68,6 +72,10 @@ Before starting a new feature, scan the relevant category tables for patterns th
 |---|---|---|---|
 | **Stale closure in SpeechRecognition callbacks** | `finalTranscript` state captured at callback-creation time; `onend` always saw the initial empty string | Maintain a `finalTranscriptRef` updated in `useEffect`; read the ref inside event callbacks | Never read React state inside async browser event callbacks; always bridge via a ref |
 | **Wrong CSS keyframe for waveform animation** | Tailwind `bounce` uses `translateY` (vertical jump); audio bars need `scaleY` from bottom anchor | Custom `@keyframes bar-wave` using `scaleY` + `transform-origin: bottom` | Verify the exact CSS property required before reaching for a utility class; animate scale/origin separately |
+| **UI reads field name that doesn't match API response** (BL-083) | `GET /api/jobs/[id]/criteria` returns `{ id, name, ... }` but the admin UI read `d.criteriaId` — always `undefined`. The "Linked" vs "Add" badge always showed "Add" for every criterion regardless of actual state | Match UI field access (`d.id`) exactly to what the API `RETURNING`/`SELECT` clause emits | After writing a new API endpoint, trace every field alias to the UI consumer that reads it; grep for the camelCase version of every returned key |
+| **Hardcoded API path in UI button** (BL-084) | Admin debug panel had a "Test GROQ" button calling `fetch('/api/test-groq')` — a route that never existed (404). Should have been `/api/debug/groq` | Use a constant or search for the actual route file before hardcoding a URL | Before shipping any UI button that calls a specific API path, verify the route file exists with: `find src/app/api -name "route.ts" \| xargs grep -l "<keyword>"` |
+| **Score aggregation inconsistency across pages** (BL-085) | Analytics page used weighted mean but session detail page used a simple mean and didn't even fetch `c.weight` from the DB. The same score looked different depending on which page you were on | All score aggregation points must use `sum(score×weight)/sum(weight)`, and `weight` must be included in every SQL query that feeds a score display | Any page displaying a score total must fetch `weight` and use the weighted mean formula; grep for `reduce.*score` to find unchecked aggregations |
+| **Admin forms silently swallow API errors** (BL-086) | `save()` and `remove()` in all 4 admin tabs call `fetch()` but never check `res.ok`; on a 500 the function calls `refresh()` as if the operation succeeded — no user feedback, no error toast | After every `fetch()` in a mutation handler, check `if (!res.ok) { alert/toast the error; return; }` before calling `refresh()` | Every mutation function (save, delete, link) must have a `res.ok` guard; treat silent success as a bug |
 
 ---
 
@@ -90,6 +98,7 @@ Before starting a new feature, scan the relevant category tables for patterns th
 |---|---|---|---|
 | **633-line monolith page** (BL-068/069) | `simulate/[sessionId]/page.tsx` grew to 633 lines with three UI modes inline; became untestable | Extract `useChatSession` hook; split chat, phone, and voice into dedicated components; extract `MessageBubble` | Extract a custom hook at the first sign of complex async state; each distinct UI mode must be its own component |
 | **Missing multi-tenancy scope on all queries** (BL-049) | `orgId` columns exist in schema but no API route filters by them; all data is cross-tenant visible | Add `where: { orgId }` to every query; derive `orgId` from the authenticated session | If a multi-tenant schema is in place, every query must scope to `orgId` — enforce via code review checklist or lint rule |
+| **Shared helper function never called by a second consumer** (BL-082) | `buildSessionSystemPrompt` was the correct function to use in both chat and phone paths. The Telnyx webhook had its own local stub that was 4 lines vs 30 lines — less prompt richness, inconsistent behaviour, harder to maintain | Export shared AI helper functions from `src/lib/ai.ts`; every entry point (chat route, phone webhook) imports from that single source | When a function is "shared," verify every logical consumer imports it; a local copy is a divergence waiting to happen |
 
 ---
 
@@ -99,6 +108,7 @@ Before starting a new feature, scan the relevant category tables for patterns th
 |---|---|
 | **Using Prisma Client in Cloudflare Workers** | **NEVER use `prisma.*` in edge runtime — use raw SQL via `@neondatabase/serverless`** |
 | **Using NPM packages with Node.js dependencies in Cloudflare Workers** | **Verify packages are edge-compatible before installing; runtime polyfills don't work because bundlers inline code at build time** |
+| **Every INSERT needs `gen_random_uuid()` — no DB default exists** | **`id TEXT NOT NULL` columns have no DB DEFAULT; every `INSERT INTO` must include `gen_random_uuid()` in the VALUES clause** |
 | **Schema column names vs Prisma field names in SQL** | **Always check `schema.prisma` for actual column names (snake_case) before writing SQL** |
 | **Auth helpers with Prisma calls** | **Auth helpers run on EVERY route — must use edge-compatible raw SQL only** |
 | Importing Prisma WASM client in Node.js dev | Import `@prisma/client`; WASM only for Workers build |
@@ -114,6 +124,12 @@ Before starting a new feature, scan the relevant category tables for patterns th
 | No resource limits on external API calls | Implement turn cap, timeout, or token budget alongside the call |
 | Monolith page components mixing multiple UI modes | One UI mode = one component; complex state = one custom hook |
 | Missing `orgId` filter on queries | Every query in a multi-tenant system must include `where: { orgId }` |
+| Schema field defined but ignored in downstream logic | Trace every new field: store → AI prompt → aggregate → display. Any missing step is a lie to users |
+| UI field name doesn't match API response key | Before reading `d.someField` in the UI, verify the exact key emitted by `RETURNING`/`SELECT` in the API |
+| Hardcoded API path in UI | Before shipping any fetch call, verify the route file exists; never guess the URL |
+| Inconsistent score aggregation across pages | All score totals must use the same formula (weighted mean); grep `reduce.*score` before merging |
+| Phone and chat paths diverging silently | Any prompt, scoring, or turn logic added to the chat path must be simultaneously applied to the Telnyx webhook |
+| Mutation handlers not checking `res.ok` | Every `fetch()` in a save/delete handler must check `if (!res.ok)` and surface the error before calling `refresh()` |
 
 ---
 
@@ -121,6 +137,10 @@ Before starting a new feature, scan the relevant category tables for patterns th
 
 - [ ] **All API routes and server components use raw SQL (`@neondatabase/serverless`), NOT Prisma Client**
 - [ ] **All NPM packages used in API routes are verified edge-compatible (no Node.js runtime dependencies like `http`, `fs`, `crypto`)**
+- [ ] **Every new `INSERT INTO` statement includes `gen_random_uuid()` for the `id` column (no DB default exists)**
+- [ ] **All score/aggregate computations use weighted mean `sum(score×weight)/sum(weight)` — not simple mean**
+- [ ] **Phone (Telnyx webhook) path has the same prompt, scoring, and turn logic as the chat path**
+- [ ] **Every `fetch()` in an admin mutation handler checks `res.ok` before calling `refresh()`**
 - [ ] All SQL queries use actual database column names from `schema.prisma` (snake_case), not Prisma field names
 - [ ] All Prisma relations have `@@index` on FK columns and `onDelete` behaviour defined
 - [ ] `npx prisma generate` has been run and dev server restarted after any schema change
@@ -135,6 +155,9 @@ Before starting a new feature, scan the relevant category tables for patterns th
 - [ ] New page components exceeding ~150 lines or containing async state have been refactored into hooks and sub-components
 - [ ] Cloudflare build (`npx @opennextjs/cloudflare build`) has been verified after any dependency change
 - [ ] DB writes introduced during setup have been verified with an explicit read-back query
+- [ ] UI field access (`d.someField`) verified against exact column aliases in the API `SELECT`/`RETURNING` clause
+- [ ] No hardcoded API URL paths in the UI — every `fetch('/api/...')` has a verified matching route file
+- [ ] No exported functions in `src/lib/ai.ts` (or other shared libs) that have zero import sites
 
 ---
 

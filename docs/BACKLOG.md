@@ -1,6 +1,6 @@
 # XPElevator — Product & Engineering Backlog
 
-Last evaluated: 2026-02-24 (sprint 10 — API auth guards, Credentials provider fix, Telnyx signature verification, multi-tenancy org filtering)  
+Last evaluated: 2026-02-26 (sprint 11 — correctness & diligence audit: INSERT IDs, weight wiring, phone scoring, criteria UI, score aggregation)  
 Format: `[ID] Title — Priority | Status | Notes`
 
 ---
@@ -35,6 +35,7 @@ Format: `[ID] Title — Priority | Status | Notes`
 | BL-045 | Fix `@opennextjs/cloudflare` build failure (exit code 1) | `done` | Fixed type error in `auth-api.ts` (`Headers` vs `Request` parameter); build now succeeds in 19.6s + 14.4s bundling |
 | BL-046 | Add auth guards to all API routes (currently only `/admin` is protected) | `done` | Created `src/lib/auth-api.ts` with `requireAuth()`/`withAuth()` helpers; all 15 API route files now check auth; ADMIN role required for write operations on criteria/jobs/scenarios/orgs |
 | BL-047 | Credentials provider grants admin access to any non-empty username | `done` | `auth.ts` now uses email-based DB lookup to verify actual `User.role`; dev mode auto-creates MEMBER users; middleware expanded to protect `/api/*`, `/simulate/*`, `/sessions/*`, `/analytics/*` |
+| BL-078 | Missing `gen_random_uuid()` in 4 POST INSERT routes | `done` | `POST /api/criteria`, `POST /api/jobs`, `POST /api/scenarios`, `POST /api/jobs/[id]/criteria` all missing `id` value in INSERT; caused 500 on every create. Fixed in commit `bb6c8a2` |
 
 ---
 
@@ -79,6 +80,10 @@ Format: `[ID] Title — Priority | Status | Notes`
 | ID | Title | Status | Notes |
 |----|-------|--------|-------|
 | BL-020 | Add `error.tsx` global error boundary | `done` | `src/app/error.tsx` with retry + home links |
+| BL-083 | `JobCriteriaTab` always showed "Add" — never "Linked" | `done` | `GET /api/jobs/[id]/criteria` returns `{ id, ... }` but UI read `d.criteriaId` (always `undefined`). Fixed to `d.id`. Fixed in commit `657353e` |
+| BL-084 | Admin debug GROQ button called `/api/test-groq` (404) | `done` | Button called `/api/test-groq` which doesn't exist. Correct route is `/api/debug/groq`. Fixed in commit `657353e` |
+| BL-085 | Session detail `/sessions/[id]` used simple mean for total score | `done` | SQL query didn't fetch `c.weight`; total score computed as `avg(score)` instead of `sum(score×weight)/sum(weight)`. Now consistent with analytics. Fixed in commit `657353e` |
+| BL-086 | Admin `save()`/`remove()` silently swallow API errors | `open` | All 4 tabs call `refresh()` regardless of `res.ok`; 500 errors appear as silent success. Needs `if (!res.ok) { toast error; return; }` guard in each mutation handler |
 | BL-021 | Add `loading.tsx` for simulate and sessions routes | `done` | Skeleton loaders for both routes |
 | BL-022 | Add `not-found.tsx` (404 page) | `done` | `src/app/not-found.tsx` |
 | BL-023 | Session detail page `/sessions/[id]` | `done` | Full transcript + per-criteria score breakdown |
@@ -98,6 +103,10 @@ Format: `[ID] Title — Priority | Status | Notes`
 | ID | Title | Status | Notes |
 |----|-------|--------|-------|
 | BL-030 | Seed scenarios with realistic `script` JSON payloads | `done` | All 6 scenarios seeded via Neon MCP with personas + hints |
+| BL-079 | Criteria `weight` field ignored in AI scoring prompt | `done` | `scoreSession()` prompt listed criteria without importance; all criteria treated equally. Fixed: prompt now shows `[importance: X/10]` per criterion. Fixed in commit `45af3e8` |
+| BL-080 | Analytics aggregates used simple mean instead of weighted mean | `done` | All 4 aggregates in `GET /api/analytics` (`overallAvg`, `scoreTrend`, `byJobTitle`, `byType`) rewritten to use `sum(score×weight)/sum(weight)`. Fixed in commit `45af3e8` |
+| BL-081 | Phone sessions never scored on `[RESOLVED]` | `done` | Telnyx webhook `call.gather.ended` handler had a `// TODO` comment in place of actual scoring; `scoreSession()` never ran for phone calls. Fixed in commit `45af3e8` |
+| BL-082 | Telnyx webhook used a local 4-line `buildSystemPrompt` stub | `done` | Webhook had its own `buildSystemPrompt` with no persona details, hints, or difficulty guidance. Now imports and calls `buildSessionSystemPrompt` from `src/lib/ai.ts`. Fixed in commit `45af3e8` |
 | BL-031 | End-of-conversation detection (AI signals end naturally) | `done` | [RESOLVED] token from AI → auto-end via SSE session_ending/session_ended |
 | BL-032 | Scoring: attach justification text per criterion to session view | `done` | Feedback shown in session detail page |
 | BL-053 | Enforce `maxTurns` in chat route | `done` | Agent turn count checked before Groq call; session auto-ends and scores when `ScenarioScript.maxTurns` is reached |
@@ -133,6 +142,8 @@ Format: `[ID] Title — Priority | Status | Notes`
 |----|-------|-------|
 | BL-056 | Scope `job_titles.name` unique to `(orgId, name)` | Global `@unique` on `name` breaks multi-tenancy — two orgs can't share a job title name |
 | BL-057 | Add `onDelete: Cascade` on Session→Messages, Session→Scores, JobTitle→Scenarios | Prevents orphaned rows on direct SQL deletes |
+| BL-086 | Admin UI `save()`/`remove()` silently swallow 500 errors | All tabs: add `if (!res.ok) { show error; return; }` before `refresh()` — currently a 500 looks like a success |
+| BL-087 | Remove `getNextCustomerMessage` dead code from `src/lib/ai.ts` | Exported but never imported anywhere; misleads future developers about the active call path |
 | BL-063 | Add `validate.mjs` integration diagnostic script | `done` | `node validate.mjs` from project root — tests env vars, DB connectivity, scenario scripts, Groq API (streaming + non-streaming), E2E chat with scoring, Telnyx API |
 | BL-064 | Clean up 8 stuck `IN_PROGRESS` sessions with 0 messages | `done` | 8 sessions (PHONE/CHAT/VOICE) marked `ABANDONED` via SQL; no messages existed so no data loss |
 | BL-065 | Suppress `outputFileTracingRoot` lockfile warning in `next.config.ts` | `done` | Added `outputFileTracingRoot: path.join(__dirname)` to next.config.ts |
@@ -209,6 +220,14 @@ Format: `[ID] Title — Priority | Status | Notes`
 | BL-052 | DB indexes on FK columns | Sprint 8 |
 | BL-053 | Enforce `maxTurns` in chat route | Sprint 8 |
 | BL-071 | Voice hands-free auto-listen mode | Sprint 8 |
+| BL-078 | Missing `gen_random_uuid()` in 4 POST INSERT routes (criteria, jobs, scenarios, job-criteria) | Sprint 11 |
+| BL-079 | Criteria weight wired into AI scoring prompt + analytics weighted means | Sprint 11 |
+| BL-080 | Analytics aggregates rewritten to use weighted mean | Sprint 11 |
+| BL-081 | Phone sessions now scored on `[RESOLVED]` (was a TODO) | Sprint 11 |
+| BL-082 | Telnyx webhook uses full `buildSessionSystemPrompt` (was local 4-line stub) | Sprint 11 |
+| BL-083 | `JobCriteriaTab` `d.criteriaId` → `d.id` field name fix | Sprint 11 |
+| BL-084 | Admin debug GROQ button URL fixed (`/api/test-groq` → `/api/debug/groq`) | Sprint 11 |
+| BL-085 | Session detail `/sessions/[id]` weighted score + weight SQL column | Sprint 11 |
 
 ---
 
@@ -226,3 +245,9 @@ Format: `[ID] Title — Priority | Status | Notes`
 4. **BL-051** — Telnyx webhook signature verification
 5. **BL-056** — Fix `job_titles.name` unique constraint to `(orgId, name)` scope
 6. **BL-057** — Add `onDelete: Cascade` on Session→Messages/Scores, JobTitle→Scenarios
+
+### Sprint 11 — Admin UX + Dead-Code Cleanup
+1. **BL-086** — Admin `save()`/`remove()` error handling (check `res.ok`, toast on failure) 🔴 **affects all 4 admin tabs**
+2. **BL-087** — Remove `getNextCustomerMessage` dead code from `src/lib/ai.ts`
+3. **BL-056** — Scope `job_titles.name` unique to `(orgId, name)` (carry forward)
+4. **BL-057** — Add cascade deletes (carry forward)

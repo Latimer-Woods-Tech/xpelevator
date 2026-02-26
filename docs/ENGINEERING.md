@@ -373,7 +373,7 @@ npm run preview               # pages:build + bundle:worker + wrangler pages dev
 npm run deploy                # pages:build + bundle:worker + wrangler pages deploy
 ```
 
-> **Note**: The build currently fails (BL-045). The active issue is likely `groq-sdk` CJS/ESM interop or `next-auth` v5 beta + React 19 incompatibility during esbuild bundling for CF Workers. The `open-next.config.ts` uses `dummy` adapters for cache/queue — these will need real CF KV/Queue bindings for production ISR/caching.
+> **Note**: Ensure `npx next build` completes and produces `.next/required-server-files.json` before running `npx @opennextjs/cloudflare build`. If the Next.js build exits early, the OpenNext worker will have no routes and deploy as a 404.
 
 ### Environment Variables in Cloudflare
 Set via Cloudflare dashboard → Pages → project → Settings → Environment variables (Production & Preview), or:
@@ -471,8 +471,9 @@ If `npm run pages:build` (OpenNext CF) fails:
 
 1. Create `src/app/api/<resource>/route.ts`
 2. Export `GET`, `POST` etc handlers
-3. Add corresponding types if needed in `src/types/`
-4. Update `docs/ARCHITECTURE.md` if it changes the system design
+3. **If handler writes to the DB**: every `INSERT INTO ... VALUES (...)` must include `gen_random_uuid()` as the `id` value — there is no DB default for any `id` column
+4. Add corresponding types if needed in `src/types/`
+5. Update `docs/ARCHITECTURE.md` if it changes the system design
 
 ### Add a New Page
 
@@ -494,6 +495,7 @@ If `npm run pages:build` (OpenNext CF) fails:
 2. Add a new exported function with a well-typed signature
 3. Keep system prompts as constants at the top of the file
 4. Document the prompt purpose and expected output format
+5. **Ensure every entry point that needs the prompt imports from `src/lib/ai.ts`** — never duplicate prompt logic locally in route handlers (see BL-082 in LESSONS_LEARNED.md)
 
 ### Run a Manual DB Query (via Neon MCP)
 Use the Neon MCP tool (`mcp_neon_run_sql`) with project ID `aged-butterfly-52244878`.
