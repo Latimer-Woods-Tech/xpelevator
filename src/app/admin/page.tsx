@@ -69,17 +69,21 @@ function CriteriaTab() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const save = async () => {
+    let res: Response;
     if (editingId) {
-      await fetch(`/api/criteria/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      res = await fetch(`/api/criteria/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
     } else {
-      await fetch('/api/criteria', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      res = await fetch('/api/criteria', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
     }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Save failed: ${(body as any).error || res.statusText}`); return; }
     setEditingId(null); setShowForm(false); setForm(blankCriteria); refresh();
   };
 
   const remove = async (id: string) => {
     if (!confirm('Delete this criteria?')) return;
-    await fetch(`/api/criteria/${id}`, { method: 'DELETE' }); refresh();
+    const res = await fetch(`/api/criteria/${id}`, { method: 'DELETE' });
+    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Delete failed: ${(body as any).error || res.statusText}`); return; }
+    refresh();
   };
 
   const startEdit = (c: Criteria) => {
@@ -223,17 +227,21 @@ function JobTitlesTab() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const save = async () => {
+    let res: Response;
     if (editingId) {
-      await fetch(`/api/jobs/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      res = await fetch(`/api/jobs/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
     } else {
-      await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      res = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
     }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Save failed: ${(body as any).error || res.statusText}`); return; }
     setEditingId(null); setShowForm(false); setForm(blankJob); refresh();
   };
 
   const remove = async (id: string) => {
     if (!confirm('Delete this job title? This may affect linked scenarios.')) return;
-    await fetch(`/api/jobs/${id}`, { method: 'DELETE' }); refresh();
+    const res = await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
+    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Delete failed: ${(body as any).error || res.statusText}`); return; }
+    refresh();
   };
 
   const startEdit = (j: JobTitle) => {
@@ -342,17 +350,21 @@ function ScenariosTab() {
       hints: form.hints.filter(h => h.trim()),
     };
     const body = { name: form.name, jobTitleId: form.jobTitleId, type: form.type, description: form.description, script };
+    let res: Response;
     if (editingId) {
-      await fetch(`/api/scenarios/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      res = await fetch(`/api/scenarios/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     } else {
-      await fetch('/api/scenarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      res = await fetch('/api/scenarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     }
+    if (!res.ok) { const body2 = await res.json().catch(() => ({})); alert(`Save failed: ${(body2 as any).error || res.statusText}`); return; }
     setEditingId(null); setShowForm(false); setForm(blankScenario); refresh();
   };
 
   const remove = async (id: string) => {
     if (!confirm('Delete this scenario?')) return;
-    await fetch(`/api/scenarios/${id}`, { method: 'DELETE' }); refresh();
+    const res = await fetch(`/api/scenarios/${id}`, { method: 'DELETE' });
+    if (!res.ok) { const body2 = await res.json().catch(() => ({})); alert(`Delete failed: ${(body2 as any).error || res.statusText}`); return; }
+    refresh();
   };
 
   const startEdit = (s: Scenario) => {
@@ -766,22 +778,24 @@ function OrgsTab() {
 
   const createOrg = async () => {
     if (!form.name.trim()) return;
-    await fetch('/api/orgs', {
+    const res = await fetch('/api/orgs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
     });
+    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Create failed: ${(body as any).error || res.statusText}`); return; }
     setForm({ name: '', plan: 'FREE' });
     setShowForm(false);
     refresh();
   };
 
   const changePlan = async (orgId: string, plan: Org['plan']) => {
-    await fetch(`/api/orgs/${orgId}`, {
+    const res = await fetch(`/api/orgs/${orgId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan }),
     });
+    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Plan update failed: ${(body as any).error || res.statusText}`); return; }
     refresh();
   };
 
@@ -792,27 +806,30 @@ function OrgsTab() {
       alert('Cannot delete: this org has simulation sessions. Remove sessions first.');
       return;
     }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Delete failed: ${(body as any).error || res.statusText}`); return; }
     refresh();
   };
 
   const inviteMember = async (orgId: string) => {
     if (!inviteEmail.trim()) return;
-    await fetch(`/api/orgs/${orgId}/members`, {
+    const res = await fetch(`/api/orgs/${orgId}/members`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
     });
+    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Invite failed: ${(body as any).error || res.statusText}`); return; }
     setInviteEmail('');
     loadMembers(orgId);
   };
 
   const removeMember = async (orgId: string, userId: string) => {
     if (!confirm('Remove this member from the org?')) return;
-    await fetch(`/api/orgs/${orgId}/members`, {
+    const res = await fetch(`/api/orgs/${orgId}/members`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),
     });
+    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Remove failed: ${(body as any).error || res.statusText}`); return; }
     loadMembers(orgId);
   };
 

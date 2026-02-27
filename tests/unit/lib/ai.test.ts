@@ -5,8 +5,7 @@
  *   1. System prompt construction        — bridge 3 entrance gate
  *   2. Prompt personalises per difficulty — bridge guard checks ticket
  *   3. Fallback script when no script     — missing bridge still passable
- *   4. getNextCustomerMessage maps roles  — man begins crossing bridge
- *   5. scoreSession parses valid JSON     — man crosses successfully
+ *   4. scoreSession parses valid JSON     — man crosses successfully
  *   6. scoreSession handles bad JSON      — bridge survives a fall, returns []
  *   7. scoreSession clamps scores 1–10   — no one falls off the edge
  *   8. scoreSession returns [] for empty criteria — no bridge, no crossing
@@ -43,7 +42,6 @@ import {
   generateResponse,
   scoreSession,
   streamNextCustomerMessage,
-  getNextCustomerMessage,
 } from '@/lib/ai';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -126,36 +124,6 @@ describe('lib/ai — generateResponse', () => {
     mockCreate.mockResolvedValueOnce({ choices: [] });
     const result = await generateResponse([]);
     expect(result).toBe('');
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('lib/ai — getNextCustomerMessage', () => {
-  beforeEach(() => mockCreate.mockReset());
-
-  it('maps CUSTOMER role → assistant, AGENT → user in conversation history', async () => {
-    mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content: 'I still have no internet!' } }],
-    });
-
-    const history = [
-      { role: 'CUSTOMER' as const, content: 'My internet is down.' },
-      { role: 'AGENT' as const, content: 'Have you tried restarting?' },
-    ];
-
-    const systemPrompt = buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT);
-    const result = await getNextCustomerMessage(systemPrompt, history);
-
-    expect(result).toBe('I still have no internet!');
-
-    // Verify the API was called with correctly mapped roles
-    const callArgs = mockCreate.mock.calls[0][0] as {
-      messages: Array<{ role: string; content: string }>;
-    };
-    expect(callArgs.messages[0].role).toBe('system');
-    expect(callArgs.messages[1].role).toBe('assistant'); // CUSTOMER → assistant
-    expect(callArgs.messages[2].role).toBe('user');      // AGENT → user
   });
 });
 

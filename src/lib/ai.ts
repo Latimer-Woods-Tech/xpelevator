@@ -117,25 +117,6 @@ export function buildSessionSystemPrompt(
 }
 
 /**
- * Get the next AI customer message given the conversation history.
- * Stores history as DB messages (caller's responsibility to provide full history).
- */
-export async function getNextCustomerMessage(
-  systemPrompt: string,
-  conversationHistory: Array<{ role: 'CUSTOMER' | 'AGENT'; content: string }>
-): Promise<string> {
-  const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt },
-    ...conversationHistory.map(m => ({
-      role: m.role === 'CUSTOMER' ? ('assistant' as const) : ('user' as const),
-      content: m.content,
-    })),
-  ];
-
-  return generateResponse(messages);
-}
-
-/**
  * Streaming version — get the next customer message as a stream.
  */
 export async function* streamNextCustomerMessage(
