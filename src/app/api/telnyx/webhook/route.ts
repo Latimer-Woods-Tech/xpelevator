@@ -85,7 +85,7 @@ export async function POST(request: Request) {
 
   try {
     switch (event_type) {
-      // ── Call answered — AI speaks opening ───────────────────────────────────
+      // ── Call answered — AI speaks opening AND starts listening ────────────
       case 'call.answered': {
         if (!state) break;
 
@@ -121,34 +121,32 @@ export async function POST(request: Request) {
         // Save AI's opening message to DB (AI = CUSTOMER role; trainee = AGENT role)
         await saveMessage(state.sessionId, 'CUSTOMER', cleanOpening);
 
-        // Speak the opening line, then gather
+        // Speak the opening AND immediately start gathering — one atomic action.
+        // Using gather_using_speak (not separate callSpeak + callGather) prevents
+        // an infinite call.speak.ended loop since gather_using_speak also fires
+        // call.speak.ended for its TTS portion.
         const newState = { ...state, turnCount: 1 };
-        await callSpeak(call_control_id, {
-          payload: cleanOpening,
+        await callGather(call_control_id, {
+          spokenPayload: cleanOpening,
           clientState: encodeClientState(newState as unknown as Record<string, unknown>),
         });
         break;
       }
 
-      // ── AI finished speaking — start gathering caller input ──────────────────
+      // ── call.speak.ended — only fires for final callSpeak before hangup ────
+      // gather_using_speak also fires call.speak.ended for its TTS portion, but
+      // we ignore it here — the conversation is driven entirely by call.gather.ended.
       case 'call.speak.ended': {
         if (!state) break;
-
-        // Check if conversation was flagged as resolved (session ended by AI)
         const sessionRows = await sql`
           SELECT status FROM simulation_sessions WHERE id = ${state.sessionId}
         `;
         const session: any = sessionRows[0] ?? null;
         if (session?.status === 'COMPLETED') {
           await callHangup(call_control_id);
-          break;
         }
-
-        await callGather(call_control_id, {
-          timeout: 8000,
-          speechEndTimeout: 1500,
-          clientState: client_state,
-        });
+        // Otherwise: this is the speak.ended from gather_using_speak — ignore,
+        // Telnyx is already in listening mode; call.gather.ended will follow.
         break;
       }
 
@@ -158,14 +156,14 @@ export async function POST(request: Request) {
 
         const transcript = payload.transcript?.trim();
         if (!transcript) {
-          // No speech detected — ask AI to prompt again or hang up after too many retries
+          // No speech detected — re-prompt with a short nudge
           const turn = state.turnCount ?? 0;
           if (turn > 10) {
             await callHangup(call_control_id);
           } else {
             await callGather(call_control_id, {
-              timeout: 8000,
-              speechEndTimeout: 1500,
+              spokenPayload: 'Are you still there?',
+              timeout: 10000,
               clientState: client_state,
             });
           }
@@ -264,10 +262,19 @@ export async function POST(request: Request) {
           turnCount: (state.turnCount ?? 0) + 1,
         };
 
-        await callSpeak(call_control_id, {
-          payload: cleanText,
-          clientState: encodeClientState(newState as unknown as Record<string, unknown>),
-        });
+        if (isResolved) {
+          // Speak the farewell, then call.speak.ended will trigger hangup
+          await callSpeak(call_control_id, {
+            payload: cleanText,
+            clientState: encodeClientState(newState as unknown as Record<string, unknown>),
+          });
+        } else {
+          // Speak AI reply AND immediately start listening for next caller turn
+          await callGather(call_control_id, {
+            spokenPayload: cleanText,
+            clientState: encodeClientState(newState as unknown as Record<string, unknown>),
+          });
+        }
         break;
       }
 

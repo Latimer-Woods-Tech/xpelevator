@@ -107,27 +107,38 @@ export async function callSpeak(callControlId: string, payload: {
   return res.json();
 }
 
-/** Gather speech input from the caller (Speech-to-Text). */
+/**
+ * Speak text AND immediately start listening for the caller's response.
+ *
+ * This is the correct Telnyx Call Control conversation pattern: every AI turn
+ * uses gather_using_speak so speaking + STT gathering happen in one atomic action.
+ * This avoids a speak → call.speak.ended → gather → call.speak.ended infinite loop
+ * that occurs when callSpeak and callGather are used as separate sequential steps.
+ *
+ * Events fired by Telnyx (in order):
+ *   1. call.speak.started  — TTS begins
+ *   2. call.speak.ended    — TTS finished (ignore this in the webhook handler)
+ *   3. call.gather.ended   — caller finished speaking; payload.transcript has the STT result
+ */
 export async function callGather(callControlId: string, payload: {
-  timeout?: number;       // Overall inactivity timeout in ms before gather ends
-  speechEndTimeout?: number; // Silence gap after speech ends before STT finalises (ms)
+  spokenPayload: string;      // The AI text to speak before listening
+  speechEndTimeout?: number;  // Silence-after-speech before STT finalises (ms)
+  timeout?: number;           // Overall inactivity timeout (ms)
   clientState?: string;
 }) {
   const res = await fetch(`${TELNYX_BASE}/calls/${callControlId}/actions/gather_using_speak`, {
     method: 'POST',
     headers: telnyxHeaders(),
     body: JSON.stringify({
-      // A short SSML break activates the TTS engine with no audible speech,
-      // allowing Telnyx to enter speech-recognition (STT) gather mode.
-      payload: '<speak><break time="200ms"/></speak>',
+      payload: payload.spokenPayload,
       language: 'en-US',
       voice: 'female',
-      // speech_end_timeout (not speech_timeout_millis) activates STT mode.
-      // Without this, Telnyx defaults to DTMF-only and never returns a transcript.
+      // speech_end_timeout activates STT mode (not speech_timeout_millis).
+      // Without this, Telnyx defaults to DTMF-only and returns no transcript.
       speech_end_timeout: payload.speechEndTimeout ?? 1500,
       minimum_phrase_duration: 500,
       speech_recognition_language: 'en-US',
-      timeout_millis: payload.timeout ?? 8000,
+      timeout_millis: payload.timeout ?? 10000,
       client_state: payload.clientState,
     }),
   });
