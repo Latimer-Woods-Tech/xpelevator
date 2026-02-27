@@ -130,6 +130,7 @@ export async function callSpeak(callControlId: string, payload: {
 export async function startTranscription(callControlId: string, options: {
   engine?: 'A' | 'B' | 'Google' | 'Telnyx' | 'Deepgram';
   language?: string;
+  track?: 'inbound' | 'outbound' | 'both';
   clientState?: string;
 }) {
   const engine = options.engine ?? 'Telnyx';
@@ -140,6 +141,7 @@ export async function startTranscription(callControlId: string, options: {
       language: options.language ?? 'en',  // short code only; 'en-US' is invalid for Telnyx engine
       transcription_model: 'openai/whisper-large-v3-turbo',
     },
+    transcription_tracks: options.track ?? 'inbound',  // 'inbound' = caller's voice only
     client_state: options.clientState,
   };
   console.log('[telnyx] transcription_start request:', JSON.stringify({ ...body, client_state: '<redacted>' }));

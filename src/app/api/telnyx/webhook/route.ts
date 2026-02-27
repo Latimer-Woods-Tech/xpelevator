@@ -143,6 +143,17 @@ async function handleEvent(
       case 'call.answered': {
         if (!state) break;
 
+        // IDEMPOTENCY: skip if we've already processed call.answered for this session.
+        // Telnyx retries webhooks after ~10s if no 200 is received. Duplicate call.answered
+        // events cause two AI voices speaking simultaneously and two openings saved to DB.
+        const existingMsgs = await sql`
+          SELECT id FROM chat_messages WHERE session_id = ${state.sessionId} LIMIT 1
+        `;
+        if ((existingMsgs as any[]).length > 0) {
+          console.log('[telnyx] call.answered: already processed (idempotency skip), session:', state.sessionId);
+          break;
+        }
+
         // Load scenario script for the opening line
         const scenarioRows = await sql`
           SELECT id, script FROM scenarios WHERE id = ${state.scenarioId}
@@ -194,11 +205,18 @@ async function handleEvent(
         }
         // Start real-time transcription — fires call.transcription webhooks
         console.log('[telnyx] call.speak.ended: calling startTranscription...');
-        await startTranscription(call_control_id, {
-          engine: 'Telnyx',
-          clientState: client_state,
-        });
-        console.log('[telnyx] call.speak.ended: startTranscription OK');
+        try {
+          await startTranscription(call_control_id, {
+            engine: 'Telnyx',
+            track: 'inbound',  // only transcribe the caller's voice (not AI TTS)
+            clientState: client_state,
+          });
+          console.log('[telnyx] call.speak.ended: startTranscription succeeded');
+        } catch (transcriptionErr) {
+          console.error('[telnyx] call.speak.ended: startTranscription FAILED:', transcriptionErr);
+          // Hangup gracefully if transcription unavailable
+          await callHangup(call_control_id).catch(() => {});
+        }
         break;
       }
 
