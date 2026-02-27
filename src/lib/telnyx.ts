@@ -137,7 +137,6 @@ export async function callGather(callControlId: string, payload: {
       // Without this, Telnyx defaults to DTMF-only and returns no transcript.
       speech_end_timeout: payload.speechEndTimeout ?? 1500,
       minimum_phrase_duration: 500,
-      speech_recognition_language: 'en-US',
       timeout_millis: payload.timeout ?? 10000,
       client_state: payload.clientState,
     }),

@@ -4,15 +4,21 @@
  *
  * Receives Telnyx Call Control webhook events and drives the AI phone simulation.
  *
+ * CRITICAL: Return 200 to Telnyx IMMEDIATELY (before any async work) using
+ * CF Workers ctx.waitUntil(). Telnyx retries the webhook after ~10s with no
+ * response, causing duplicate call.answered events that fire conflicting
+ * gather_using_speak requests that cancel each other — leaving the call silent.
+ *
  * Flow:
- *   1. call.answered      → AI speaks the scenario opening line, then listens
- *   2. call.gather.ended  → STT result arrives; send to Groq AI; speak the response
- *   3. call.speak.ended   → AI finished speaking; start listening again (gather)
- *   4. call.hangup        → End session, trigger scoring
+ *   1. call.answered      → gather_using_speak(opening) — speaks AND listens
+ *   2. call.gather.ended  → STT transcript → Groq → gather_using_speak(aiReply)
+ *   3. call.speak.ended   → no-op (fired by gather TTS); hangup if COMPLETED
+ *   4. call.hangup        → mark session ABANDONED if not already COMPLETED
  *
  * Event reference: https://developers.telnyx.com/docs/call-control/receiving-webhooks
  */
 import { NextResponse } from 'next/server';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { getGroqClient } from '@/lib/groq-fetch';
 import { buildSessionSystemPrompt, scoreSession } from '@/lib/ai';
 import { sql } from '@/lib/db';
@@ -83,8 +89,39 @@ export async function POST(request: Request) {
     }
   }
 
+  // ── Return 200 to Telnyx IMMEDIATELY, then process in background ─────────────
+  // Telnyx retries the webhook after ~10s with no response. Groq + Neon cold
+  // starts can take 5–15s each, easily exceeding that timeout. Duplicate
+  // call.answered retries create conflicting gather requests that cancel each
+  // other, making the call permanently silent.
+  //
+  // ctx.waitUntil() keeps the CF Worker alive after the response is sent.
+  const processingPromise = handleEvent(event_type, payload, state, call_control_id, client_state);
   try {
-    switch (event_type) {
+    const { ctx } = getCloudflareContext();
+    ctx.waitUntil(processingPromise.catch(err =>
+      console.error(`[telnyx] webhook error (${event_type}):`, err)
+    ));
+  } catch {
+    // Local dev — not in a CF Worker context; await directly
+    await processingPromise.catch(err =>
+      console.error(`[telnyx] webhook error (${event_type}):`, err)
+    );
+  }
+
+  return NextResponse.json({ received: true });
+}
+
+// ── Event processor (runs in background via waitUntil) ─────────────────────────
+
+async function handleEvent(
+  event_type: string,
+  payload: TelnyxWebhookPayload['data']['payload'],
+  state: TelnyxClientState | null,
+  call_control_id: string,
+  client_state: string | undefined,
+) {
+  switch (event_type) {
       // ── Call answered — AI speaks opening AND starts listening ────────────
       case 'call.answered': {
         if (!state) break;
@@ -293,18 +330,9 @@ export async function POST(request: Request) {
         // Acknowledge unhandled events silently
         break;
     }
-  } catch (err) {
-    console.error(`Telnyx webhook error for ${event_type}:`, err);
-    // Always return 200 to Telnyx to prevent retries for app errors
-  }
-
-  // Telnyx expects a 200 response for all webhook events
-  return NextResponse.json({ received: true });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-
 
 async function saveMessage(sessionId: string, role: 'CUSTOMER' | 'AGENT', content: string) {
   await sql`
