@@ -133,18 +133,14 @@ export async function startTranscription(callControlId: string, options: {
   track?: 'inbound' | 'outbound' | 'both';
   clientState?: string;
 }) {
-  const engine = options.engine ?? 'Telnyx';
+  // Use 'Telnyx' (canonical engine name, alias for Whisper) — no external creds needed.
+  // Keep body minimal: top-level transcription_engine + transcription_tracks only.
   const body: Record<string, unknown> = {
-    transcription_engine: engine,
-    transcription_engine_config: {
-      transcription_engine: engine,
-      language: options.language ?? 'en',  // short code only; 'en-US' is invalid for Telnyx engine
-      transcription_model: 'openai/whisper-large-v3-turbo',
-    },
-    transcription_tracks: options.track ?? 'inbound',  // 'inbound' = caller's voice only
+    transcription_engine: 'Telnyx',
+    transcription_tracks: options.track ?? 'inbound',  // 'inbound' = caller voice only, not AI TTS
     client_state: options.clientState,
   };
-  console.log('[telnyx] transcription_start request:', JSON.stringify({ ...body, client_state: '<redacted>' }));
+  console.log('[telnyx] transcription_start request body:', JSON.stringify({ ...body, client_state: '<redacted>' }));
   const res = await fetch(`${TELNYX_BASE}/calls/${callControlId}/actions/transcription_start`, {
     method: 'POST',
     headers: telnyxHeaders(),
