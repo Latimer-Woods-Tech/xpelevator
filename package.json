@@ -1,0 +1,36 @@
+{
+  "name": "xpelevator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@adrper79-dot/analytics": "^0.2.0",
+    "@adrper79-dot/auth": "^0.2.0",
+    "@adrper79-dot/deploy": "^0.2.0",
+    "@adrper79-dot/errors": "^0.2.0",
+    "@adrper79-dot/logger": "^0.2.0",
+    "@adrper79-dot/monitoring": "^0.2.0",
+    "@adrper79-dot/neon": "^0.2.0",
+    "@adrper79-dot/stripe": "^0.2.0",
+    "drizzle-orm": "^0.43.0",
+    "hono": "^4.12.15"
+  },
+  "devDependencies": {
+    "@adrper79-dot/testing": "^0.2.0",
+    "@cloudflare/workers-types": "^4.20260426.1",
+    "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "drizzle-kit": "^0.31.0",
+    "typescript": "^5.4.0",
+    "wrangler": "^4.0.0",
+    "vitest": "^1.6.0",
+    "@vitest/coverage-v8": "^1.6.0"
+  }
+}

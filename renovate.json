@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:base"
+  ],
+  "registryUrls": [
+    "https://npm.pkg.github.com"
+  ],
+  "packageRules": [
+    {
+      "matchPackagePrefixes": [
+        "@adrper79-dot/"
+      ],
+      "pinVersions": true,
+      "automerge": false,
+      "labels": [
+        "factory-core-update"
+      ],
+      "commitMessagePrefix": "chore(deps):"
+    }
+  ]
+}

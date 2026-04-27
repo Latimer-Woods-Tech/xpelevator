@@ -1,0 +1,11 @@
+# Copy this file to .dev.vars and fill in values for local development.
+# .dev.vars is gitignored — never commit it.
+# Wrangler reads .dev.vars automatically during wrangler dev.
+
+JWT_SECRET=dev-secret-at-least-32-characters-long
+SENTRY_DSN=
+POSTHOG_KEY=
+ANTHROPIC_API_KEY=
+GROK_API_KEY=
+GROQ_API_KEY=
+RESEND_API_KEY=

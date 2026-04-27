@@ -1,0 +1,40 @@
+{
+  "name": "xpelevator",
+  "compatibility_date": "2024-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "src/index.ts",
+
+  // ── Hyperdrive (Neon Postgres via @adrper79-dot/neon) ──────────────────────
+  "hyperdrive": [
+    {
+      "binding": "DB",
+      "id": "5b62381d252c4c0abb0a24b2d7a27d87"
+    }
+  ],
+
+  // ── Non-secret vars (secrets go in wrangler secret put, never here) ────────
+  "vars": {
+    "ENVIRONMENT": "production",
+    "WORKER_NAME": "xpelevator"
+  },
+
+  // ── Rate Limiter (auth routes) ────────────────────────────────────────────
+  "rate_limiters": [
+    {
+      "binding": "AUTH_RATE_LIMITER",
+      "namespace_id": "1007",
+      "simple": { "limit": 60, "period": 60 }
+    }
+  ],
+
+  // ── Staging environment ────────────────────────────────────────────────────
+  "env": {
+    "staging": {
+      "name": "xpelevator-staging",
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "WORKER_NAME": "xpelevator-staging"
+      }
+    }
+  }
+}
