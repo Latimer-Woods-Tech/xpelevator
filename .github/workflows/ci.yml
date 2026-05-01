@@ -2,11 +2,30 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feature/**']
   pull_request:
     branches: [main]
 
 jobs:
   ci:
-    uses: Latimer-Woods-Tech/factory/.github/workflows/_app-ci.yml@main
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.FACTORY_APP_ID }}
+          private-key: ${{ secrets.FACTORY_APP_PRIVATE_KEY }}
+          owner: Latimer-Woods-Tech
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@latimer-woods-tech'
+      - name: Configure npm auth
+        run: echo "//npm.pkg.github.com/:_authToken=${{ steps.app-token.outputs.token }}" >> .npmrc
+      - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ steps.app-token.outputs.token }}
+      - run: npm run typecheck --if-present
+      - run: npm test --if-present
