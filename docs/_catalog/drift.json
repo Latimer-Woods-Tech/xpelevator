@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "generated_by": "scripts/docs/drift.mjs",
+  "generated_at": "source-derived",
+  "ok": true,
+  "counts": {
+    "issues": 1,
+    "errors": 0,
+    "warnings": 1
+  },
+  "issues": [
+    {
+      "id": "docs.npm-script.missing",
+      "severity": "warning",
+      "doc": "CLAUDE.md",
+      "line": 55,
+      "owner": "xpelevator",
+      "status": "active",
+      "truth_source": "package.json",
+      "message": "References missing npm script \"build\".",
+      "fix": "Update the command, add the root script to package.json, or mark it as a package-local command.",
+      "blocks": []
+    }
+  ]
+}

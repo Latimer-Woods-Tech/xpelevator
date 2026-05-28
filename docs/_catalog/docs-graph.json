@@ -1,0 +1,236 @@
+{
+  "version": 1,
+  "generated_by": "scripts/docs/catalog.mjs",
+  "generated_at": "source-derived",
+  "generated_at_commit": null,
+  "git_status": "not-recorded",
+  "source_hashes": {
+    "docs/_governance/canonical-docs.yml": "sha256:9ac398289cad43ac7ca92fa0c5a1b5de89ede7e15aefcfad01193409244594be",
+    "docs/_governance/doc-overrides.yml": "sha256:80766f80a83dba259c71978c5ead9ca8666e2d1a8ac45f4abc69a91034810c14"
+  },
+  "counts": {
+    "total_docs": 10,
+    "canonical": 1,
+    "active": 7,
+    "stale": 0,
+    "archive": 0,
+    "generated": 2,
+    "scratch": 0,
+    "missing_canonical": 0
+  },
+  "errors": [],
+  "docs": [
+    {
+      "path": "CLAUDE.md",
+      "title": "xpelevator — Standing Orders",
+      "status": "active",
+      "owner": "xpelevator",
+      "doc_type": "reference",
+      "fidelity": "unverified",
+      "quality": "usable",
+      "last_updated": null,
+      "last_verified": null,
+      "scope": null,
+      "truth_sources": [],
+      "verified_by": [],
+      "content_hash": "sha256:cf5077c9744976a0f6286a98df4f945081f900f463abc49eecf2edcf627fa196",
+      "source": {
+        "frontmatter": false,
+        "canonical_allowlist": false,
+        "override": "*.md"
+      },
+      "errors": []
+    },
+    {
+      "path": "docs/_generated/docs-trust-map.md",
+      "title": "Factory Documentation Trust Map",
+      "status": "generated",
+      "owner": "xpelevator",
+      "doc_type": "diagram",
+      "fidelity": "generated",
+      "quality": "usable",
+      "last_updated": null,
+      "last_verified": null,
+      "scope": null,
+      "truth_sources": [],
+      "verified_by": [],
+      "content_hash": "sha256:733f9e415a52e37d95458cbf8e1fce843ed121a0b1d51275c64bbb1ee70329c3",
+      "source": {
+        "frontmatter": false,
+        "canonical_allowlist": false,
+        "override": "docs/_generated/**"
+      },
+      "errors": []
+    },
+    {
+      "path": "docs/_generated/workflow-map.md",
+      "title": "Factory Workflow Map",
+      "status": "generated",
+      "owner": "xpelevator",
+      "doc_type": "diagram",
+      "fidelity": "generated",
+      "quality": "usable",
+      "last_updated": null,
+      "last_verified": null,
+      "scope": null,
+      "truth_sources": [],
+      "verified_by": [],
+      "content_hash": "sha256:37352cfedf3a23e092cee537337f22da6fd90f8f36a413ac7750a92c1f68b9bf",
+      "source": {
+        "frontmatter": false,
+        "canonical_allowlist": false,
+        "override": "docs/_generated/**"
+      },
+      "errors": []
+    },
+    {
+      "path": "docs/README.md",
+      "title": "xpelevator Documentation",
+      "status": "canonical",
+      "owner": "xpelevator",
+      "doc_type": "index",
+      "fidelity": "owner-reviewed",
+      "quality": "usable",
+      "last_updated": null,
+      "last_verified": null,
+      "scope": "Repo entry point and current orientation.",
+      "truth_sources": [
+        "manual-review"
+      ],
+      "verified_by": [],
+      "content_hash": "sha256:22532c1c251909b6049f1f892ef22a45ff8e9b4629f0143509a87605857dad14",
+      "source": {
+        "frontmatter": false,
+        "canonical_allowlist": true,
+        "override": "docs/**"
+      },
+      "errors": []
+    },
+    {
+      "path": "docs/runbooks/database.md",
+      "title": "xpelevator — Database",
+      "status": "active",
+      "owner": "xpelevator",
+      "doc_type": "runbook",
+      "fidelity": "unverified",
+      "quality": "usable",
+      "last_updated": null,
+      "last_verified": null,
+      "scope": null,
+      "truth_sources": [],
+      "verified_by": [],
+      "content_hash": "sha256:d521edabfbfb67f7425aaf8c04aa1883bc193504ac098bd1b33a5cee02555897",
+      "source": {
+        "frontmatter": false,
+        "canonical_allowlist": false,
+        "override": "docs/runbooks/**"
+      },
+      "errors": []
+    },
+    {
+      "path": "docs/runbooks/deployment.md",
+      "title": "xpelevator — Deployment",
+      "status": "active",
+      "owner": "xpelevator",
+      "doc_type": "runbook",
+      "fidelity": "unverified",
+      "quality": "usable",
+      "last_updated": null,
+      "last_verified": null,
+      "scope": null,
+      "truth_sources": [],
+      "verified_by": [],
+      "content_hash": "sha256:3dddc229b594acc02b86fca333bd3c2a8b621b9448dc349066a9f6a2f51701b2",
+      "source": {
+        "frontmatter": false,
+        "canonical_allowlist": false,
+        "override": "docs/runbooks/**"
+      },
+      "errors": []
+    },
+    {
+      "path": "docs/runbooks/getting-started.md",
+      "title": "xpelevator — Getting Started",
+      "status": "active",
+      "owner": "xpelevator",
+      "doc_type": "runbook",
+      "fidelity": "unverified",
+      "quality": "usable",
+      "last_updated": null,
+      "last_verified": null,
+      "scope": null,
+      "truth_sources": [],
+      "verified_by": [],
+      "content_hash": "sha256:0fc916ed677ec3654ebc0d039100981b5e74ec6f1edc008f45226655c3a4b462",
+      "source": {
+        "frontmatter": false,
+        "canonical_allowlist": false,
+        "override": "docs/runbooks/**"
+      },
+      "errors": []
+    },
+    {
+      "path": "docs/runbooks/secret-rotation.md",
+      "title": "xpelevator — Secret Rotation",
+      "status": "active",
+      "owner": "xpelevator",
+      "doc_type": "runbook",
+      "fidelity": "unverified",
+      "quality": "usable",
+      "last_updated": null,
+      "last_verified": null,
+      "scope": null,
+      "truth_sources": [],
+      "verified_by": [],
+      "content_hash": "sha256:859b20db3bcfd07583ca61ad7124612c703407446a60610254a1c7d33622feb7",
+      "source": {
+        "frontmatter": false,
+        "canonical_allowlist": false,
+        "override": "docs/runbooks/**"
+      },
+      "errors": []
+    },
+    {
+      "path": "docs/runbooks/slo.md",
+      "title": "xpelevator — SLO",
+      "status": "active",
+      "owner": "xpelevator",
+      "doc_type": "runbook",
+      "fidelity": "unverified",
+      "quality": "usable",
+      "last_updated": null,
+      "last_verified": null,
+      "scope": null,
+      "truth_sources": [],
+      "verified_by": [],
+      "content_hash": "sha256:3f62ed834142a8db8a9fce546bea5ff738440a04340906e86932602a0987c8cd",
+      "source": {
+        "frontmatter": false,
+        "canonical_allowlist": false,
+        "override": "docs/runbooks/**"
+      },
+      "errors": []
+    },
+    {
+      "path": "SECURITY.md",
+      "title": "Security Policy",
+      "status": "active",
+      "owner": "xpelevator",
+      "doc_type": "reference",
+      "fidelity": "unverified",
+      "quality": "usable",
+      "last_updated": null,
+      "last_verified": null,
+      "scope": null,
+      "truth_sources": [],
+      "verified_by": [],
+      "content_hash": "sha256:1bf15fcce877066d707327e4878ac998717d1843c52e0150436e866c9eb90412",
+      "source": {
+        "frontmatter": false,
+        "canonical_allowlist": false,
+        "override": "*.md"
+      },
+      "errors": []
+    }
+  ]
+}
