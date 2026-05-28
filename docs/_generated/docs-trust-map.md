@@ -27,7 +27,7 @@ flowchart LR
   active["Active Docs\n7"]
   stale["Stale Docs\n0"]
   archive["Archive Docs\n0"]
-  generated["Generated Docs\n0"]
+  generated["Generated Docs\n2"]
   truth --> generated
   generated --> canonical
 ```
