@@ -1,0 +1,32 @@
+name: Docs Health
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/**'
+      - 'package.json'
+      - '.nvmrc'
+      - 'README.md'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/**'
+      - 'package.json'
+      - '.nvmrc'
+      - 'README.md'
+  workflow_dispatch:
+  schedule:
+    - cron: '17 9 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  docs-health:
+    uses: Latimer-Woods-Tech/Factory/.github/workflows/_docs-health.yml@main
+    with:
+      repo_profile: app
+      tools_ref: main
+      enforce_generated: true
