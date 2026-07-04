@@ -9,9 +9,12 @@ import {
   integer,
   boolean,
   doublePrecision,
-  timestamptz,
+  timestamp,
   jsonb,
 } from 'drizzle-orm/pg-core';
+
+/** `timestamp with time zone` column helper — `timestamptz` is not a drizzle export. */
+const timestamptz = (name: string) => timestamp(name, { withTimezone: true });
 
 /** Registered members on the platform. */
 export const members = pgTable('members', {

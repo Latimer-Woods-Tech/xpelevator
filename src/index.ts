@@ -23,8 +23,8 @@ app.get('/health', (c) =>
 app.use('/api/*', (c, next) => jwtMiddleware(c.env.JWT_SECRET)(c, next));
 
 app.get('/api/me', (c) => {
-  // c.get('jwtPayload') is set by jwtMiddleware
-  return c.json({ data: c.get('jwtPayload'), error: null });
+  // c.get('user') is set by jwtMiddleware (augments hono's ContextVariableMap)
+  return c.json({ data: c.get('user'), error: null });
 });
 
 // ── Add your routes here ─────────────────────────────────────────────────────

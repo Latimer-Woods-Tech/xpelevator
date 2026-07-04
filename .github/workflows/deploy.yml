@@ -15,20 +15,18 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'production' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-          scope: '@adrper79-dot'
       - run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
       - run: npm run typecheck
+      # wrangler.jsonc has no `production` env — production deploys top-level;
+      # only the staging env takes an `--env` flag.
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: deploy --env ${{ github.event.inputs.environment || 'production' }}
+          command: deploy ${{ github.event.inputs.environment == 'staging' && '--env staging' || '' }}
