@@ -1,0 +1,56 @@
+name: Phase 2 (2/3) — tenant-isolation check
+
+# Proves the cross-tenant IDOR on GET /api/chat is closed: a session transcript
+# is readable only by its owner or a same-org admin. Mints two authed identities
+# in different orgs against the LIVE deploy and asserts anon=401, cross-tenant=403
+# (JSON + phone-stream), owner=200. Touches NO DNS. Uses repo-staged secrets.
+#
+# Runs on manual dispatch, and once automatically on the PR merge (paths filter
+# matches the files it adds) so the slice self-verifies without needing
+# actions:write to dispatch. Waits for the deploy workflow to publish first.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/phase2-isolation.yml'
+      - 'scripts/phase2-isolation-check.mjs'
+      - 'src/lib/session-access.ts'
+      - 'src/app/api/chat/route.ts'
+
+concurrency:
+  group: phase2-isolation
+  cancel-in-progress: false
+
+jobs:
+  isolation:
+    name: Cross-tenant session-read isolation
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://xpelevator-sim.pages.dev
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for the freshly-deployed build to be live
+        # The deploy workflow (push→main) runs in parallel; give it time to
+        # publish before we probe. /api/health returning 200 is sufficient.
+        run: |
+          set -e
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/health" || echo 000)
+            echo "attempt $i: /api/health -> $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "::warning::/api/health not 200 after wait — running the check anyway"
+
+      - name: Assert tenant isolation on session reads
+        run: node scripts/phase2-isolation-check.mjs

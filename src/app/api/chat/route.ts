@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { buildSessionSystemPrompt, streamNextCustomerMessage, scoreSession } from '@/lib/ai';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { canAccessSession } from '@/lib/session-access';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
 
 
@@ -88,11 +89,8 @@ export async function POST(request: Request) {
     
     const session = sessionResult[0];
 
-    // Multi-tenancy: verify user can access this session
-    const canAccess =
-      session.userId === userId ||  // User owns the session
-      (userRole === 'ADMIN' && session.orgId === userOrgId);  // Admin in same org
-    if (!canAccess) {
+    // Multi-tenancy: verify user can access this session (owner or same-org admin)
+    if (!canAccessSession(session, { id: userId, role: userRole, orgId: userOrgId })) {
       console.error('[Chat API] Access denied for session:', sessionId);
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
@@ -272,6 +270,27 @@ export async function GET(request: Request) {
 
     if (!sessionId) {
       return NextResponse.json({ error: 'sessionId is required' }, { status: 400 });
+    }
+
+    // Multi-tenancy: a session transcript (and its live phone stream) must only
+    // be readable by the session owner or an admin in the same org — never by
+    // any authenticated user who guesses the session UUID. Verify ownership
+    // before emitting any data on either the JSON or the SSE path.
+    const ownerRows = await sql`
+      SELECT user_id as "userId", org_id as "orgId"
+      FROM simulation_sessions
+      WHERE id = ${sessionId}
+      LIMIT 1
+    `;
+    if (ownerRows.length === 0) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    }
+    if (!canAccessSession(ownerRows[0], {
+      id: viewer.user.id,
+      role: viewer.user.role,
+      orgId: viewer.user.orgId,
+    })) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     // ── BL-054: SSE transcript stream for phone simulation ──────────────────────

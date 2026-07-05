@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { canAccessSession } from '@/lib/session-access';
 
 
 // Score a simulation session
@@ -31,10 +32,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
     // Multi-tenancy: user must own session or be admin in same org
-    const canAccess =
-      session.userId === userId ||
-      (userRole === 'ADMIN' && session.orgId === userOrgId);
-    if (!canAccess) {
+    if (!canAccessSession(session, { id: userId, role: userRole, orgId: userOrgId })) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
