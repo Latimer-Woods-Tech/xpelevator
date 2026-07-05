@@ -13,11 +13,17 @@
  *   /auth/*    — sign in/out pages
  *   /api/health — health check
  *   /api/telnyx/webhook — external webhook (has own verification)
+ *
+ * Every other /api/* route (including all reads) requires authentication —
+ * downstream handlers additionally enforce role and org scoping.
  */
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Routes that don't require authentication
+// Routes that don't require authentication.
+// Note: /api/jobs, /api/scenarios and /api/criteria are deliberately NOT here —
+// their reads are authenticated (Phase 2). /api/scenarios in particular leaked
+// each scenario's hidden hints to anonymous callers.
 const PUBLIC_ROUTES = [
   '/',
   '/auth/signin',
@@ -25,14 +31,12 @@ const PUBLIC_ROUTES = [
   '/api/health',
   '/api/telnyx/webhook', // Has its own signature verification
   '/api/auth', // NextAuth handlers
-  '/api/jobs', // Public GET, protected POST
-  '/api/scenarios', // Public GET, protected POST
-  '/api/criteria', // Public GET, protected POST/PUT/DELETE
 ];
 
 export default function middleware(req: NextRequest) {
-  // TESTING MODE: Bypass all auth checks if DISABLE_AUTH is set
-  if (process.env.DISABLE_AUTH === 'true') {
+  // TESTING MODE: Bypass auth checks if DISABLE_AUTH is set — never in production.
+  // TODO(phase-2/3): retire this crutch once the test-auth harness lands.
+  if (process.env.DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production') {
     return NextResponse.next();
   }
 

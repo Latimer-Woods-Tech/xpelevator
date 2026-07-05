@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError, getAuthOrNull } from '@/lib/auth-api';
+import { sanitizeSessionScenario } from '@/lib/scenario-safety';
 
 
 // Start a new simulation session
@@ -73,7 +74,11 @@ export async function POST(request: Request) {
       WHERE ss.id = ${created[0].id}
     `;
 
-    return NextResponse.json(newSession[0], { status: 201 });
+    const isAdmin = authResult.session.user.role === 'ADMIN';
+    return NextResponse.json(
+      sanitizeSessionScenario(newSession[0], isAdmin),
+      { status: 201 }
+    );
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -209,7 +214,11 @@ export async function GET(request: Request) {
         `;
 
     console.log('[simulations/GET] Query completed, sessions count:', sessions.length);
-    return NextResponse.json(sessions);
+    const isAdmin = userRole === 'ADMIN';
+    const safe = (sessions as Array<{ scenario?: unknown }>).map((s) =>
+      sanitizeSessionScenario(s, isAdmin)
+    );
+    return NextResponse.json(safe);
   } catch (error) {
     console.error('[simulations/GET] ERROR:', error);
     console.error('[simulations/GET] ERROR Stack:', error instanceof Error ? error.stack : 'No stack trace');

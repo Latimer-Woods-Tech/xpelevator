@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { sanitizeScenarioScript } from '@/lib/scenario-safety';
 
 
 export async function GET(
@@ -11,6 +12,7 @@ export async function GET(
     // Require authentication for reading scenarios
     const { session } = await requireAuth();
     const userOrgId = session.user.orgId;
+    const isAdmin = session.user.role === 'ADMIN';
 
     const { id } = await params;
     const scenarios = await sql`
@@ -36,6 +38,8 @@ export async function GET(
     if (scenario.orgId && scenario.orgId !== userOrgId) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
+    // Strip hidden mechanics from the script for non-admin trainees.
+    scenario.script = sanitizeScenarioScript(scenario.script, isAdmin);
     return NextResponse.json(scenario);
   } catch (error) {
     if (error instanceof AuthError) {

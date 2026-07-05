@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { requireAuth, getAuthOrNull, AuthError } from '@/lib/auth-api';
+import { requireAuth, AuthError } from '@/lib/auth-api';
 
 
 export async function GET() {
   try {
-    // Public read - optionally scoped to user's org if authenticated
-    const authResult = await getAuthOrNull();
-    const userOrgId = authResult?.session.user.orgId;
+    // Authenticated read, scoped to the caller's org.
+    const { session } = await requireAuth();
+    const userOrgId = session.user.orgId;
 
     // Multi-tenancy: show user's org criteria + global ones
     // If not authenticated, only show global criteria
