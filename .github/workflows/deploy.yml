@@ -149,3 +149,12 @@ jobs:
             exit 1
           fi
           echo "✅ Phase 2 read-auth + hidden-hint-leak checks passed"
+
+      - name: Verify Phase 2 tenant isolation (session IDOR closed)
+        # Runs AFTER this deploy, against the freshly-shipped build: a stranger
+        # (authenticated, but not the session owner) must be denied on every
+        # session-scoped route, while the owner still reads their own session.
+        # Permanent regression gate — a reintroduced IDOR fails the deploy.
+        env:
+          BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
+        run: node scripts/phase2-tenant-isolation.mjs

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { canAccessSession } from '@/lib/session-access';
 
 
 // Score a simulation session
@@ -8,9 +9,6 @@ export async function POST(request: Request) {
   try {
     // Require authentication for scoring
     const { session: authSession } = await requireAuth();
-    const userId = authSession.user.id;
-    const userOrgId = authSession.user.orgId;
-    const userRole = authSession.user.role;
 
     const body = await request.json();
     const { sessionId, scores } = body;
@@ -30,11 +28,9 @@ export async function POST(request: Request) {
     if (!session) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
-    // Multi-tenancy: user must own session or be admin in same org
-    const canAccess =
-      session.userId === userId ||
-      (userRole === 'ADMIN' && session.orgId === userOrgId);
-    if (!canAccess) {
+    // Multi-tenancy: user must own session or be admin in same org.
+    // Shared with /api/chat POST + GET reads.
+    if (!canAccessSession(session, authSession.user)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 

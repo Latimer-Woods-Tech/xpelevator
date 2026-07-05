@@ -3,6 +3,7 @@ import { sql } from '@/lib/db';
 import { buildSessionSystemPrompt, streamNextCustomerMessage, scoreSession } from '@/lib/ai';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
+import { canAccessSession } from '@/lib/session-access';
 
 
 // POST /api/chat
@@ -14,9 +15,6 @@ export async function POST(request: Request) {
   try {
     // Require authentication for chat interactions
     const { session: authSession } = await requireAuth();
-    const userId = authSession.user.id;
-    const userOrgId = authSession.user.orgId;
-    const userRole = authSession.user.role;
 
     console.log('[Chat API] POST request received');
     const body = await request.json();
@@ -88,11 +86,12 @@ export async function POST(request: Request) {
     
     const session = sessionResult[0];
 
-    // Multi-tenancy: verify user can access this session
-    const canAccess =
-      session.userId === userId ||  // User owns the session
-      (userRole === 'ADMIN' && session.orgId === userOrgId);  // Admin in same org
-    if (!canAccess) {
+    // Multi-tenancy: verify user can access this session (owner, or admin in
+    // the same org). Shared with the GET reads and /api/scoring.
+    if (!canAccessSession(
+      session as { userId: string | null; orgId: string | null },
+      authSession.user
+    )) {
       console.error('[Chat API] Access denied for session:', sessionId);
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
@@ -272,6 +271,23 @@ export async function GET(request: Request) {
 
     if (!sessionId) {
       return NextResponse.json({ error: 'sessionId is required' }, { status: 400 });
+    }
+
+    // Tenant isolation: verify the caller owns this session (or is an admin in
+    // the same org) BEFORE returning any transcript/scores/scenario. Without
+    // this, any authenticated user could read another user's — or another
+    // org's — session by id, via either the JSON read or the SSE stream below.
+    const ownerRows = await sql`
+      SELECT user_id as "userId", org_id as "orgId"
+      FROM simulation_sessions
+      WHERE id = ${sessionId}
+      LIMIT 1
+    `;
+    if (ownerRows.length === 0) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    }
+    if (!canAccessSession(ownerRows[0] as { userId: string | null; orgId: string | null }, viewer.user)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     // ── BL-054: SSE transcript stream for phone simulation ──────────────────────
