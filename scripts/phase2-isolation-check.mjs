@@ -62,13 +62,30 @@ async function mintCookieHeader(userId, email) {
   return parts.join('; ');
 }
 
-async function get(path, cookie) {
+async function get(path, cookie, { drain = true } = {}) {
+  // fetch() resolves as soon as response headers arrive, so res.status is
+  // available before any body. For SSE endpoints (?stream=true) we must NOT read
+  // the body — an unprotected phone-transcript stream stays open for minutes and
+  // res.text() would block. Cancel the body instead and rely on the status. A
+  // 10s abort backstops any slow header.
   const headers = {};
   if (cookie) headers.cookie = cookie;
-  const res = await fetch(`${BASE}${path}`, { method: 'GET', headers });
-  // Drain the body so streaming responses don't leave a dangling connection.
-  try { await res.text(); } catch { /* ignore */ }
-  return res.status;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  try {
+    const res = await fetch(`${BASE}${path}`, { method: 'GET', headers, signal: ctrl.signal });
+    const status = res.status;
+    if (drain) {
+      try { await res.text(); } catch { /* ignore */ }
+    } else {
+      try { await res.body?.cancel(); } catch { /* ignore */ }
+    }
+    return status;
+  } catch (e) {
+    return `ERR(${e?.name || 'fetch'})`;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function main() {
@@ -133,7 +150,7 @@ async function main() {
     const intr = await get(path, intruderCookie);
     check('cross-tenant read is forbidden (expect 403)', intr === 403, `got ${intr}`);
 
-    const intrStream = await get(`${path}&stream=true`, intruderCookie);
+    const intrStream = await get(`${path}&stream=true`, intruderCookie, { drain: false });
     check('cross-tenant phone-stream is forbidden (expect 403)', intrStream === 403, `got ${intrStream}`);
 
     const own = await get(path, ownerCookie);
