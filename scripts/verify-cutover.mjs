@@ -16,6 +16,8 @@
  * Env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CF_PROJECT, APEX.
  */
 
+import { createHash } from 'node:crypto';
+
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN?.replace(/[\r\n]/g, '');
 const ACCOUNT = process.env.CLOUDFLARE_ACCOUNT_ID?.replace(/[\r\n]/g, '');
 const PROJECT = (process.env.CF_PROJECT || 'xpelevator-sim').trim();
@@ -43,17 +45,19 @@ async function domainStatus(name) {
   return r.ok ? (r.body.result?.status || 'unknown') : `err${r.status}`;
 }
 
-// Extract the Next.js buildId from a page's HTML (App Router emits
-// /_next/static/<buildId>/_buildManifest.js etc.). Returns null if not found.
-async function buildId(host) {
+// Fingerprint the running build from a page's HTML. The canonical signature is
+// the set of content-hashed /_next/static/... asset URLs — identical iff the
+// same Next build is serving. Falls back to a hash of the raw HTML when no such
+// assets appear (so two identical shells still compare equal).
+async function fingerprint(host) {
   try {
     const res = await fetch(`https://${host}/`, { redirect: 'follow' });
     const html = await res.text();
-    const m = html.match(/\/_next\/static\/([^/"']+)\/_(?:buildManifest|ssgManifest)/) ||
-              html.match(/"buildId":"([^"]+)"/) ||
-              html.match(/\/_next\/static\/([^/"']+)\/_next/);
-    return { code: res.status, id: m ? m[1] : null, len: html.length };
-  } catch (e) { return { code: 0, id: null, err: String(e).slice(0, 120) }; }
+    const assets = [...new Set((html.match(/\/_next\/static\/[^\s"'<>()]+/g) || []))].sort();
+    const basis = assets.length ? assets.join('\n') : html;
+    const sig = createHash('sha256').update(basis).digest('hex').slice(0, 16);
+    return { code: res.status, sig, assetCount: assets.length, sample: assets[0] || null, len: html.length };
+  } catch (e) { return { code: 0, sig: null, assetCount: 0, err: String(e).slice(0, 120) }; }
 }
 
 // ── Step 1: wait for the Pages custom domain to go active ────────────────────
@@ -73,17 +77,17 @@ if (sA !== 'active' || sW !== 'active') {
 
 // ── Step 2: fingerprint the running build (branded vs new project) ───────────
 console.log(`\n=== Build fingerprint: ${APEX} vs ${SIM} ===`);
-const [apexFp, simFp] = [await buildId(APEX), await buildId(SIM)];
-console.log(`${APEX}   → HTTP ${apexFp.code}, buildId=${apexFp.id}`);
-console.log(`${SIM} → HTTP ${simFp.code}, buildId=${simFp.id}`);
+const [apexFp, simFp] = [await fingerprint(APEX), await fingerprint(SIM)];
+console.log(`${APEX}   → HTTP ${apexFp.code}, sig=${apexFp.sig} (${apexFp.assetCount} assets, sample=${apexFp.sample})`);
+console.log(`${SIM} → HTTP ${simFp.code}, sig=${simFp.sig} (${simFp.assetCount} assets, sample=${simFp.sample})`);
 
-if (!simFp.id) fail(`could not read a buildId from ${SIM} (HTTP ${simFp.code}) — cannot calibrate`);
-if (!apexFp.id) fail(`could not read a buildId from ${APEX} (HTTP ${apexFp.code})`);
+if (!simFp.sig) fail(`could not fingerprint ${SIM} (HTTP ${simFp.code}) — cannot calibrate`, simFp.err);
+if (!apexFp.sig) fail(`could not fingerprint ${APEX} (HTTP ${apexFp.code})`, apexFp.err);
 
-if (apexFp.id === simFp.id) {
-  console.log(`\n✅ CUTOVER CONFIRMED: ${APEX} is serving the SAME build as ${SIM} (buildId ${apexFp.id}).`);
-  console.log(`   Pages domain status: ${APEX}=${sA}, ${WWW}=${sW}.`);
+if (apexFp.sig === simFp.sig) {
+  console.log(`\n✅ CUTOVER CONFIRMED: ${APEX} serves the SAME build as ${SIM} (fingerprint ${apexFp.sig}).`);
+  console.log(`   Pages custom-domain status: ${APEX}=${sA}, ${WWW}=${sW} (active binding is exclusive to ${PROJECT}).`);
   process.exit(0);
 }
-fail(`${APEX} buildId (${apexFp.id}) ≠ ${SIM} buildId (${simFp.id}) — branded domain is NOT yet serving the new build ` +
+fail(`${APEX} fingerprint (${apexFp.sig}) ≠ ${SIM} (${simFp.sig}) — branded domain is NOT yet serving the new build ` +
      `(propagation lag or the old deployment still answering). Re-run shortly; DNS is already repointed.`);
