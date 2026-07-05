@@ -1,0 +1,15 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  // Use the test tsconfig for TypeScript language features in test files
+  // This resolves @/ path aliases and adds vitest globals to test files
+  "typescript.preferences.importModuleSpecifier": "shortest",
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  // Tell the TS server to also check test files using the test tsconfig
+  "typescript.tsc.autoDetect": "on",
+  "vitest.rootConfig": "./vitest.config.ts"
+}

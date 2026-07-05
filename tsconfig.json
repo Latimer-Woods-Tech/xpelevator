@@ -1,24 +1,50 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "target": "ES2017",
     "lib": [
-      "ES2022",
-      "WebWorker"
+      "dom",
+      "dom.iterable",
+      "esnext"
     ],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
+    "allowJs": true,
     "skipLibCheck": true,
-    "types": [
-      "@cloudflare/workers-types"
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
     ],
-    "noEmit": true
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
   },
   "include": [
-    "src/**/*"
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.d.ts",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.d.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "src/index.ts",
+    "prisma/seed.ts",
+    "tests/**",
+    "vitest.config.ts",
+    "tsconfig.test.json"
   ]
 }

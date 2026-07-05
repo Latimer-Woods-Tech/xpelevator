@@ -1,0 +1,15 @@
+
+> xpelevator@0.1.0 build
+> next build --no-lint
+
+ ⚠ Linting is disabled.
+   ▲ Next.js 15.5.12
+   - Environments: .env
+
+   Creating an optimized production build ...
+Failed to compile.
+
+Error: ENOENT: no such file or directory, open '/mnt/c/Users/Ultimate Warrior/My project/xpelevator/.next/server/chunks/253.js'
+
+
+> Build failed because of webpack errors

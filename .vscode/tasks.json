@@ -1,0 +1,47 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run MCP Server",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"dev"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Build Next.js",
+			"type": "shell",
+			"command": "npx next build"
+		},
+		{
+			"label": "Build with OpenNext",
+			"type": "shell",
+			"command": "npx @opennextjs/cloudflare@latest build"
+		},
+		{
+			"label": "Build Next.js directly",
+			"type": "shell",
+			"command": "node node_modules/.bin/next build"
+		},
+		{
+			"label": "Check wrangler deploy help",
+			"type": "shell",
+			"command": "wrangler pages deploy --help"
+		},
+		{
+			"label": "Build with direct path",
+			"type": "shell",
+			"command": "./node_modules/.bin/next build"
+		},
+		{
+			"label": "Build with OpenNext via cmd",
+			"type": "shell",
+			"command": "cmd.exe /c \"cd /d %cd% && npx @opennextjs/cloudflare build\""
+		}
+	]
+}

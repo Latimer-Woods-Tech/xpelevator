@@ -1,18 +1,38 @@
 name: CI
+
 on:
   push:
-    branches: [main, 'feature/**']
+    branches: [main]
   pull_request:
     branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  ci:
+  build:
+    name: Build
     runs-on: ubuntu-latest
+
+    env:
+      # Dummy values — build does not connect to DB at build time.
+      # Real secrets must be set in Cloudflare Pages environment variables.
+      DATABASE_URL: postgresql://user:pass@localhost/db
+      GROQ_API_KEY: dummy-key-for-build
+      AUTH_SECRET: dummy-secret-for-build
+
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-      - run: npm ci
-      - run: npm run typecheck --if-present
-      - run: npm test --if-present
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build

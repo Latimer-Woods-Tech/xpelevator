@@ -1,0 +1,25 @@
+   ▲ Next.js 15.5.12
+   - Environments: .env
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 20.9s
+   Skipping linting
+   Checking validity of types ...
+   Collecting page data ...
+Error [PrismaClientValidationError]: Prisma Client was configured to use the `adapter` option but it was imported via its `/edge` endpoint.
+Please either remove the `/edge` endpoint or remove the `adapter` from the Prisma Client constructor.
+    at <unknown> (.next/server/app/api/analytics/route.js:1:9087)
+    at 48201 (.next/server/app/api/analytics/route.js:1:9119)
+    at c (.next/server/webpack-runtime.js:1:127)
+    at 5600 (.next/server/app/api/analytics/route.js:1:1323)
+    at c (.next/server/webpack-runtime.js:1:127)
+    at <unknown> (.next/server/app/api/analytics/route.js:1:9483)
+    at c.X (.next/server/webpack-runtime.js:1:1191)
+    at <unknown> (.next/server/app/api/analytics/route.js:1:9461) {
+  clientVersion: '6.19.2'
+}
+
+> Build error occurred
+[Error: Failed to collect page data for /api/analytics] {
+  type: 'Error'
+}

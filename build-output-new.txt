@@ -1,0 +1,5 @@
+
+> xpelevator@0.1.0 pages:build
+> npx @opennextjs/cloudflare build
+
+sh: 1: opennextjs-cloudflare: not found
