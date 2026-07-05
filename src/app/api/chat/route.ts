@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { buildSessionSystemPrompt, streamNextCustomerMessage, scoreSession } from '@/lib/ai';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { sanitizeSessionScenario } from '@/lib/scenario-safety';
 
 
 // POST /api/chat
@@ -263,7 +264,8 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     // Require authentication for reading session data
-    await requireAuth();
+    const { session: viewer } = await requireAuth();
+    const isAdmin = viewer.user.role === 'ADMIN';
 
     const { searchParams } = new URL(request.url);
     const sessionId = searchParams.get('sessionId');
@@ -353,7 +355,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
 
-    return NextResponse.json(result[0]);
+    // Trainees must not receive the scenario's hidden mechanics via the session.
+    return NextResponse.json(sanitizeSessionScenario(result[0], isAdmin));
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -1,14 +1,18 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { requireAuth, getAuthOrNull, AuthError } from '@/lib/auth-api';
+import { requireAuth, AuthError } from '@/lib/auth-api';
+import { sanitizeScenarioScript } from '@/lib/scenario-safety';
 
 
 // GET /api/scenarios?jobTitleId=...
 export async function GET(request: Request) {
   try {
-    // Public read - optionally scoped to user's org if authenticated
-    const authResult = await getAuthOrNull();
-    const userOrgId = authResult?.session.user.orgId;
+    // Authenticated read, scoped to the caller's org. Non-admins receive a
+    // script stripped of the scenario's hidden mechanics (persona / objective /
+    // hints) — the admin UI promises trainees never see those.
+    const { session } = await requireAuth();
+    const userOrgId = session.user.orgId;
+    const isAdmin = session.user.role === 'ADMIN';
 
     const { searchParams } = new URL(request.url);
     const jobTitleId = searchParams.get('jobTitleId');
@@ -85,7 +89,12 @@ export async function GET(request: Request) {
             ORDER BY s.job_title_id ASC, s.name ASC
           `;
 
-    return NextResponse.json(scenarios);
+    const safe = (scenarios as Array<Record<string, unknown>>).map((s) => ({
+      ...s,
+      script: sanitizeScenarioScript(s.script, isAdmin),
+    }));
+
+    return NextResponse.json(safe);
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -108,3 +108,44 @@ jobs:
             exit 1
           fi
           echo "✅ Groq credential valid — scoring engine credential is live"
+
+      - name: Verify Phase 2 read-auth + no hidden-hint leak
+        # The scoring mechanic depends on trainees NEVER seeing a scenario's
+        # hidden hints/persona/objective. Assert on the freshly-deployed build:
+        #   1. /api/scenarios, /api/jobs, /api/criteria reject anonymous reads (401)
+        #   2. an anonymous /api/scenarios body exposes no hidden mechanics
+        # Checked on the pages.dev alias (authoritative for this deploy) and on
+        # the branded domain (proves live trainees are protected).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            echo "== $BASE =="
+            for path in /api/scenarios /api/jobs /api/criteria; do
+              code=000
+              for i in 1 2 3 4 5; do
+                code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$path" || echo 000)
+                if [ "$code" = "401" ]; then break; fi
+                sleep 6
+              done
+              echo "GET $path -> HTTP $code"
+              if [ "$code" != "401" ]; then
+                echo "::error::$BASE$path must require auth (got $code)"
+                fail=1
+              fi
+            done
+            # Hidden-hint leak guard on the anonymous scenarios payload.
+            sc=$(curl -s "$BASE/api/scenarios" || echo '')
+            if printf '%s' "$sc" | grep -Eiq '"hints"|customerObjective|customerPersona'; then
+              echo "::error::$BASE/api/scenarios leaked hidden scenario mechanics"
+              echo "  body (first 300 chars): $(printf '%s' "$sc" | head -c 300)"
+              fail=1
+            else
+              echo "✅ $BASE/api/scenarios exposes no hidden mechanics to anonymous callers"
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Phase 2 security verification failed"
+            exit 1
+          fi
+          echo "✅ Phase 2 read-auth + hidden-hint-leak checks passed"
