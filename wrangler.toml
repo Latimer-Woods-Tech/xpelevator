@@ -2,7 +2,7 @@
 # Deployed via @opennextjs/cloudflare (Workers format, v1.x)
 # Docs: https://opennext.js.org/cloudflare/get-started
 
-name = "xpelevator"
+name = "xpelevator-sim"
 compatibility_date = "2025-01-01"
 
 # nodejs_compat is required for Neon serverless driver

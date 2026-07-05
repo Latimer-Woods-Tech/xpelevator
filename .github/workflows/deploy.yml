@@ -1,28 +1,43 @@
-name: Deploy to Cloudflare Pages
+name: Deploy to Cloudflare Pages (LWT)
 
-# NOTE (Phase 1a promotion): auto-deploy-on-push is intentionally disabled.
-# This workflow still references the old project name (`xpelevator`) and the
-# CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID secret names, whereas this repo
-# stages CF_API_TOKEN/CF_ACCOUNT_ID. Phase 1b rebuilds this to deploy a NEW
-# project in the LWT Cloudflare account and verifies on the preview URL before
-# any DNS cutover. Manual-only until then.
+# Phase 1(b): build via OpenNext and deploy a NEW Cloudflare Pages project in the
+# LWT account, then verify on the *.pages.dev preview URL BEFORE any DNS cutover.
+#
+# - Auth uses the repo-staged CF_API_TOKEN / CF_ACCOUNT_ID (mapped onto the
+#   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID env vars wrangler reads).
+# - Deploys to a fresh project name (xpelevator-sim) — the old xpelevator.pages.dev
+#   lives in a different CF account and its subdomain is globally reserved.
+# - The xpelevator.com CNAME flip is founder-gated and is NOT part of this workflow.
+# - Runs on push to main (steady state) and manual dispatch. The job
+#   self-verifies (/api/health 200 + live Groq credential) and fails loudly on a
+#   bad deploy; it touches NO DNS, so auto-run on merge is safe.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: deploy-lwt
+  cancel-in-progress: false
+
+env:
+  CF_PROJECT: xpelevator-sim
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    name: Build and Deploy
-    
+    name: Build, deploy to LWT, verify
+
     env:
-      # Real secrets injected at build time so env.ts validation passes.
-      # At RUNTIME the CF Worker reads these from Pages bindings via
-      # getCloudflareContext().env — NOT from process.env — so the built
-      # bundle never has stale/dummy values baked in for runtime use.
+      # Injected at build time so src/lib/env.ts validation passes during the
+      # OpenNext build. At RUNTIME the Pages Worker reads these from the
+      # project secrets set below (surfaced into process.env by OpenNext).
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,21 +54,57 @@ jobs:
       - name: Build with OpenNext
         run: npx @opennextjs/cloudflare build
 
-      - name: Bundle worker
+      - name: Bundle worker for Pages advanced mode
         run: node scripts/bundle-worker.js
 
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .open-next/assets --project-name=xpelevator
-
-      - name: Set production secrets
+      - name: Ensure Pages project exists (idempotent)
         run: |
-          echo "${{ secrets.GROQ_API_KEY }}" | npx wrangler pages secret put GROQ_API_KEY --project-name=xpelevator
-          echo "${{ secrets.DATABASE_URL }}" | npx wrangler pages secret put DATABASE_URL --project-name=xpelevator
-          echo "${{ secrets.AUTH_SECRET }}" | npx wrangler pages secret put AUTH_SECRET --project-name=xpelevator
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          npx wrangler pages project create "$CF_PROJECT" \
+            --production-branch=main \
+            || echo "Project already exists — continuing."
+
+      - name: Set Pages project secrets
+        # printf '%s' (NOT echo) avoids the trailing-newline trap on secret values.
+        run: |
+          printf '%s' "$GROQ_API_KEY"  | npx wrangler pages secret put GROQ_API_KEY  --project-name="$CF_PROJECT"
+          printf '%s' "$DATABASE_URL"  | npx wrangler pages secret put DATABASE_URL  --project-name="$CF_PROJECT"
+          printf '%s' "$AUTH_SECRET"   | npx wrangler pages secret put AUTH_SECRET   --project-name="$CF_PROJECT"
+
+      - name: Deploy to Cloudflare Pages (production branch)
+        run: |
+          npx wrangler pages deploy .open-next/assets \
+            --project-name="$CF_PROJECT" \
+            --branch=main
+
+      - name: Verify /api/health on the pages.dev alias
+        run: |
+          set -e
+          BASE="https://${CF_PROJECT}.pages.dev"
+          echo "Verifying $BASE/api/health ..."
+          code=000
+          for i in 1 2 3 4 5 6 7 8; do
+            code=$(curl -s -o /tmp/health.json -w '%{http_code}' "$BASE/api/health" || echo 000)
+            echo "attempt $i: HTTP $code"
+            cat /tmp/health.json 2>/dev/null || true; echo
+            if [ "$code" = "200" ]; then break; fi
+            sleep 10
+          done
+          if [ "$code" != "200" ]; then
+            echo "::error::/api/health did not return 200 (last=$code)"
+            exit 1
+          fi
+          echo "✅ /api/health returned 200"
+
+      - name: Verify Groq scoring credential is live (not expired)
+        run: |
+          set -e
+          code=$(curl -s -o /tmp/groq.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GROQ_API_KEY" \
+            https://api.groq.com/openai/v1/models || echo 000)
+          echo "Groq /v1/models -> HTTP $code"
+          head -c 400 /tmp/groq.json 2>/dev/null; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::Groq credential rejected (HTTP $code) — scoring would be down"
+            exit 1
+          fi
+          echo "✅ Groq credential valid — scoring engine credential is live"
