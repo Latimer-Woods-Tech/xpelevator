@@ -1,0 +1,28 @@
+
+> xpelevator@0.1.0 build
+> next build --no-lint
+
+ [33m[1m⚠[22m[39m Linting is disabled.
+[33m[1m⚠[22m[39m No build cache found. Please configure build caching for faster rebuilds. Read more: https://nextjs.org/docs/messages/no-cache
+[35m[1mAttention[22m[39m: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+[36mhttps://nextjs.org/telemetry[39m
+
+   [1m[38;2;173;127;168m▲ Next.js 15.5.12[39m[22m
+   - Environments: .env
+
+ [37m[1m [22m[39m Creating an optimized production build ...
+ [32m[1m✓[22m[39m Compiled successfully in 33.7s
+ [37m[1m [22m[39m Checking validity of types ...
+[31mFailed to compile.
+[39m
+[36m./next.config.ts[39m:[33m1[39m:[33m15[39m
+[31m[1mType error[22m[39m: Module '"next"' has no exported member 'NextConfig'. Did you mean to use 'import NextConfig from "next"' instead?
+
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mimport[39m type { [33mNextConfig[39m } [36mfrom[39m [32m"next"[39m[33m;[39m
+ [90m   |[39m               [31m[1m^[22m[39m
+ [90m 2 |[39m [36mimport[39m path [36mfrom[39m [32m"path"[39m[33m;[39m
+ [90m 3 |[39m
+ [90m 4 |[39m [36mconst[39m nextConfig[33m:[39m [33mNextConfig[39m [33m=[39m {[0m
+Next.js build worker exited with code: 1 and signal: null

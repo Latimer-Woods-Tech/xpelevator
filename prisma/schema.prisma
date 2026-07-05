@@ -1,0 +1,188 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Organisation / multi-tenant models ──────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  plan      OrgPlan  @default(FREE)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users       User[]
+  jobTitles   JobTitle[]
+  scenarios   Scenario[]
+  criteria    Criteria[]
+  sessions    SimulationSession[]
+
+  @@map("organizations")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  orgId     String?  @map("org_id")       // nullable — users without an org use personal workspace
+  email     String   @unique
+  name      String?
+  role      UserRole @default(MEMBER)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  org      Organization? @relation(fields: [orgId], references: [id])
+  sessions SimulationSession[]
+
+  @@map("users")
+}
+
+model JobTitle {
+  id          String   @id @default(uuid())
+  orgId       String?  @map("org_id")       // null = global (available to all orgs)
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  org          Organization?       @relation(fields: [orgId], references: [id])
+  scenarios    Scenario[]
+  jobCriteria  JobCriteria[]
+  sessions     SimulationSession[]
+
+  @@map("job_titles")
+}
+
+model Scenario {
+  id          String       @id @default(uuid())
+  orgId       String?      @map("org_id")
+  jobTitleId  String       @map("job_title_id")
+  name        String
+  description String?
+  type        SimulationType
+  script      Json         @default("{}")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  org      Organization? @relation(fields: [orgId], references: [id])
+  jobTitle JobTitle      @relation(fields: [jobTitleId], references: [id])
+  sessions SimulationSession[]
+
+  @@map("scenarios")
+}
+
+model Criteria {
+  id          String   @id @default(uuid())
+  orgId       String?  @map("org_id")
+  name        String
+  description String?
+  weight      Int      @default(5)
+  category    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  org         Organization? @relation(fields: [orgId], references: [id])
+  jobCriteria JobCriteria[]
+  scores      Score[]
+
+  @@map("criteria")
+}
+
+model JobCriteria {
+  id         String   @id @default(uuid())
+  jobTitleId String   @map("job_title_id")
+  criteriaId String   @map("criteria_id")
+
+  jobTitle   JobTitle @relation(fields: [jobTitleId], references: [id])
+  criteria   Criteria @relation(fields: [criteriaId], references: [id])
+
+  @@unique([jobTitleId, criteriaId])
+  @@map("job_criteria")
+}
+
+model SimulationSession {
+  id         String           @id @default(uuid())
+  orgId      String?          @map("org_id")         // populated when user belongs to an org
+  userId     String?          @map("user_id")        // auth user id (string from NextAuth)
+  dbUserId   String?          @map("db_user_id")     // FK to User.id when user record exists
+  jobTitleId String           @map("job_title_id")
+  scenarioId String           @map("scenario_id")
+  type       SimulationType
+  status     SessionStatus    @default(PENDING)
+  startedAt  DateTime?        @map("started_at")
+  endedAt    DateTime?        @map("ended_at")
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  org        Organization?    @relation(fields: [orgId], references: [id])
+  dbUser     User?            @relation(fields: [dbUserId], references: [id])
+  jobTitle   JobTitle         @relation(fields: [jobTitleId], references: [id])
+  scenario   Scenario         @relation(fields: [scenarioId], references: [id])
+  messages   ChatMessage[]
+  scores     Score[]
+
+  @@index([userId])
+  @@index([jobTitleId])
+  @@index([orgId])
+  @@map("simulation_sessions")
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id")
+  role      MessageRole
+  content   String
+  timestamp DateTime @default(now())
+
+  session   SimulationSession @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId])
+  @@map("chat_messages")
+}
+
+model Score {
+  id         String   @id @default(uuid())
+  sessionId  String   @map("session_id")
+  criteriaId String   @map("criteria_id")
+  score      Float
+  feedback   String?
+  scoredAt   DateTime @default(now()) @map("scored_at")
+
+  session    SimulationSession @relation(fields: [sessionId], references: [id])
+  criteria   Criteria          @relation(fields: [criteriaId], references: [id])
+
+  @@index([sessionId])
+  @@index([criteriaId])
+  @@map("scores")
+}
+
+enum SimulationType {
+  PHONE
+  CHAT
+  VOICE
+}
+
+enum SessionStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  ABANDONED
+}
+
+enum MessageRole {
+  CUSTOMER
+  AGENT
+}
+
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+enum OrgPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
