@@ -149,3 +149,13 @@ jobs:
             exit 1
           fi
           echo "✅ Phase 2 read-auth + hidden-hint-leak checks passed"
+
+      - name: Verify tenant isolation on session reads (Phase 2 2/3)
+        # Race-free proof: this runs in the SAME job right after the deploy above,
+        # so the freshly-built code is guaranteed live on the pages.dev alias (no
+        # "health 200 on the old build" ambiguity). Mints two authed identities in
+        # different orgs, seeds an owner-held session, and asserts anon=401,
+        # cross-tenant=403 (JSON + phone-stream), owner=200, then cleans up.
+        env:
+          BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
+        run: node scripts/phase2-isolation-check.mjs

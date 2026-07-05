@@ -5,18 +5,13 @@ name: Phase 2 (2/3) — tenant-isolation check
 # in different orgs against the LIVE deploy and asserts anon=401, cross-tenant=403
 # (JSON + phone-stream), owner=200. Touches NO DNS. Uses repo-staged secrets.
 #
-# Runs on manual dispatch, and once automatically on the PR merge (paths filter
-# matches the files it adds) so the slice self-verifies without needing
-# actions:write to dispatch. Waits for the deploy workflow to publish first.
+# Manual re-verification only. The authoritative on-merge proof runs INSIDE
+# deploy.yml as a post-deploy step (same job as the deploy → new build is
+# guaranteed live, no race). This standalone copy waits for /api/health, which
+# a stale build also answers 200, so it must not gate merges — hence dispatch
+# only. The script hardens the SSE path against hanging regardless.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/phase2-isolation.yml'
-      - 'scripts/phase2-isolation-check.mjs'
-      - 'src/lib/session-access.ts'
-      - 'src/app/api/chat/route.ts'
 
 concurrency:
   group: phase2-isolation
