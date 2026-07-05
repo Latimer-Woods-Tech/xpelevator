@@ -8,8 +8,12 @@ name: Deploy to Cloudflare Pages (LWT)
 # - Deploys to a fresh project name (xpelevator-sim) — the old xpelevator.pages.dev
 #   lives in a different CF account and its subdomain is globally reserved.
 # - The xpelevator.com CNAME flip is founder-gated and is NOT part of this workflow.
-# - Manual-only (workflow_dispatch) while Phase 1 is in flight.
+# - Runs on push to main (steady state) and manual dispatch. The job
+#   self-verifies (/api/health 200 + live Groq credential) and fails loudly on a
+#   bad deploy; it touches NO DNS, so auto-run on merge is safe.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
