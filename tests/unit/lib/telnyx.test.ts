@@ -6,7 +6,7 @@
  *   2. initiateCall sends correct POST to Telnyx API    — man steps onto bridge
  *   3. initiateCall throws when TELNYX_API_KEY missing  — bridge locked, no crossing
  *   4. callSpeak sends speak action                     — voice heard halfway across
- *   5. callGather sends gather action                   — waiting for reply
+ *   5. start/stopTranscription send transcription actions — STT lifecycle
  *   6. callHangup sends hangup action                   — bridge exit
  *   7. Telnyx API error surfaces as thrown Error        — bridge collapses, caught
  */
@@ -22,7 +22,8 @@ import {
   decodeClientState,
   initiateCall,
   callSpeak,
-  callGather,
+  startTranscription,
+  stopTranscription,
   callHangup,
 } from '@/lib/telnyx';
 
@@ -144,7 +145,8 @@ describe('lib/telnyx — callSpeak', () => {
     const body = JSON.parse(opts.body as string);
     expect(body.payload).toBe('Hello, thank you for calling.');
     expect(body.language).toBe('en-US');
-    expect(body.voice).toBe('female');
+    // Default voice is a natural US-English female Polly Neural voice.
+    expect(body.voice).toBe('Polly.Joanna-Neural');
   });
 
   it('uses custom language and voice when provided', async () => {
@@ -157,18 +159,38 @@ describe('lib/telnyx — callSpeak', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('lib/telnyx — callGather', () => {
+describe('lib/telnyx — startTranscription / stopTranscription', () => {
   beforeEach(() => {
     process.env.TELNYX_API_KEY = 'test-key';
     fetchMock.mockReset();
-    fetchMock.mockResolvedValue(makeOkResponse({}));
+    fetchMock.mockResolvedValue(makeOkResponse({ data: {} }));
   });
 
-  it('sends POST to /actions/gather_using_speak', async () => {
-    await callGather('cc-101', { timeout: 5000, clientState: 'state-xyz' });
+  it('startTranscription POSTs to /actions/transcription_start with the Telnyx engine', async () => {
+    await startTranscription('cc-101', { clientState: 'state-xyz' });
 
     const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('cc-101/actions/gather_using_speak');
+    expect(url).toContain('cc-101/actions/transcription_start');
+    expect(opts.method).toBe('POST');
+
+    const body = JSON.parse(opts.body as string);
+    expect(body.transcription_engine).toBe('Telnyx');
+    // Defaults to caller audio only so the customer's own TTS is not transcribed.
+    expect(body.transcription_tracks).toBe('inbound');
+    expect(body.client_state).toBe('state-xyz');
+  });
+
+  it('startTranscription honours an explicit track', async () => {
+    await startTranscription('cc-101', { track: 'both' });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.transcription_tracks).toBe('both');
+  });
+
+  it('stopTranscription POSTs to /actions/transcription_stop', async () => {
+    await stopTranscription('cc-202', { clientState: 'st' });
+
+    const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('cc-202/actions/transcription_stop');
     expect(opts.method).toBe('POST');
   });
 });

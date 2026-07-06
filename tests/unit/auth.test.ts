@@ -139,22 +139,40 @@ describe('env.ts — required variable validation', () => {
 
 // ── NextAuth configuration ────────────────────────────────────────────────────
 
+// The Credentials provider now looks a user up by email via @/lib/db `sql`
+// (a Neon tagged-template query fn). We mock it so `authorize` is fully
+// deterministic and never touches a real database.
+type AuthorizeCreds = Record<string, string | undefined>;
+type CapturedConfig = { authorize?: (creds: AuthorizeCreds) => unknown } | null;
+
+/** Install the standard next-auth mocks and a controllable `sql` mock. */
+function mockAuthDeps(sqlImpl: (...args: unknown[]) => unknown = () => Promise.resolve([])) {
+  const sqlMock = vi.fn(sqlImpl);
+  vi.doMock('@/lib/db', () => ({ sql: sqlMock, default: sqlMock }));
+  vi.doMock('next-auth/providers/github', () => ({ default: vi.fn() }));
+  vi.doMock('next-auth', () => ({
+    default: vi.fn((config: { providers?: unknown[] } = {}) => ({
+      handlers: { GET: vi.fn(), POST: vi.fn() },
+      auth: vi.fn().mockResolvedValue(null),
+      signIn: vi.fn(),
+      signOut: vi.fn(),
+      _providers: config.providers,
+    })),
+  }));
+  return sqlMock;
+}
+
 describe('NextAuth credentials provider', () => {
   afterEach(() => {
     vi.resetModules();
+    delete process.env.AUTH_GITHUB_ID;
+    delete process.env.AUTH_GITHUB_SECRET;
+    delete process.env.CREDENTIALS_REQUIRE_EXISTING;
   });
 
   it('exports auth, handlers, signIn, signOut from @/auth', async () => {
     vi.resetModules();
-    vi.doMock('next-auth', () => ({
-      default: vi.fn(() => ({
-        handlers: { GET: vi.fn(), POST: vi.fn() },
-        auth: vi.fn().mockResolvedValue(null),
-        signIn: vi.fn(),
-        signOut: vi.fn(),
-      })),
-    }));
-    vi.doMock('next-auth/providers/github', () => ({ default: vi.fn() }));
+    mockAuthDeps();
     vi.doMock('next-auth/providers/credentials', () => ({
       default: vi.fn((config: unknown) => config),
     }));
@@ -165,55 +183,78 @@ describe('NextAuth credentials provider', () => {
     expect(authModule.handlers).toBeDefined();
   });
 
-  it('credentials provider authorize returns null for empty username', async () => {
+  it('authorize returns null when the email is empty or malformed', async () => {
     vi.resetModules();
-    // Capture the credentials config to test `authorize` directly
-    let capturedConfig: { authorize?: (creds: Record<string, string | undefined>) => unknown } | null = null;
+    let captured: CapturedConfig = null;
+    mockAuthDeps();
     vi.doMock('next-auth/providers/credentials', () => ({
-      default: vi.fn((config: { authorize?: (creds: Record<string, string | undefined>) => unknown }) => {
-        capturedConfig = config;
+      default: vi.fn((config: NonNullable<CapturedConfig>) => {
+        captured = config;
         return config;
       }),
     }));
-    vi.doMock('next-auth', () => ({
-      default: vi.fn(() => ({
-        handlers: { GET: vi.fn(), POST: vi.fn() },
-        auth: vi.fn().mockResolvedValue(null),
-        signIn: vi.fn(), signOut: vi.fn(),
-      })),
-    }));
-    vi.doMock('next-auth/providers/github', () => ({ default: vi.fn() }));
 
     await import('@/auth');
-    expect(capturedConfig).not.toBeNull();
-    const result = capturedConfig!.authorize?.({ username: '' });
-    expect(result).toBeNull();
+    expect(captured).not.toBeNull();
+    await expect(captured!.authorize?.({ email: '' })).resolves.toBeNull();
+    await expect(captured!.authorize?.({ email: 'not-an-email' })).resolves.toBeNull();
   });
 
-  it('credentials provider authorize returns user object for non-empty username', async () => {
+  it('authorize returns the existing user for a valid email', async () => {
     vi.resetModules();
-    let capturedConfig: { authorize?: (creds: Record<string, string | undefined>) => unknown } | null = null;
+    let captured: CapturedConfig = null;
+    // First (SELECT) query returns an existing user row.
+    mockAuthDeps(() =>
+      Promise.resolve([
+        { id: 'u1', email: 'alice@example.com', name: 'Alice', role: 'ADMIN' },
+      ])
+    );
     vi.doMock('next-auth/providers/credentials', () => ({
-      default: vi.fn((config: { authorize?: (creds: Record<string, string | undefined>) => unknown }) => {
-        capturedConfig = config;
+      default: vi.fn((config: NonNullable<CapturedConfig>) => {
+        captured = config;
         return config;
       }),
     }));
-    vi.doMock('next-auth', () => ({
-      default: vi.fn(() => ({
-        handlers: { GET: vi.fn(), POST: vi.fn() },
-        auth: vi.fn().mockResolvedValue(null),
-        signIn: vi.fn(), signOut: vi.fn(),
-      })),
-    }));
-    vi.doMock('next-auth/providers/github', () => ({ default: vi.fn() }));
 
     await import('@/auth');
-    expect(capturedConfig).not.toBeNull();
-    const result = capturedConfig!.authorize?.({ username: 'Alice' }) as { id: string; name: string } | null;
+    const result = (await captured!.authorize?.({ email: 'Alice@Example.com' })) as {
+      id: string;
+      email: string;
+      role: string;
+    } | null;
     expect(result).not.toBeNull();
-    expect(result?.name).toBe('Alice');
-    expect(result?.id).toBe('Alice');
+    expect(result?.id).toBe('u1');
+    expect(result?.email).toBe('alice@example.com'); // normalised to lowercase
+    expect(result?.role).toBe('ADMIN');
+  });
+
+  it('authorize auto-creates a user in dev/demo mode when none exists', async () => {
+    vi.resetModules();
+    let captured: CapturedConfig = null;
+    let call = 0;
+    // 1st call (SELECT) → no user; 2nd call (INSERT ... RETURNING) → created row.
+    mockAuthDeps(() => {
+      call += 1;
+      if (call === 1) return Promise.resolve([]);
+      return Promise.resolve([
+        { id: 'u2', email: 'bob@example.com', name: 'bob', role: 'MEMBER' },
+      ]);
+    });
+    vi.doMock('next-auth/providers/credentials', () => ({
+      default: vi.fn((config: NonNullable<CapturedConfig>) => {
+        captured = config;
+        return config;
+      }),
+    }));
+
+    await import('@/auth');
+    const result = (await captured!.authorize?.({ email: 'bob@example.com' })) as {
+      id: string;
+      email: string;
+    } | null;
+    expect(result).not.toBeNull();
+    expect(result?.id).toBe('u2');
+    expect(result?.email).toBe('bob@example.com');
   });
 
   it('GitHub provider included only when both env vars set', async () => {
@@ -221,6 +262,8 @@ describe('NextAuth credentials provider', () => {
     process.env.AUTH_GITHUB_ID = 'gh-id';
     process.env.AUTH_GITHUB_SECRET = 'gh-secret';
     const githubMock = vi.fn();
+    const sqlMock = vi.fn(() => Promise.resolve([]));
+    vi.doMock('@/lib/db', () => ({ sql: sqlMock, default: sqlMock }));
     vi.doMock('next-auth/providers/github', () => ({ default: githubMock }));
     vi.doMock('next-auth/providers/credentials', () => ({ default: vi.fn((c: unknown) => c) }));
     let capturedProviders: unknown[] = [];
@@ -232,7 +275,5 @@ describe('NextAuth credentials provider', () => {
     }));
     await import('@/auth');
     expect(capturedProviders.some(p => p === githubMock)).toBe(true);
-    delete process.env.AUTH_GITHUB_ID;
-    delete process.env.AUTH_GITHUB_SECRET;
   });
 });
