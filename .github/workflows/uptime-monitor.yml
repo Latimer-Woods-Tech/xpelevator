@@ -1,0 +1,101 @@
+name: Uptime + scoring monitor
+
+# Phase 1 tail — "Uptime checks on /api/health + a scoring canary".
+#
+# Runs on the Actions runner (the sandbox/prod egress to the branded domain is
+# policy-blocked; all live checks run runner-side per the repo's staged-secrets
+# pattern). Two jobs, split by cron so the cheap check runs often and the heavy
+# end-to-end check runs a few times a day:
+#
+#   health  (every 15 min) — /api/health 200 on xpelevator.com + the pages.dev
+#     alias, AND a direct Groq /v1/models credential probe. That probe is the
+#     early-warning for the ORIGINAL outage (live-issue #1): an expired GROQ_API_KEY
+#     silently nulls every score while /api/health stays 200 (it only checks the
+#     var is present, not that it authenticates).
+#
+#   scoring-canary (every 6h) — drives one full authenticated session against the
+#     live branded domain and asserts a NON-NULL score, then prunes old canary
+#     sessions so the live DB doesn't accrete monitor rows.
+#
+# Any failure opens (or comments on) a single GitHub alert issue, so a red run in
+# the Actions tab becomes an actual notification. Touches NO DNS.
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # health + credential probe
+    - cron: '17 */6 * * *'   # end-to-end scoring canary
+  workflow_dispatch:
+  push:
+    # Self-verify once on merge (dispatch needs actions:write the MCP token lacks).
+    branches: [main]
+    paths:
+      - '.github/workflows/uptime-monitor.yml'
+      - 'scripts/uptime-check.mjs'
+      - 'scripts/prune-canary-sessions.mjs'
+      - 'scripts/monitor-alert.cjs'
+
+concurrency:
+  group: uptime-monitor-${{ github.event.schedule || github.event_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  health:
+    name: Health + scoring-credential probe
+    # On schedule run only for the 15-min cron; on push/dispatch always run.
+    if: ${{ github.event_name != 'schedule' || github.event.schedule == '*/15 * * * *' }}
+    runs-on: ubuntu-latest
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # No npm install: the probe uses only Node's global fetch.
+      - name: Probe /api/health + Groq credential
+        run: node scripts/uptime-check.mjs
+      - name: Alert on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reason = fs.existsSync('monitor-failure.md')
+              ? fs.readFileSync('monitor-failure.md', 'utf8')
+              : 'Health / scoring-credential probe failed (no detail file written).';
+            await require('./scripts/monitor-alert.cjs')({ github, context, reason, job: 'health' });
+
+  scoring-canary:
+    name: End-to-end scoring canary (non-null score)
+    if: ${{ github.event_name != 'schedule' || github.event.schedule == '17 */6 * * *' }}
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://xpelevator.com
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Drive a full session and assert a non-null score
+        run: node scripts/phase1-canary.mjs
+      - name: Prune old canary sessions (keep newest 3)
+        if: always()
+        run: node scripts/prune-canary-sessions.mjs
+      - name: Alert on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const reason =
+              'The end-to-end scoring canary failed against https://xpelevator.com — a full ' +
+              'authenticated session did NOT produce a non-null score (the Phase-1 core-loop ' +
+              'acceptance). See the run log for the failing step.';
+            await require('./scripts/monitor-alert.cjs')({ github, context, reason, job: 'scoring-canary' });
