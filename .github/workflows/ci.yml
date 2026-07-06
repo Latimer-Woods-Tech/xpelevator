@@ -34,6 +34,27 @@ jobs:
       - name: Lint (eslint, zero errors)
         run: npm run lint
 
+  # Deterministic unit tests — no DB, no live LLM/Telnyx creds (all mocked).
+  # Every PR must pass. Integration/UI tests are NOT yet wired (see NOTE below).
+  unit-tests:
+    name: Unit tests (vitest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests (vitest run tests/unit)
+        run: npm run test:unit
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -60,9 +81,10 @@ jobs:
       - name: Build
         run: npm run build
 
-  # NOTE: the vitest suite is NOT yet wired as a gate. As of 2026-07-06 it has
-  # ~33 failing tests that drifted from the current implementation (renamed
-  # exports, changed Telnyx voice mapping, stale UI/auth expectations). Wiring a
-  # red suite as a required check would block every PR. Repairing the suite +
-  # adding coverage floors (PLATFORM_STANDARDS §3-4) is tracked as the next
-  # Phase 3 sub-slice in issue #16; the test job is added there once green.
+  # NOTE: only the DETERMINISTIC unit suite (tests/unit — 73 tests, all deps
+  # mocked, no DB/LLM/Telnyx creds) is wired as a required gate above. The
+  # integration/ui/smoke tiers still hit live Neon + Groq (tests/setup.ts loads
+  # real .env) and carry residual drift, so they are NOT gated yet — wiring a
+  # credential-dependent or red suite as a required check would flake/block every
+  # PR. Repairing the integration/ui tiers + adding the §3-4 coverage floors is
+  # the next Phase 3 sub-slice tracked in issue #16.

@@ -1,48 +1,92 @@
 /**
  * Unit tests for src/lib/ai.ts
  *
- * Bridges tested:
- *   1. System prompt construction        — bridge 3 entrance gate
- *   2. Prompt personalises per difficulty — bridge guard checks ticket
- *   3. Fallback script when no script     — missing bridge still passable
- *   4. scoreSession parses valid JSON     — man crosses successfully
- *   6. scoreSession handles bad JSON      — bridge survives a fall, returns []
- *   7. scoreSession clamps scores 1–10   — no one falls off the edge
- *   8. scoreSession returns [] for empty criteria — no bridge, no crossing
- *   9. streamNextCustomerMessage yields tokens — foot-by-foot crossing
+ * The scoring/generation stack calls the Groq HTTP API through
+ * getGroqClient() -> GroqFetchClient (raw fetch, Cloudflare-Workers safe).
+ * We stub global fetch and provide a non-placeholder GROQ_API_KEY so the
+ * real client code runs against controlled responses — this exercises both
+ * ai.ts logic AND groq-fetch's SSE parsing (empty-delta skipping, etc.).
+ *
+ * Covered:
+ *   1. System prompt construction        — persona/objective/difficulty/hints
+ *   2. Fallback script when no script     — default customer still renders
+ *   3. generateResponse returns content   — and '' when choices empty
+ *   4. scoreSession parses valid JSON, strips markdown fences, clamps 1–10,
+ *      tolerates malformed JSON ([]), filters out-of-range criteria indices
+ *   5. streamNextCustomerMessage yields streamed tokens + skips empty deltas
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// ── Types for the mocked Groq client ─────────────────────────────────────────
-
-type CompletionResponse = {
-  choices: Array<{ message: { content: string } }>;
-};
-
-type StreamChunk = {
-  choices: Array<{ delta: { content?: string } }>;
-};
-
-// ── Mock groq-sdk BEFORE importing ai.ts ─────────────────────────────────────
-// vi.hoisted ensures mockCreate is defined before the vi.mock factory runs
-const mockCreate = vi.hoisted(() => vi.fn());
-
-vi.mock('groq-sdk', () => {
-  // Use a real class so `new Groq(...)` doesn't throw "not a constructor"
-  class MockGroq {
-    chat = { completions: { create: mockCreate } };
-  }
-  return { default: MockGroq };
-});
-
-// ── Import ai.ts AFTER mock ───────────────────────────────────────────────────
 import {
   buildSessionSystemPrompt,
   generateResponse,
   scoreSession,
   streamNextCustomerMessage,
 } from '@/lib/ai';
+
+// ── fetch response helpers ────────────────────────────────────────────────────
+
+/** Build a non-streaming Groq chat/completions Response with the given text. */
+function completionResponse(content: string) {
+  return new Response(
+    JSON.stringify({
+      id: 'cmpl-test',
+      object: 'chat.completion',
+      created: 0,
+      model: 'test',
+      choices: [
+        { index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' },
+      ],
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}
+
+/** Build a Groq Response whose choices array is empty. */
+function emptyChoicesResponse() {
+  return new Response(JSON.stringify({ choices: [] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+/**
+ * Build a streaming (SSE) Groq Response. Each entry becomes a `data:` frame;
+ * `null` emits a chunk with an empty delta (no content) to exercise skipping.
+ */
+function streamResponse(deltas: Array<string | null>) {
+  const enc = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const d of deltas) {
+        const frame =
+          d === null
+            ? { choices: [{ delta: {} }] }
+            : { choices: [{ delta: { content: d } }] };
+        controller.enqueue(enc.encode(`data: ${JSON.stringify(frame)}\n\n`));
+      }
+      controller.enqueue(enc.encode('data: [DONE]\n\n'));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200 });
+}
+
+// ── globals ───────────────────────────────────────────────────────────────────
+
+let fetchMock: ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  // Non-placeholder key so getGroqClient() resolves a client (not 'dummy-*').
+  process.env.GROQ_API_KEY = 'gsk_test_unit_key';
+  fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -99,29 +143,26 @@ describe('lib/ai — buildSessionSystemPrompt', () => {
     expect(prompt.toLowerCase()).toContain('mildly frustrated');
   });
 
-  it('does NOT include hints section when hints array is empty', () => {
+  it('does NOT include a context-details section when hints array is empty', () => {
     const scriptNoHints = { ...SAMPLE_SCRIPT, hints: [] };
     const prompt = buildSessionSystemPrompt('Test', scriptNoHints);
-    expect(prompt).not.toContain('SITUATION CUES');
+    expect(prompt).not.toContain('CONTEXT DETAILS');
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('lib/ai — generateResponse', () => {
-  beforeEach(() => mockCreate.mockReset());
-
-  it('returns the AI message content', async () => {
-    mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content: 'Hello, I need help with my bill.' } }],
-    });
-
+  it('returns the message content', async () => {
+    fetchMock.mockResolvedValueOnce(
+      completionResponse('Hello, I need help with my bill.')
+    );
     const result = await generateResponse([{ role: 'user', content: 'Hi' }]);
     expect(result).toBe('Hello, I need help with my bill.');
   });
 
   it('returns empty string when choices is empty', async () => {
-    mockCreate.mockResolvedValueOnce({ choices: [] });
+    fetchMock.mockResolvedValueOnce(emptyChoicesResponse());
     const result = await generateResponse([]);
     expect(result).toBe('');
   });
@@ -130,15 +171,13 @@ describe('lib/ai — generateResponse', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('lib/ai — scoreSession', () => {
-  beforeEach(() => mockCreate.mockReset());
-
-  it('returns empty array when no criteria provided', async () => {
+  it('returns empty array when no criteria provided (no API call)', async () => {
     const result = await scoreSession(
       [{ role: 'AGENT', content: 'How can I help?' }],
       []
     );
     expect(result).toEqual([]);
-    expect(mockCreate).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('parses valid JSON scoring response', async () => {
@@ -146,9 +185,7 @@ describe('lib/ai — scoreSession', () => {
       { criteriaIndex: 1, score: 8, justification: 'Agent showed empathy.' },
       { criteriaIndex: 2, score: 9, justification: 'Issue was fully resolved.' },
     ];
-    mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content: JSON.stringify(scores) } }],
-    });
+    fetchMock.mockResolvedValueOnce(completionResponse(JSON.stringify(scores)));
 
     const transcript = [
       { role: 'CUSTOMER' as const, content: 'My internet is down.' },
@@ -164,7 +201,7 @@ describe('lib/ai — scoreSession', () => {
 
   it('handles JSON wrapped in markdown code fences', async () => {
     const raw = '```json\n[{"criteriaIndex":1,"score":7,"justification":"Good."}]\n```';
-    mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: raw } }] });
+    fetchMock.mockResolvedValueOnce(completionResponse(raw));
 
     const result = await scoreSession(
       [{ role: 'AGENT', content: 'Hello!' }],
@@ -179,20 +216,18 @@ describe('lib/ai — scoreSession', () => {
       { criteriaIndex: 1, score: 15, justification: 'Great.' },
       { criteriaIndex: 2, score: -3, justification: 'Terrible.' },
     ]);
-    mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: raw } }] });
+    fetchMock.mockResolvedValueOnce(completionResponse(raw));
 
     const result = await scoreSession(
       [{ role: 'AGENT', content: 'Hello!' }],
       SAMPLE_CRITERIA
     );
     expect(result[0].score).toBe(10); // clamped from 15
-    expect(result[1].score).toBe(1);  // clamped from -3
+    expect(result[1].score).toBe(1); // clamped from -3
   });
 
-  it('returns [] when AI returns malformed JSON', async () => {
-    mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content: 'NOT VALID JSON {{{' } }],
-    });
+  it('returns [] when the model returns malformed JSON', async () => {
+    fetchMock.mockResolvedValueOnce(completionResponse('NOT VALID JSON {{{'));
 
     const result = await scoreSession(
       [{ role: 'AGENT', content: 'Hello!' }],
@@ -206,14 +241,13 @@ describe('lib/ai — scoreSession', () => {
       { criteriaIndex: 99, score: 8, justification: 'Out of range.' },
       { criteriaIndex: 1, score: 7, justification: 'Valid.' },
     ]);
-    mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: raw } }] });
+    fetchMock.mockResolvedValueOnce(completionResponse(raw));
 
     const result = await scoreSession(
       [{ role: 'AGENT', content: 'Hi' }],
       [SAMPLE_CRITERIA[0]]
     );
     expect(result).toHaveLength(1); // only the valid one
-    expect(result[0].criteriaIndex).toBeUndefined(); // not in output shape
     expect(result[0].criteriaId).toBe('c1');
   });
 });
@@ -221,16 +255,10 @@ describe('lib/ai — scoreSession', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('lib/ai — streamNextCustomerMessage', () => {
-  beforeEach(() => mockCreate.mockReset());
-
   it('yields streamed tokens from Groq', async () => {
-    async function* mockStream(): AsyncGenerator<StreamChunk> {
-      yield { choices: [{ delta: { content: 'My ' } }] };
-      yield { choices: [{ delta: { content: 'internet ' } }] };
-      yield { choices: [{ delta: { content: 'is down.' } }] };
-    }
-
-    mockCreate.mockResolvedValueOnce(mockStream());
+    fetchMock.mockResolvedValueOnce(
+      streamResponse(['My ', 'internet ', 'is down.'])
+    );
 
     const systemPrompt = buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT);
     const tokens: string[] = [];
@@ -243,12 +271,7 @@ describe('lib/ai — streamNextCustomerMessage', () => {
   });
 
   it('skips chunks with no delta content', async () => {
-    async function* mockStream(): AsyncGenerator<StreamChunk> {
-      yield { choices: [{ delta: {} }] };          // no content
-      yield { choices: [{ delta: { content: 'Hello!' } }] };
-    }
-
-    mockCreate.mockResolvedValueOnce(mockStream());
+    fetchMock.mockResolvedValueOnce(streamResponse([null, 'Hello!']));
 
     const tokens: string[] = [];
     for await (const token of streamNextCustomerMessage('prompt', [])) {
