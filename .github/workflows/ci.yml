@@ -35,7 +35,7 @@ jobs:
         run: npm run lint
 
   # Deterministic unit tests — no DB, no live LLM/Telnyx creds (all mocked).
-  # Every PR must pass. Integration/UI tests are NOT yet wired (see NOTE below).
+  # Job name kept stable as a required status check.
   unit-tests:
     name: Unit tests (vitest)
     runs-on: ubuntu-latest
@@ -54,6 +54,27 @@ jobs:
 
       - name: Unit tests (vitest run tests/unit)
         run: npm run test:unit
+
+  # Deterministic ui tier — React component render in happy-dom. All deps mocked
+  # (auth/next-auth/next-navigation/fetch), no DB/LLM/Telnyx creds, can't flake.
+  ui-tests:
+    name: UI tests (vitest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: UI component tests (vitest run tests/ui)
+        run: npm run test:ui
 
   build:
     name: Build
@@ -81,10 +102,12 @@ jobs:
       - name: Build
         run: npm run build
 
-  # NOTE: only the DETERMINISTIC unit suite (tests/unit — 73 tests, all deps
-  # mocked, no DB/LLM/Telnyx creds) is wired as a required gate above. The
-  # integration/ui/smoke tiers still hit live Neon + Groq (tests/setup.ts loads
+  # NOTE: the DETERMINISTIC tiers — unit (tests/unit, 73 tests) and ui
+  # (tests/ui, 21 tests, React render in happy-dom) — are wired as required
+  # gates above. All deps are mocked (auth/next-auth/next-navigation/fetch), so
+  # neither needs DB/LLM/Telnyx creds and neither can flake on credentials.
+  # The integration/smoke tiers still hit live Neon + Groq (tests/setup.ts loads
   # real .env) and carry residual drift, so they are NOT gated yet — wiring a
   # credential-dependent or red suite as a required check would flake/block every
-  # PR. Repairing the integration/ui tiers + adding the §3-4 coverage floors is
-  # the next Phase 3 sub-slice tracked in issue #16.
+  # PR. Making the integration/smoke tiers deterministic + adding the §3-4
+  # coverage floors is the next Phase 3 sub-slice tracked in issue #16.

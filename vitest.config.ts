@@ -3,6 +3,12 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 
 export default defineConfig({
   plugins: [tsconfigPaths({ projects: ['./tsconfig.test.json'] })],
+  // Source components (src/app/**) use Next.js' automatic JSX runtime and do
+  // NOT `import React`. esbuild defaults to the classic runtime (React.create-
+  // Element), which throws "React is not defined" when rendering those files in
+  // the ui tier. Force the automatic runtime so component tests transform the
+  // same way `next build` does.
+  esbuild: { jsx: 'automatic' },
   resolve: {
     // Note: 'node' condition was previously needed for next-auth v5 package
     // exports resolution. Removed because it causes React to resolve differently
