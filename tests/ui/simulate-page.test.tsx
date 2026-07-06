@@ -206,8 +206,10 @@ describe('SimulatePage — job and scenario selection', () => {
     mockFetch();
     render(<SimulatePage />);
     await userEvent.click(await screen.findByText('Help Desk Technician'));
-    await waitFor(() => expect(screen.getByText(/CHAT/i)).toBeInTheDocument());
-    expect(screen.getByText(/PHONE/i)).toBeInTheDocument();
+    // Match the uppercase type badge exactly — a loose /CHAT/i also matches the
+    // "💬 Chat" launch button that now sits below each CHAT scenario.
+    await waitFor(() => expect(screen.getByText('CHAT')).toBeInTheDocument());
+    expect(screen.getByText('PHONE')).toBeInTheDocument();
   });
 
   it('start button triggers POST to /api/simulations', async () => {
