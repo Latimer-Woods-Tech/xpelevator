@@ -159,3 +159,50 @@ jobs:
         env:
           BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
         run: node scripts/phase2-isolation-check.mjs
+
+      - name: Verify security headers (Phase 2 3/3)
+        # Assert the security-header set is present on the freshly-deployed build.
+        # Targets a DYNAMIC document route (/) and an API route (/api/health) —
+        # both rendered by the OpenNext worker, so next.config headers() attaches.
+        # Checked on the pages.dev alias (authoritative for this deploy) AND the
+        # branded domain (proves live users are protected). A missing header
+        # fails the deploy — this is a permanent regression gate.
+        run: |
+          set -e
+          fail=0
+          # Header name (case-insensitive) + a substring its value MUST contain.
+          check_header() {
+            local hdrs="$1" name="$2" needle="$3" where="$4"
+            local line
+            line=$(printf '%s' "$hdrs" | grep -i "^$name:" | head -1 || true)
+            if [ -z "$line" ]; then
+              echo "::error::$where missing header $name"; fail=1; return
+            fi
+            if ! printf '%s' "$line" | grep -iq "$needle"; then
+              echo "::error::$where $name present but missing '$needle' -> $line"; fail=1; return
+            fi
+            echo "  ✓ $name ($needle)"
+          }
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            for path in / /api/health; do
+              echo "== $BASE$path =="
+              H=""
+              for i in 1 2 3 4 5; do
+                H=$(curl -sS -D - -o /dev/null "$BASE$path" || echo '')
+                if printf '%s' "$H" | grep -iq '^content-security-policy:'; then break; fi
+                sleep 6
+              done
+              check_header "$H" "content-security-policy"   "frame-ancestors 'none'"           "$BASE$path"
+              check_header "$H" "strict-transport-security"  "max-age=31536000"                 "$BASE$path"
+              check_header "$H" "x-content-type-options"     "nosniff"                          "$BASE$path"
+              check_header "$H" "x-frame-options"            "DENY"                             "$BASE$path"
+              check_header "$H" "referrer-policy"            "strict-origin-when-cross-origin"  "$BASE$path"
+              # microphone=(self) MUST survive — browser voice mode depends on it.
+              check_header "$H" "permissions-policy"         "microphone=(self)"                "$BASE$path"
+            done
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Phase 2 (3/3) security-header verification failed"
+            exit 1
+          fi
+          echo "✅ Security headers present on both hosts (document + API)"
