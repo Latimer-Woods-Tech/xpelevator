@@ -11,6 +11,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fast static gates — no build, no DB. Every PR must pass typecheck + lint.
+  quality:
+    name: Quality (typecheck + lint)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Lint (eslint, zero errors)
+        run: npm run lint
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -36,3 +59,10 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # NOTE: the vitest suite is NOT yet wired as a gate. As of 2026-07-06 it has
+  # ~33 failing tests that drifted from the current implementation (renamed
+  # exports, changed Telnyx voice mapping, stale UI/auth expectations). Wiring a
+  # red suite as a required check would block every PR. Repairing the suite +
+  # adding coverage floors (PLATFORM_STANDARDS §3-4) is tracked as the next
+  # Phase 3 sub-slice in issue #16; the test job is added there once green.
