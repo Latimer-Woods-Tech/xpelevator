@@ -12,13 +12,6 @@ const eslintConfig = defineConfig([
     "tests/**",
     "**/*.test.ts",
     "**/*.test.tsx",
-    // Throwaway root-level debug/scratch scripts left over from the Phase 0/1
-    // production-debugging sessions (unreferenced; use process.env + hardcoded
-    // test IDs). Slated for physical removal in the Phase 3 repo-cleanup slice
-    // (issue #16); ignored here so they can't block the CI lint gate.
-    "test-*.js",
-    "test-*.mjs",
-    "check-*.js",
   ]),
 ]);
 
