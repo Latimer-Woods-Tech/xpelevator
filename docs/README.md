@@ -1,13 +1,26 @@
 # XPElevator — Documentation Index
 
-> Last updated: February 21, 2026
+> Last updated: February 21, 2026 (spine links refreshed 2026-07-09; the status
+> summary below predates the Phase 1–4 work on issue #16 — treat the **design
+> spine** as source of truth, not this section).
 
 ## Quick Links
+
+**Design spine (source of truth — PLATFORM_STANDARDS §16):**
+
+| Document | Purpose |
+|----------|---------|
+| [VISION.md](VISION.md) | North star — ICP (operators), the problem, monetization thesis, non-goals, kill-signals |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Grounded system description — C4 Current context/containers, Target, Gap analysis, key decisions (`verified:` stamped) |
+| [REQUIREMENTS.md](REQUIREMENTS.md) | Numbered, testable, statused requirements — the traceability spine for #16 slices |
+| [adr/](adr/) | Architecture Decision Records |
+| [DOMAIN_REFERENCE.md](DOMAIN_REFERENCE.md) | Product/domain knowledge — MSP role ladder, scenario catalog, scoring rubric, `Scenario.script` shape, persona templates |
+
+**Other docs:**
 
 | Document | Purpose |
 |----------|---------|
 | [USER_GUIDE.md](USER_GUIDE.md) | **End-user documentation** — how to use XPElevator, start simulations, review scores, admin features |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | System design: C4 diagrams, Mermaid flow diagrams, DB schema, scenario catalog, scoring rubric, API reference |
 | [ENGINEERING.md](ENGINEERING.md) | Developer guide: setup, project structure, conventions, deployment, debugging runbooks |
 | [BACKLOG.md](BACKLOG.md) | Product & engineering backlog — all open issues, sprint assignments, completed history |
 | [ROADMAP.md](ROADMAP.md) | Phase plan, gap analysis, architecture decision log |
