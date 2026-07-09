@@ -150,6 +150,45 @@ jobs:
           fi
           echo "✅ Phase 2 read-auth + hidden-hint-leak checks passed"
 
+      - name: Verify /api/plans is publicly reachable (anon 200)
+        # The operator pricing/signup surface reads the seat-plan catalog from
+        # /api/plans, which is public by design (no secrets, no tenant data).
+        # The /api/* middleware matcher gates every API path, so this route must
+        # be in PUBLIC_ROUTES or anonymous callers get 401 before the handler
+        # runs. Permanent regression gate against that class of mismatch.
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /tmp/plans.json -w '%{http_code}' "$BASE/api/plans" || echo 000)
+              if [ "$code" = "200" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/plans -> HTTP $code"
+            if [ "$code" != "200" ]; then
+              echo "::error::$BASE/api/plans must be public (got $code) — pricing/signup surface would break"
+              fail=1
+              continue
+            fi
+            # Public catalog must expose the tier shape but never internal wiring.
+            if ! grep -q 'seat-based-subscription' /tmp/plans.json; then
+              echo "::error::$BASE/api/plans body missing expected catalog shape"
+              echo "  body (first 300 chars): $(head -c 300 /tmp/plans.json)"
+              fail=1
+            fi
+            if grep -q 'stripeLookupKey' /tmp/plans.json; then
+              echo "::error::$BASE/api/plans leaked internal stripeLookupKey wiring"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::/api/plans public-reachability verification failed"
+            exit 1
+          fi
+          echo "✅ /api/plans is publicly reachable and carries no internal wiring"
+
       - name: Verify tenant isolation on session reads (Phase 2 2/3)
         # Race-free proof: this runs in the SAME job right after the deploy above,
         # so the freshly-built code is guaranteed live on the pages.dev alias (no

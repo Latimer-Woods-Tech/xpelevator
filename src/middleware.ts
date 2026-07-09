@@ -12,6 +12,7 @@
  *   /          — home page
  *   /auth/*    — sign in/out pages
  *   /api/health — health check
+ *   /api/plans — public seat-plan catalog (pricing/signup surface)
  *   /api/telnyx/webhook — external webhook (has own verification)
  *
  * Every other /api/* route (including all reads) requires authentication —
@@ -29,6 +30,7 @@ const PUBLIC_ROUTES = [
   '/auth/signin',
   '/auth/signout',
   '/api/health',
+  '/api/plans', // Public seat-plan catalog for the operator pricing/signup surface — no secrets, no tenant data
   '/api/telnyx/webhook', // Has its own signature verification
   '/api/auth', // NextAuth handlers
 ];
