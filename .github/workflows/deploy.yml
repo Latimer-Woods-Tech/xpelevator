@@ -229,6 +229,38 @@ jobs:
           fi
           echo "✅ /pricing is publicly reachable, lists all seat tiers, and is copy-clean"
 
+      - name: Verify manager reporting export is auth-gated (Phase 4)
+        # The manager CSV export (GET /api/reports/sessions) returns a tenant's
+        # completed-session scores — it is ADMIN-only and org-scoped, and must
+        # NEVER be readable anonymously. The /api/* middleware matcher gates it,
+        # and the handler additionally requires role=ADMIN. Permanent regression
+        # gate: an anonymous caller must get 401 on both hosts (a 200 here would
+        # mean the export leaked cross-tenant session data). Checked on the
+        # pages.dev alias (authoritative for this deploy) and the branded domain.
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/reports/sessions" || echo 000)
+              # 401 is the pass; anything else (esp. 200) is retried in case the
+              # fresh deploy is still propagating, then failed below.
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/reports/sessions -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/reports/sessions must require auth (got $code) — manager export would leak session data"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Manager reporting export auth-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /api/reports/sessions rejects anonymous callers (401) on both hosts"
+
       - name: Verify tenant isolation on session reads (Phase 2 2/3)
         # Race-free proof: this runs in the SAME job right after the deploy above,
         # so the freshly-built code is guaranteed live on the pages.dev alias (no
