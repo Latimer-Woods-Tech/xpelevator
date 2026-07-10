@@ -147,7 +147,15 @@ export default function AnalyticsPage() {
           &larr; Back to Home
         </Link>
 
-        <h1 className="text-3xl font-bold mb-8">Analytics</h1>
+        <div className="flex items-center justify-between mb-8 gap-4">
+          <h1 className="text-3xl font-bold">Analytics</h1>
+          <a
+            href="/api/reports/sessions"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+          >
+            Download CSV
+          </a>
+        </div>
 
         {loading ? (
           <p className="text-slate-400">Loading analytics...</p>

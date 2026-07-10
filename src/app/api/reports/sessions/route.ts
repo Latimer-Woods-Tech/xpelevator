@@ -1,0 +1,82 @@
+/**
+ * Manager reporting export — `GET /api/reports/sessions`
+ *
+ * Returns a downloadable CSV of the caller's org's completed simulation
+ * sessions with their per-session weighted score — the artifact a manager (or a
+ * reselling operator) hands to their client. Phase 4, issue #16:
+ * "Manager reporting + CSV/PDF export".
+ *
+ * Access: ADMIN only (managers), and strictly scoped to the admin's own org —
+ * `requireAuth(request, 'ADMIN')` yields 401 for anon (also caught earlier by
+ * middleware), 403 for a non-admin member, and the query filters on the admin's
+ * `orgId`, so it can never surface another tenant's sessions.
+ *
+ * The row/weighting logic lives in the pure `@/lib/report` + `@/lib/csv`
+ * modules (unit-tested without a DB); this handler is a thin auth + query shell.
+ */
+import { NextResponse } from 'next/server';
+import { sql } from '@/lib/db';
+import { requireAuth, AuthError } from '@/lib/auth-api';
+import { sessionsToCsv, type ReportSession } from '@/lib/report';
+
+export async function GET(request: Request) {
+  try {
+    const { session } = await requireAuth(request, 'ADMIN');
+    const orgId = session.user.orgId ?? null;
+
+    // Strict tenant scoping: an admin sees only their own org's sessions.
+    // (`org_id IS NULL` for an admin without an org = their personal workspace.)
+    const rows = await sql`
+      SELECT
+        ss.id,
+        ss.type,
+        ss.ended_at   as "endedAt",
+        ss.created_at as "createdAt",
+        u.email       as "traineeEmail",
+        jt.name       as "jobTitle",
+        s.name        as "scenario",
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'score', sc.score,
+              'criteria', json_build_object('name', c.name, 'weight', c.weight)
+            ) ORDER BY sc.scored_at
+          ) FILTER (WHERE sc.id IS NOT NULL),
+          '[]'
+        ) as scores
+      FROM simulation_sessions ss
+      LEFT JOIN users      u  ON u.id  = ss.db_user_id
+      LEFT JOIN job_titles jt ON jt.id = ss.job_title_id
+      LEFT JOIN scenarios  s  ON s.id  = ss.scenario_id
+      LEFT JOIN scores     sc ON sc.session_id = ss.id
+      LEFT JOIN criteria   c  ON c.id  = sc.criteria_id
+      WHERE ss.status = 'COMPLETED'
+        AND (${orgId ? sql`ss.org_id = ${orgId}` : sql`ss.org_id IS NULL`})
+      GROUP BY ss.id, u.email, jt.name, s.name
+      ORDER BY ss.ended_at DESC NULLS LAST
+    `;
+
+    const csv = sessionsToCsv(rows as unknown as ReportSession[]);
+    const filename = `xpelevator-sessions-${new Date().toISOString().slice(0, 10)}.csv`;
+
+    return new NextResponse(csv, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        // Reporting data is per-request and tenant-specific — never cache it.
+        'Cache-Control': 'no-store',
+      },
+    });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('Failed to build sessions report:', msg);
+    return NextResponse.json(
+      { error: 'Failed to build report' },
+      { status: 500 }
+    );
+  }
+}
