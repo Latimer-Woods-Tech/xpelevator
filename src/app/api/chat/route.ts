@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { buildSessionSystemPrompt, streamNextCustomerMessage, scoreSession } from '@/lib/ai';
+import {
+  buildSessionSystemPrompt,
+  streamNextCustomerMessage,
+  scoreSession,
+  customerModelForDifficulty,
+  resolveScenarioDifficulty,
+} from '@/lib/ai';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
@@ -132,6 +138,13 @@ export async function POST(request: Request) {
       session.scenario.name,
       session.scenario.script
     );
+    // Conversation-speed lever: pick the model tier by scenario difficulty. Hard
+    // scenarios keep the higher-realism 70B model; easy/medium use the ~3x faster
+    // 8B model so the customer's reply streams back closer to real-time.
+    const customerModel = customerModelForDifficulty(
+      resolveScenarioDifficulty(session.scenario.script)
+    );
+    console.log('[Chat API] Customer model:', customerModel);
     console.log('[Chat API] System prompt length:', systemPrompt.length);
     console.log('[Chat API] System prompt preview:', systemPrompt.substring(0, 150) + '...');
 
@@ -153,7 +166,7 @@ export async function POST(request: Request) {
     const readable = new ReadableStream({
       async start(controller) {
         try {
-          for await (const chunk of streamNextCustomerMessage(systemPrompt, history)) {
+          for await (const chunk of streamNextCustomerMessage(systemPrompt, history, customerModel)) {
             fullResponse += chunk;
             const event = `data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`;
             controller.enqueue(encoder.encode(event));
