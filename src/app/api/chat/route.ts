@@ -44,27 +44,6 @@ export async function POST(request: Request) {
           'name', s.name,
           'script', s.script
         ) as scenario,
-        json_build_object(
-          'id', jt.id,
-          'jobCriteria', COALESCE(
-            (
-              SELECT json_agg(
-                json_build_object(
-                  'criteria', json_build_object(
-                    'id', c.id,
-                    'name', c.name,
-                    'description', c.description,
-                    'weight', c.weight
-                  )
-                )
-              )
-              FROM job_criteria jc
-              LEFT JOIN criteria c ON c.id = jc.criteria_id
-              WHERE jc.job_title_id = jt.id AND c.active = true
-            ),
-            '[]'
-          )
-        ) as "jobTitle",
         COALESCE(
           json_agg(
             json_build_object(
@@ -76,11 +55,14 @@ export async function POST(request: Request) {
         ) as messages
       FROM simulation_sessions ss
       LEFT JOIN scenarios s ON s.id = ss.scenario_id
-      LEFT JOIN job_titles jt ON jt.id = ss.job_title_id
       LEFT JOIN chat_messages m ON m.session_id = ss.id
       WHERE ss.id = ${sessionId}
-      GROUP BY ss.id, s.id, jt.id
+      GROUP BY ss.id, s.id
     `;
+    // NOTE: scoring criteria are intentionally NOT loaded here. They are only
+    // needed when a session ends (scoring), so endSession() resolves them by
+    // sessionId — keeping the criteria join off the per-turn conversational
+    // hot path (this query runs before every streamed reply).
 
     if (sessionResult.length === 0) {
       console.error('[Chat API] Session not found:', sessionId);
@@ -103,13 +85,19 @@ export async function POST(request: Request) {
     }
 
     // ── 2. Save agent message ─────────────────────────────────────────────────
+    // Fire the INSERT now but DON'T block the turn on it: on a normal turn we
+    // let it run concurrently with the (much longer) AI stream and only await
+    // it once, after streaming, before any read that depends on it. This drops
+    // a Neon round-trip off the pre-first-token path — the latency the trainee
+    // actually feels. On terminal branches (end/maxTurns) we await before
+    // scoring so the transcript read is durable.
     const isStartSignal = content.trim() === '[START]';
-    if (!isStartSignal) {
-      await sql`
+    const agentInsertPromise = isStartSignal
+      ? null
+      : sql`
         INSERT INTO chat_messages (id, session_id, role, content, timestamp)
         VALUES (gen_random_uuid(), ${sessionId}, 'AGENT', ${content.trim()}, NOW())
       `;
-    }
 
     // ── 3. Check for end signal ───────────────────────────────────────────────
     const shouldEnd =
@@ -117,6 +105,7 @@ export async function POST(request: Request) {
       content.trim().toLowerCase() === 'end conversation';
 
     if (shouldEnd) {
+      if (agentInsertPromise) await agentInsertPromise;
       return await endSession(sessionId, session as any);
     }
 
@@ -132,6 +121,7 @@ export async function POST(request: Request) {
         ).length;
         if (priorAgentTurns + 1 >= maxTurns) {
           console.log(`[Chat API] maxTurns (${maxTurns}) reached — auto-ending session`);
+          if (agentInsertPromise) await agentInsertPromise;
           return await endSession(sessionId, session as any);
         }
       }
@@ -169,6 +159,11 @@ export async function POST(request: Request) {
             controller.enqueue(encoder.encode(event));
           }
 
+          // The agent-message INSERT was fired before streaming so it overlaps
+          // the model latency; ensure it has landed before we persist the reply
+          // and before any transcript read (ordering + scoring correctness).
+          if (agentInsertPromise) await agentInsertPromise;
+
           // Strip [RESOLVED] signal from stored message
           const isResolved = /\[RESOLVED\]/i.test(fullResponse);
           const cleanedResponse = fullResponse.replace(/\[RESOLVED\]\s*$/i, '').trim();
@@ -184,31 +179,12 @@ export async function POST(request: Request) {
             const sessionEndingEvent = `data: ${JSON.stringify({ type: 'session_ending', content: cleanedResponse })}\n\n`;
             controller.enqueue(encoder.encode(sessionEndingEvent));
 
-            // Reload session with the newly-saved message included
+            // Reload the transcript with the newly-saved message included.
+            // Criteria are resolved inside endSession() by sessionId, so this
+            // refresh only needs the message list.
             const refreshedResult = await sql`
-              SELECT 
+              SELECT
                 ss.id,
-                json_build_object(
-                  'jobCriteria', COALESCE(
-                    (
-                      SELECT json_agg(
-                        json_build_object(
-                          'criteria', json_build_object(
-                            'id', c.id,
-                            'name', c.name,
-                            'description', c.description,
-                            'weight', c.weight
-                          )
-                        )
-                      )
-                      FROM job_criteria jc
-                      LEFT JOIN criteria c ON c.id = jc.criteria_id
-                      LEFT JOIN job_titles jt ON jt.id = jc.job_title_id
-                      WHERE jt.id = ss.job_title_id AND c.active = true
-                    ),
-                    '[]'
-                  )
-                ) as "jobTitle",
                 COALESCE(
                   json_agg(
                     json_build_object(
@@ -235,6 +211,10 @@ export async function POST(request: Request) {
           }
           controller.close();
         } catch (err) {
+          // If the stream failed before we awaited the concurrent agent-message
+          // INSERT, swallow its result so a late rejection can't surface as an
+          // unhandled promise rejection.
+          if (agentInsertPromise) await agentInsertPromise.catch(() => {});
           const errEvent = `data: ${JSON.stringify({ type: 'error', message: 'Simulation error' })}\n\n`;
           controller.enqueue(encoder.encode(errEvent));
           controller.close();
@@ -507,31 +487,30 @@ async function endSession(
   sessionId: string,
   session: {
     messages: Array<{ role: string; content: string }>;
-    jobTitle: {
-      jobCriteria: Array<{
-        criteria: { id: string; name: string; description: string | null; weight: number };
-      }>;
-    };
   }
 ) {
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 
   // Mark session COMPLETED
   await sql`
-    UPDATE simulation_sessions 
+    UPDATE simulation_sessions
     SET status = 'COMPLETED', ended_at = NOW()
     WHERE id = ${sessionId}
   `;
 
-  // Collect criteria for this job title (or all active criteria as fallback)
-  const jobCriteria = session.jobTitle.jobCriteria.map(
-    (jc: { criteria: { id: string; name: string; description: string | null; weight: number } }) => jc.criteria
-  );
-  
-  let criteria;
-  if (jobCriteria.length > 0) {
-    criteria = jobCriteria;
-  } else {
+  // Resolve scoring criteria for this session's job title (active only). This
+  // is fetched here — at end-of-session — rather than on every conversational
+  // turn, so the criteria join stays off the streamed-reply hot path. Falls
+  // back to all active criteria if the job has no explicit links (unchanged
+  // scoring semantics vs. the previous per-turn load).
+  let criteria = await sql`
+    SELECT c.id, c.name, c.description, c.weight
+    FROM simulation_sessions ss
+    JOIN job_criteria jc ON jc.job_title_id = ss.job_title_id
+    JOIN criteria c ON c.id = jc.criteria_id
+    WHERE ss.id = ${sessionId} AND c.active = true
+  `;
+  if (criteria.length === 0) {
     criteria = await sql`SELECT id, name, description, weight FROM criteria WHERE active = true`;
   }
 
