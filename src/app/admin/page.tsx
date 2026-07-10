@@ -97,7 +97,7 @@ function CriteriaTab() {
       <TabIntro
         icon="📋"
         title="Scoring Criteria"
-        description="Criteria are the skills you want to measure in each simulation — things like Empathy, Product Knowledge, or Problem-Solving. Each criterion has a weight (importance) from 1–10. After a session ends, the AI rates the employee on every criterion linked to their job title."
+        description="Criteria are the skills you want to measure in each simulation — things like Empathy, Product Knowledge, or Problem-Solving. Each criterion has a weight (importance) from 1–10. After a session ends, the simulator rates the employee on every criterion linked to their job title."
       />
       <div className="flex justify-end mb-6">
         <button
@@ -131,7 +131,7 @@ function CriteriaTab() {
             <div className="md:col-span-2">
               <label className="block text-xs text-slate-400 mb-1">
                 Description
-                <Tooltip text="Explain exactly what this criterion measures so the AI scores consistently. E.g. 'Employee acknowledged the customer's frustration before jumping to a solution.'" />
+                <Tooltip text="Explain exactly what this criterion measures so scoring stays consistent. E.g. 'Employee acknowledged the customer's frustration before jumping to a solution.'" />
               </label>
               <input placeholder="What does this criterion measure?" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
                 className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-400" />
@@ -394,7 +394,7 @@ function ScenariosTab() {
       <TabIntro
         icon="🎭"
         title="Scenarios"
-        description="A scenario is a specific customer situation that employees practise — e.g. 'Angry customer with a late delivery'. Fill in plain-English descriptions below; no coding or JSON required. The AI uses these details to play a realistic virtual customer."
+        description="A scenario is a specific customer situation that employees practise — e.g. 'Angry customer with a late delivery'. Fill in plain-English descriptions below; no coding or JSON required. The simulator uses these details to play a realistic virtual customer."
       />
       <div className="flex items-center justify-between mb-6 gap-4">
         <select
@@ -416,7 +416,7 @@ function ScenariosTab() {
       {showForm && (
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 mb-6">
           <h3 className="font-semibold mb-1">{editingId ? 'Edit Scenario' : 'New Scenario'}</h3>
-          <p className="text-xs text-slate-400 mb-5">Fill in the fields below to define how the AI customer will behave. No technical knowledge required.</p>
+          <p className="text-xs text-slate-400 mb-5">Fill in the fields below to define how the simulated customer will behave. No technical knowledge required.</p>
 
           {/* Basic info */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
@@ -463,14 +463,14 @@ function ScenariosTab() {
             </div>
           </div>
 
-          {/* AI Customer behaviour */}
+          {/* Simulated Customer behaviour */}
           <div className="border-t border-slate-700 pt-5 mb-5">
-            <h4 className="text-sm font-medium text-slate-200 mb-4">🤖 AI Customer Behaviour</h4>
+            <h4 className="text-sm font-medium text-slate-200 mb-4">🤖 Simulated Customer Behaviour</h4>
             <div className="grid grid-cols-1 gap-4">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">
                   Who is the customer?
-                  <Tooltip text="Describe the customer's personality and emotional state. The AI will play this character throughout the simulation. E.g. 'A frustrated customer who paid for express shipping but received the item 2 weeks late. They are upset but polite.'" />
+                  <Tooltip text="Describe the customer's personality and emotional state. The simulator plays this character throughout the simulation. E.g. 'A frustrated customer who paid for express shipping but received the item 2 weeks late. They are upset but polite.'" />
                 </label>
                 <textarea
                   rows={3}
@@ -483,7 +483,7 @@ function ScenariosTab() {
               <div>
                 <label className="block text-xs text-slate-400 mb-1">
                   What does the customer want?
-                  <Tooltip text="The outcome the customer is trying to achieve. The AI won't fully reveal this upfront — the employee needs to uncover and resolve it. E.g. 'A full refund or guaranteed reshipping with compensation.'" />
+                  <Tooltip text="The outcome the customer is trying to achieve. The simulated customer won't fully reveal this upfront — the employee needs to uncover and resolve it. E.g. 'A full refund or guaranteed reshipping with compensation.'" />
                 </label>
                 <textarea
                   rows={2}
@@ -529,7 +529,7 @@ function ScenariosTab() {
           <div className="border-t border-slate-700 pt-5">
             <label className="block text-xs text-slate-400 mb-3">
               Background Hints (optional)
-              <Tooltip text="Extra facts the AI knows about this customer's situation — things like order numbers, account history, or policy details. These help the AI give realistic, specific responses. Employees won't see these hints." />
+              <Tooltip text="Extra facts the simulated customer knows about this situation — things like order numbers, account history, or policy details. These help the simulated customer give realistic, specific responses. Employees won't see these hints." />
             </label>
             <div className="space-y-2 mb-3">
               {form.hints.map((hint, i) => (

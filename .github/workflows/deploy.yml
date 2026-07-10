@@ -229,6 +229,39 @@ jobs:
           fi
           echo "✅ /pricing is publicly reachable, lists all seat tiers, and is copy-clean"
 
+      - name: Verify home page is copy-clean (org copy rule, Phase 4)
+        # The public home page (`/`) previously described "AI-generated
+        # performance scores". Phase 4 copy pass rewrote it to craft vocabulary
+        # ("weighted performance scores"). Permanent regression gate: anon 200
+        # and the banned word "AI" never appears in the served HTML.
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /tmp/home.html -w '%{http_code}' "$BASE/" || echo 000)
+              if [ "$code" = "200" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/ -> HTTP $code"
+            if [ "$code" != "200" ]; then
+              echo "::error::$BASE/ home page unreachable (got $code)"
+              fail=1
+              continue
+            fi
+            # Org copy rule: no standalone "AI" on a user-facing surface.
+            if grep -Eq '\bAI\b' /tmp/home.html; then
+              echo "::error::$BASE/ uses the banned word 'AI' (org copy rule)"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::home-page copy verification failed"
+            exit 1
+          fi
+          echo "✅ home page is publicly reachable and copy-clean (no banned 'AI')"
+
       - name: Verify tenant isolation on session reads (Phase 2 2/3)
         # Race-free proof: this runs in the SAME job right after the deploy above,
         # so the freshly-built code is guaranteed live on the pages.dev alias (no
