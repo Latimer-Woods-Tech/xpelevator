@@ -45,6 +45,7 @@
     "prisma/seed.ts",
     "tests/**",
     "vitest.config.ts",
+    "vitest.ci.config.ts",
     "tsconfig.test.json"
   ]
 }

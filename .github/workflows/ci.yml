@@ -76,6 +76,30 @@ jobs:
       - name: UI component tests (vitest run tests/ui)
         run: npm run test:ui
 
+  # Coverage gate on the DETERMINISTIC tiers (unit + ui), scoped to the pure
+  # business-logic surface (src/lib/**, minus runtime-only DB/binding glue).
+  # Enforces the PLATFORM_STANDARDS §3-4 floor (line & function already met;
+  # branches ratchet toward 85). Config: vitest.ci.config.ts. Kept separate from
+  # the integration/smoke tiers, which hit live Neon+Groq and can't be gated.
+  coverage:
+    name: Coverage gate (src/lib)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Coverage gate (vitest run --config vitest.ci.config.ts --coverage)
+        run: npm run test:coverage:ci
+
   build:
     name: Build
     runs-on: ubuntu-latest
