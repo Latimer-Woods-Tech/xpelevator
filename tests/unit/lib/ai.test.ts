@@ -23,6 +23,8 @@ import {
   generateResponse,
   scoreSession,
   streamNextCustomerMessage,
+  customerModelForDifficulty,
+  resolveScenarioDifficulty,
 } from '@/lib/ai';
 
 // ── fetch response helpers ────────────────────────────────────────────────────
@@ -278,5 +280,75 @@ describe('lib/ai — streamNextCustomerMessage', () => {
       tokens.push(token);
     }
     expect(tokens).toEqual(['Hello!']);
+  });
+
+  it('defaults to the realism (70B) model when no model is passed', async () => {
+    fetchMock.mockResolvedValueOnce(streamResponse(['ok']));
+
+    for await (const _ of streamNextCustomerMessage('prompt', [])) {
+      /* drain */
+    }
+
+    const [, init] = fetchMock.mock.calls[0];
+    const sent = JSON.parse((init as RequestInit).body as string);
+    expect(sent.model).toBe('llama-3.3-70b-versatile');
+  });
+
+  it('sends the model it is given to Groq (fast tier)', async () => {
+    fetchMock.mockResolvedValueOnce(streamResponse(['ok']));
+
+    for await (const _ of streamNextCustomerMessage(
+      'prompt',
+      [],
+      'llama-3.1-8b-instant'
+    )) {
+      /* drain */
+    }
+
+    const [, init] = fetchMock.mock.calls[0];
+    const sent = JSON.parse((init as RequestInit).body as string);
+    expect(sent.model).toBe('llama-3.1-8b-instant');
+    expect(sent.stream).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('lib/ai — customerModelForDifficulty', () => {
+  it('keeps the realism (70B) model for HARD scenarios', () => {
+    expect(customerModelForDifficulty('hard')).toBe('llama-3.3-70b-versatile');
+  });
+
+  it('uses the fast (8B) model for easy and medium', () => {
+    expect(customerModelForDifficulty('easy')).toBe('llama-3.1-8b-instant');
+    expect(customerModelForDifficulty('medium')).toBe('llama-3.1-8b-instant');
+  });
+
+  it('falls back to the fast (8B) model for unknown/undefined difficulty', () => {
+    expect(customerModelForDifficulty(undefined)).toBe('llama-3.1-8b-instant');
+    expect(customerModelForDifficulty('impossible')).toBe('llama-3.1-8b-instant');
+  });
+});
+
+describe('lib/ai — resolveScenarioDifficulty', () => {
+  it('returns the script difficulty when valid', () => {
+    expect(resolveScenarioDifficulty({ difficulty: 'hard' })).toBe('hard');
+    expect(resolveScenarioDifficulty({ difficulty: 'easy' })).toBe('easy');
+  });
+
+  it('falls back to medium for missing/invalid/null scripts', () => {
+    expect(resolveScenarioDifficulty(null)).toBe('medium');
+    expect(resolveScenarioDifficulty({})).toBe('medium');
+    expect(resolveScenarioDifficulty({ difficulty: 'nope' })).toBe('medium');
+  });
+
+  it('maps a hard scenario to realism and a medium one to the fast tier', () => {
+    // End-to-end of the two helpers as the route composes them.
+    expect(
+      customerModelForDifficulty(resolveScenarioDifficulty({ difficulty: 'hard' }))
+    ).toBe('llama-3.3-70b-versatile');
+    expect(
+      customerModelForDifficulty(resolveScenarioDifficulty({ difficulty: 'medium' }))
+    ).toBe('llama-3.1-8b-instant');
   });
 });

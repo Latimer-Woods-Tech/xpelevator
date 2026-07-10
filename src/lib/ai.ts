@@ -6,6 +6,44 @@ import type { ScenarioScript, ScoreResult } from '@/types';
 // Re-export so callers that import from '@/lib/ai' still get these types
 export type { ScenarioScript, ScoreResult, ChatMessage };
 
+// ─── Model tiers ──────────────────────────────────────────────────────────────
+// The live customer turn's model is the single biggest conversation-speed lever.
+// `8b-instant` delivers roughly ~3x the tokens/sec and a lower time-to-first-token
+// than `70b-versatile` — the difference a trainee feels as "half speed vs. real".
+// We keep the higher-realism 70B model only for HARD scenarios (angry / nuanced
+// de-escalation, where roleplay realism is the product differentiator) and use the
+// snappier 8B model for easy/medium. 8B is already trusted in-product for scoring.
+// To retune the speed/realism trade-off, edit this one mapping.
+const CUSTOMER_MODEL_REALISM = 'llama-3.3-70b-versatile';
+const CUSTOMER_MODEL_FAST = 'llama-3.1-8b-instant';
+
+/**
+ * Choose the live-customer model for a scenario's difficulty.
+ * `hard` → realism (70B); everything else (incl. unknown) → fast (8B).
+ */
+export function customerModelForDifficulty(difficulty?: string): string {
+  return difficulty === 'hard' ? CUSTOMER_MODEL_REALISM : CUSTOMER_MODEL_FAST;
+}
+
+/**
+ * Normalise a raw scenario `script` to its difficulty tier. Mirrors the fallback
+ * used by {@link buildSessionSystemPrompt}: a missing/invalid difficulty resolves
+ * to `medium` so both the prompt and the model tier stay consistent.
+ */
+export function resolveScenarioDifficulty(
+  scenarioScript: unknown
+): 'easy' | 'medium' | 'hard' {
+  if (
+    scenarioScript &&
+    typeof scenarioScript === 'object' &&
+    'difficulty' in scenarioScript
+  ) {
+    const d = (scenarioScript as { difficulty?: unknown }).difficulty;
+    if (d === 'easy' || d === 'medium' || d === 'hard') return d;
+  }
+  return 'medium';
+}
+
 // ─── System Prompts ──────────────────────────────────────────────────────────
 
 // Pre-generated name pool keeps the customer persona varied across calls
@@ -87,16 +125,18 @@ export async function generateResponse(messages: ChatMessage[]): Promise<string>
 
 /**
  * Generate a streaming response. Returns an async iterable of token strings.
+ * `model` defaults to the realism tier so existing callers are unchanged.
  */
 export async function* streamResponse(
-  messages: ChatMessage[]
+  messages: ChatMessage[],
+  model: string = CUSTOMER_MODEL_REALISM
 ): AsyncGenerator<string> {
   try {
     const client = getGroqClient();
     let hasYielded = false;
-    
+
     for await (const chunk of client.chatCompletionStream({
-      model: 'llama-3.3-70b-versatile',
+      model,
       messages,
       temperature: 0.75,
       max_tokens: 400,
@@ -146,10 +186,13 @@ export function buildSessionSystemPrompt(
 
 /**
  * Streaming version — get the next customer message as a stream.
+ * `model` selects the tier (see {@link customerModelForDifficulty}); it defaults
+ * to the realism tier so callers that don't pass one keep the prior behaviour.
  */
 export async function* streamNextCustomerMessage(
   systemPrompt: string,
-  conversationHistory: Array<{ role: 'CUSTOMER' | 'AGENT'; content: string }>
+  conversationHistory: Array<{ role: 'CUSTOMER' | 'AGENT'; content: string }>,
+  model: string = CUSTOMER_MODEL_REALISM
 ): AsyncGenerator<string> {
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
@@ -158,7 +201,7 @@ export async function* streamNextCustomerMessage(
       content: m.content,
     })),
   ];
-  yield* streamResponse(messages);
+  yield* streamResponse(messages, model);
 }
 
 // ─── Auto-Scoring ─────────────────────────────────────────────────────────────
