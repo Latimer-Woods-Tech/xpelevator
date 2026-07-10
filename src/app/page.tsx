@@ -16,6 +16,12 @@ export default async function Home() {
           </span>
           <div className="flex items-center gap-3">
             <Link
+              href="/pricing"
+              className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
+            >
+              Pricing
+            </Link>
+            <Link
               href="/admin"
               className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
             >
