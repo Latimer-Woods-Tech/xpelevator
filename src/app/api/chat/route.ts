@@ -235,7 +235,7 @@ export async function POST(request: Request) {
           }
           controller.close();
         } catch (err) {
-          const errEvent = `data: ${JSON.stringify({ type: 'error', message: 'AI error' })}\n\n`;
+          const errEvent = `data: ${JSON.stringify({ type: 'error', message: 'Simulation error' })}\n\n`;
           controller.enqueue(encoder.encode(errEvent));
           controller.close();
           console.error('[chat] Stream error:', err);
