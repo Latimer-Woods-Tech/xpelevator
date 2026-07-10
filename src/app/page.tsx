@@ -92,7 +92,7 @@ export default async function Home() {
               View Sessions
             </h2>
             <p className="text-slate-400 text-sm">
-              Review completed simulation sessions, full transcripts, and AI-generated performance scores.
+              Review completed simulation sessions, full transcripts, and automated performance scores.
             </p>
           </Link>
 
