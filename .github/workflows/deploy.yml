@@ -189,6 +189,46 @@ jobs:
           fi
           echo "✅ /api/plans is publicly reachable and carries no internal wiring"
 
+      - name: Verify /pricing operator surface is publicly reachable (anon 200)
+        # The operator-facing pricing/signup surface (Phase 4) must render for
+        # logged-out visitors — it is deliberately absent from the middleware
+        # matcher (public like the home page). Permanent regression gate: anon
+        # 200, the three seat-tier names present, and the org copy rule (the word
+        # "AI" never appears on any user-facing surface).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /tmp/pricing.html -w '%{http_code}' "$BASE/pricing" || echo 000)
+              if [ "$code" = "200" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/pricing -> HTTP $code"
+            if [ "$code" != "200" ]; then
+              echo "::error::$BASE/pricing must be public (got $code) — operator pricing surface would 404"
+              fail=1
+              continue
+            fi
+            for tier in Chat Voice Phone; do
+              if ! grep -q ">$tier<" /tmp/pricing.html; then
+                echo "::error::$BASE/pricing missing seat tier '$tier'"
+                fail=1
+              fi
+            done
+            # Org copy rule: no standalone "AI" on a user-facing surface.
+            if grep -Eq '\bAI\b' /tmp/pricing.html; then
+              echo "::error::$BASE/pricing uses the banned word 'AI' (org copy rule)"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::/pricing operator-surface verification failed"
+            exit 1
+          fi
+          echo "✅ /pricing is publicly reachable, lists all seat tiers, and is copy-clean"
+
       - name: Verify tenant isolation on session reads (Phase 2 2/3)
         # Race-free proof: this runs in the SAME job right after the deploy above,
         # so the freshly-built code is guaranteed live on the pages.dev alias (no
