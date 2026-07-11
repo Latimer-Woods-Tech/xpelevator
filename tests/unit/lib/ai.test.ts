@@ -131,14 +131,17 @@ describe('lib/ai — buildSessionSystemPrompt', () => {
     expect(prompt).toContain('on hold for 30 minutes');
   });
 
-  it('uses fallback script when input has no customerPersona', () => {
-    const prompt = buildSessionSystemPrompt('Generic Scenario', {});
-    expect(prompt).toContain('A customer who needs assistance');
+  it('grounds the fallback persona in the scenario name when input has no customerPersona', () => {
+    const prompt = buildSessionSystemPrompt('Billing Double-Charge Dispute', {});
+    // No longer the contentless generic — the fallback references the scenario topic.
+    expect(prompt).not.toContain('A customer who needs assistance');
+    expect(prompt).toContain('Billing Double-Charge Dispute');
   });
 
-  it('uses fallback script when input is null', () => {
-    const prompt = buildSessionSystemPrompt('Generic Scenario', null);
-    expect(prompt).toContain('A customer who needs assistance');
+  it('grounds the fallback in the scenario name when input is null', () => {
+    const prompt = buildSessionSystemPrompt('Late Delivery Complaint', null);
+    expect(prompt).not.toContain('A customer who needs assistance');
+    expect(prompt).toContain('Late Delivery Complaint');
   });
 
   it('uses medium difficulty fallback guidance when no script', () => {
@@ -150,6 +153,65 @@ describe('lib/ai — buildSessionSystemPrompt', () => {
     const scriptNoHints = { ...SAMPLE_SCRIPT, hints: [] };
     const prompt = buildSessionSystemPrompt('Test', scriptNoHints);
     expect(prompt).not.toContain('CONTEXT DETAILS');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scriptless / partial-script realism (E-root #6, #16 — "half-speed sparring"
+// realism thread). The old fallback was all-or-nothing: any scenario missing
+// `customerPersona` had its ENTIRE script discarded and reset to a contentless
+// generic — losing a set difficulty/objective/hints, and even leaving difficulty
+// undefined for a partial script. These lock in field-level, scenario-grounded
+// fallbacks so a lightly-configured scenario still feels like a real person.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('lib/ai — scriptless/partial-script realism (E-root #6)', () => {
+  it('preserves a set difficulty when the persona is missing (no reset to medium)', () => {
+    const partial = { difficulty: 'hard' as const };
+    const prompt = buildSessionSystemPrompt('Angry Refund Demand', partial);
+    expect(prompt).toContain('HARD');
+    // hard guidance, not the medium "mildly frustrated" default
+    expect(prompt.toLowerCase()).not.toContain('mildly frustrated');
+  });
+
+  it('preserves a set objective and hints even when the persona is missing', () => {
+    const partial = {
+      customerObjective: 'Escalate to a supervisor immediately.',
+      hints: ['Has already called twice this week.'],
+    };
+    const prompt = buildSessionSystemPrompt('Escalation Request', partial);
+    expect(prompt).toContain('Escalate to a supervisor immediately.');
+    expect(prompt).toContain('Has already called twice this week.');
+  });
+
+  it('grounds the fallback objective in the scenario name', () => {
+    const prompt = buildSessionSystemPrompt('Warranty Claim Denial', {});
+    expect(prompt).toContain('Warranty Claim Denial');
+    expect(prompt).not.toContain('Get help with their issue');
+  });
+
+  it('never emits an undefined difficulty for a partial script (latent crash guard)', () => {
+    // A script with a persona but a bogus difficulty previously reached
+    // `script.difficulty.toUpperCase()` with the raw (invalid) value.
+    const bogus = { customerPersona: 'Dana, a hurried small-business owner.', difficulty: 'nightmare' };
+    const prompt = buildSessionSystemPrompt('Odd Scenario', bogus);
+    expect(prompt).toContain('Dana, a hurried small-business owner.');
+    // invalid difficulty resolves to medium
+    expect(prompt).toContain('MEDIUM');
+    expect(prompt).not.toContain('undefined');
+  });
+
+  it('falls back gracefully when the scenario name is also empty', () => {
+    const prompt = buildSessionSystemPrompt('', null);
+    expect(prompt).toContain('a problem they need resolved');
+    expect(prompt).not.toContain('undefined');
+  });
+
+  it('does not treat a full valid script any differently (no behaviour change)', () => {
+    const prompt = buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT, 'seed-1');
+    expect(prompt).toContain(SAMPLE_SCRIPT.customerPersona);
+    expect(prompt).toContain(SAMPLE_SCRIPT.customerObjective);
+    expect(prompt).toContain('on hold for 30 minutes');
+    expect(prompt).toContain('HARD');
   });
 });
 
