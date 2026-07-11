@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { scoringLabel } from '@/lib/report';
 
 // Minimal types needed for the callback annotations below
 type ScoreFull = {
@@ -17,6 +18,8 @@ type SessionFull = {
   createdAt: Date;
   jobTitle: { name: string };
   scores: ScoreFull[];
+  /** End-of-session scoring outcome; `null` for pre-instrumentation rows. */
+  scoringStatus: string | null;
 };
 
 
@@ -38,6 +41,7 @@ export async function GET() {
         ss.type,
         ss.job_title_id as "jobTitleId",
         ss.scenario_id as "scenarioId",
+        ss.scoring_status as "scoringStatus",
         ss.ended_at as "endedAt",
         ss.created_at as "createdAt",
         json_build_object(
@@ -75,10 +79,34 @@ export async function GET() {
       createdAt: new Date(row.createdAt),
       jobTitle: row.jobTitle,
       scores: row.scores,
+      scoringStatus: row.scoringStatus ?? null,
     })) as unknown as SessionFull[];
 
     // ── Summary ───────────────────────────────────────────────────────────────
     const totalSessions = sessions.length;
+
+    // ── Scoring health ────────────────────────────────────────────────────────
+    // Surface the same per-session scoring outcome the CSV/PDF export carries
+    // (issue #16, E-root #8b) on-screen, so a manager can distinguish a scoring
+    // *engine* failure from an un-scorable (too-short) session — the two look
+    // identical as an empty score and quietly erode trust in the /10 otherwise.
+    // Reuses the canonical `scoringLabel` mapping so screen + export never drift.
+    const scoringHealth = { scored: 0, failed: 0, notScorable: 0, unknown: 0 };
+    for (const session of sessions) {
+      switch (scoringLabel(session)) {
+        case 'Scored':
+          scoringHealth.scored += 1;
+          break;
+        case 'Failed':
+          scoringHealth.failed += 1;
+          break;
+        case 'Not scorable':
+          scoringHealth.notScorable += 1;
+          break;
+        default:
+          scoringHealth.unknown += 1;
+      }
+    }
 
     const allScores: ScoreFull[] = sessions.flatMap((s: SessionFull) => s.scores);
     const totalWeightedScore = allScores.reduce((sum: number, s: ScoreFull) => sum + s.score * s.criteria.weight, 0);
@@ -178,6 +206,7 @@ export async function GET() {
     return NextResponse.json({
       totalSessions,
       overallAvg,
+      scoringHealth,
       scoreTrend,
       byJobTitle,
       byCriteria,

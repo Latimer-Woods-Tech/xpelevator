@@ -79,7 +79,9 @@ export const REPORT_COLUMNS: readonly string[] = [
  * `Failed` (the scoring engine broke) is NOT the same as `Not scorable` (too
  * short / no criteria) — both otherwise show an empty score.
  */
-export function scoringLabel(session: ReportSession): string {
+export function scoringLabel(
+  session: Pick<ReportSession, 'scoringStatus' | 'scores'>,
+): string {
   switch (session.scoringStatus) {
     case 'SCORED':
       return 'Scored';
