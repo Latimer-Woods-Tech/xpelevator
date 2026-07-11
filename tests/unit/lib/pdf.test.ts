@@ -109,6 +109,27 @@ describe('renderTablePdf', () => {
     expect(text.slice(xrefStart, xrefStart + 4)).toBe('xref');
   });
 
+  it('truncates an over-wide cell with an ellipsis and never over-runs', () => {
+    const long = 'this-is-a-very-long-cell-value-that-cannot-possibly-fit-in-a-narrow-column';
+    const narrow: readonly PdfColumn[] = [
+      { header: 'H', width: 40 },
+      { header: 'Tiny', width: 8 },
+    ];
+    const text = decode(renderTablePdf({ title: 'Trunc', columns: narrow, rows: [[long, long]] }));
+    // The wide-but-finite column ellipsises; the raw full value never appears.
+    expect(text).toContain('...');
+    expect(text).not.toContain(long);
+  });
+
+  it('sanitises non-ASCII and control characters in cell text', () => {
+    const text = decode(
+      renderTablePdf({ title: 'Unicode', columns: COLUMNS, rows: [['café\tné', 'a\r\nb']] })
+    );
+    // Non-ASCII → '?', tabs/newlines → spaces, so the stream stays single-line ASCII.
+    expect(text).toContain('caf? n?');
+    expect(text).toContain('a b');
+  });
+
   it("declares each content stream's /Length as its true byte length", () => {
     const text = decode(
       renderTablePdf({ title: 'Len', columns: COLUMNS, rows: [['hello', 'world']] })
