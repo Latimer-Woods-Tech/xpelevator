@@ -153,6 +153,74 @@ describe('lib/ai — buildSessionSystemPrompt', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Emotional-state determinism (E-root #3, #16 — "half-speed sparring" realism).
+// The system prompt is rebuilt on EVERY turn (chat + telnyx routes), so any
+// randomness in it re-rolls the customer's mood mid-session. These tests lock in
+// that the mood is FIXED for a session (keyed on scenario + session seed) yet
+// still varies across sessions.
+
+/** The emotional-state values by difficulty — mirror of src/lib/ai.ts. */
+const EMOTIONAL_STATES: Record<string, string[]> = {
+  easy: ['mildly inconvenienced', 'politely impatient', 'calm but pressed for time'],
+  medium: ['noticeably frustrated', 'stressed', 'short-tempered but not rude'],
+  hard: ['angry', 'extremely frustrated', 'borderline rude — demanding immediate action'],
+};
+
+/** Pull the "Emotional state right now: X" line out of a built prompt. */
+function emotionalStateOf(prompt: string): string {
+  const m = prompt.match(/Emotional state right now: (.+)/);
+  if (!m) throw new Error('prompt has no emotional-state line');
+  return m[1].trim();
+}
+
+describe('lib/ai — emotional-state determinism (E-root #3)', () => {
+  it('does NOT re-roll the mood across turns: same (scenario, seed) is stable', () => {
+    const first = emotionalStateOf(
+      buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT, 'session-abc')
+    );
+    // The chat/telnyx routes rebuild the prompt every turn — simulate 25 turns.
+    for (let turn = 0; turn < 25; turn++) {
+      const again = emotionalStateOf(
+        buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT, 'session-abc')
+      );
+      expect(again).toBe(first);
+    }
+  });
+
+  it('never calls Math.random() when building the prompt (reroll removed)', () => {
+    const spy = vi.spyOn(Math, 'random');
+    buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT, 'session-abc');
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('picks a mood from the scenario difficulty tier (hard)', () => {
+    const state = emotionalStateOf(
+      buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT, 'session-abc')
+    );
+    expect(EMOTIONAL_STATES.hard).toContain(state);
+  });
+
+  it('picks a mood from the medium tier when the script has no difficulty', () => {
+    const state = emotionalStateOf(buildSessionSystemPrompt('Generic', null, 'session-xyz'));
+    expect(EMOTIONAL_STATES.medium).toContain(state);
+  });
+
+  it('varies mood across sessions while staying deterministic per seed', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 30; i++) {
+      const seed = `session-${i}`;
+      const a = emotionalStateOf(buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT, seed));
+      const b = emotionalStateOf(buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT, seed));
+      expect(b).toBe(a); // deterministic for a given seed
+      seen.add(a);
+    }
+    // Across 30 sessions we should exercise more than one mood (variety preserved).
+    expect(seen.size).toBeGreaterThan(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 describe('lib/ai — generateResponse', () => {
   it('returns the message content', async () => {

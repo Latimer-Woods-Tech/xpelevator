@@ -40,6 +40,7 @@ Founder directive (#16, 2026-07-10): the conversation "is currently a half speed
 | ID | Requirement | Status | Verification |
 |---|---|---|---|
 | R-030 | Voice mode speaks the customer reply **incrementally** — first audio starts on the first complete sentence as the stream arrives, not after the whole response | live | pure boundary logic `src/lib/speech.ts` (unit: `tests/unit/lib/speech.test.ts`, 100% lines); `useChatSession` emits `speechChunks` per sentence; `VoiceChatInterface` speaks each as it lands. Listen-test: multi-sentence reply begins audibly before the reply finishes |
+| R-031 | The simulated customer's **emotional state is fixed for the whole session** (deterministic from scenario + session id), not re-rolled per turn — a "hard" customer no longer flip-flops angry↔frustrated between messages | live | the system prompt is rebuilt every turn (chat + telnyx routes), so `src/lib/ai.ts` selects the mood deterministically via `stableIndex` (replaces `Math.random()`); routes pass `sessionId` as the seed. Unit `tests/unit/lib/ai.test.ts`: mood stable across 25 rebuilt turns, `Math.random` never called, variety preserved across sessions |
 
 ## Non-functional
 

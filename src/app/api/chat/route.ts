@@ -136,7 +136,8 @@ export async function POST(request: Request) {
     // ── 4. Build history for AI ───────────────────────────────────────────────
     const systemPrompt = buildSessionSystemPrompt(
       session.scenario.name,
-      session.scenario.script
+      session.scenario.script,
+      sessionId
     );
     // Conversation-speed lever: pick the model tier by scenario difficulty. Hard
     // scenarios keep the higher-realism 70B model; easy/medium use the ~3x faster
