@@ -4,6 +4,7 @@ import {
   sessionToReportRow,
   sessionsToReportRows,
   sessionsToCsv,
+  sessionsToPdf,
   type ReportSession,
 } from '@/lib/report';
 
@@ -90,5 +91,22 @@ describe('sessionsToCsv', () => {
     expect(dataLine).toContain('"Refund, then upsell"');
     // 9 columns → still 9 fields after a naive comma-count check on the quoted cell
     expect(csv).toContain('sess-1');
+  });
+});
+
+describe('sessionsToPdf', () => {
+  it('produces a valid PDF byte stream', () => {
+    const bytes = sessionsToPdf([base]);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    const head = new TextDecoder('latin1').decode(bytes.slice(0, 8));
+    expect(head).toBe('%PDF-1.4');
+    expect(bytes.length).toBeGreaterThan(300);
+  });
+
+  it('renders a report with no sessions (header-only page)', () => {
+    const bytes = sessionsToPdf([]);
+    const text = new TextDecoder('latin1').decode(bytes);
+    expect(text).toContain('/Count 1');
+    expect(text).toContain('0 completed sessions');
   });
 });

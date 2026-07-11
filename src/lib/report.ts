@@ -13,6 +13,7 @@
  */
 
 import { toCsv, type CsvCell } from './csv';
+import { renderTablePdf, type PdfColumn } from './pdf';
 
 /** One scored criterion on a session (as returned by the report query). */
 export interface ReportScore {
@@ -111,4 +112,57 @@ export function sessionsToCsv(sessions: readonly ReportSession[]): string {
     r.weightedAverage,
   ]);
   return toCsv(REPORT_COLUMNS, rows);
+}
+
+/**
+ * Column layout for the PDF export. Widths are PDF points (1/72 inch) and sum to
+ * 522 — inside the 532pt printable width of a US-Letter page at a 40pt margin,
+ * leaving a hair of slack. The full UUID is shortened to an 8-char reference so
+ * the page stays readable; the CSV remains the machine-precise, full-id artifact.
+ */
+const PDF_COLUMNS: readonly PdfColumn[] = [
+  { header: 'Session', width: 54 },
+  { header: 'Date', width: 56 },
+  { header: 'Trainee', width: 118 },
+  { header: 'Job Title', width: 84 },
+  { header: 'Scenario', width: 96 },
+  { header: 'Mode', width: 34 },
+  { header: '#', width: 18 },
+  { header: 'Avg', width: 30 },
+  { header: 'Wtd', width: 32 },
+];
+
+/** Format a nullable one-decimal score for the PDF (`-` when unscored). */
+function pdfScore(value: number | null): string {
+  return value == null ? '-' : value.toFixed(1);
+}
+
+/**
+ * Serialise sessions to a manager-reporting PDF (raw bytes). The headline number
+ * shown per session is the same weighted average as the CSV and in-app analytics.
+ * A dated subtitle carries the generation timestamp so {@link renderTablePdf}
+ * itself stays deterministic.
+ */
+export function sessionsToPdf(sessions: readonly ReportSession[]): Uint8Array {
+  const reportRows = sessionsToReportRows(sessions);
+  const rows = reportRows.map((r) => [
+    r.sessionId.slice(0, 8),
+    r.date,
+    r.trainee,
+    r.jobTitle,
+    r.scenario,
+    r.modality,
+    r.criteriaScored,
+    pdfScore(r.averageScore),
+    pdfScore(r.weightedAverage),
+  ]);
+
+  const generated = new Date().toISOString().slice(0, 10);
+  const count = reportRows.length;
+  return renderTablePdf({
+    title: 'XPElevator — Session Report',
+    subtitle: `Generated ${generated} · ${count} completed session${count === 1 ? '' : 's'} · score shown is the weighted average /10`,
+    columns: PDF_COLUMNS,
+    rows,
+  });
 }

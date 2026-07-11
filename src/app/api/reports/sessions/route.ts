@@ -1,10 +1,11 @@
 /**
  * Manager reporting export — `GET /api/reports/sessions`
  *
- * Returns a downloadable CSV of the caller's org's completed simulation
+ * Returns a downloadable report of the caller's org's completed simulation
  * sessions with their per-session weighted score — the artifact a manager (or a
  * reselling operator) hands to their client. Phase 4, issue #16:
- * "Manager reporting + CSV/PDF export".
+ * "Manager reporting + CSV/PDF export". Default format is CSV; `?format=pdf`
+ * returns the same tenant-scoped data as a PDF.
  *
  * Access: ADMIN only (managers), and strictly scoped to the admin's own org —
  * `requireAuth(request, 'ADMIN')` yields 401 for anon (also caught earlier by
@@ -17,12 +18,16 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
-import { sessionsToCsv, type ReportSession } from '@/lib/report';
+import { sessionsToCsv, sessionsToPdf, type ReportSession } from '@/lib/report';
 
 export async function GET(request: Request) {
   try {
     const { session } = await requireAuth(request, 'ADMIN');
     const orgId = session.user.orgId ?? null;
+
+    // `?format=pdf` returns the same tenant-scoped report as a downloadable PDF
+    // (the client-facing artifact); anything else keeps the default CSV.
+    const wantsPdf = new URL(request.url).searchParams.get('format') === 'pdf';
 
     // Strict tenant scoping: an admin sees only their own org's sessions.
     // (`org_id IS NULL` for an admin without an org = their personal workspace.)
@@ -56,14 +61,35 @@ export async function GET(request: Request) {
       ORDER BY ss.ended_at DESC NULLS LAST
     `;
 
+    const day = new Date().toISOString().slice(0, 10);
+
+    if (wantsPdf) {
+      const pdf = sessionsToPdf(rows as unknown as ReportSession[]);
+      // Hand the response a plain ArrayBuffer view of the PDF bytes — `BodyInit`
+      // in the Next types doesn't list `Uint8Array`, and this stays Worker-safe
+      // (no `Buffer`).
+      const body = pdf.buffer.slice(
+        pdf.byteOffset,
+        pdf.byteOffset + pdf.byteLength
+      ) as ArrayBuffer;
+      return new NextResponse(body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="xpelevator-sessions-${day}.pdf"`,
+          // Reporting data is per-request and tenant-specific — never cache it.
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
     const csv = sessionsToCsv(rows as unknown as ReportSession[]);
-    const filename = `xpelevator-sessions-${new Date().toISOString().slice(0, 10)}.csv`;
 
     return new NextResponse(csv, {
       status: 200,
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Disposition': `attachment; filename="xpelevator-sessions-${day}.csv"`,
         // Reporting data is per-request and tenant-specific — never cache it.
         'Cache-Control': 'no-store',
       },

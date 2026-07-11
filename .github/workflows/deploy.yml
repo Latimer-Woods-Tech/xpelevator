@@ -240,26 +240,29 @@ jobs:
         run: |
           set -e
           fail=0
-          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
-            code=000
-            for i in 1 2 3 4 5; do
-              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/reports/sessions" || echo 000)
-              # 401 is the pass; anything else (esp. 200) is retried in case the
-              # fresh deploy is still propagating, then failed below.
-              if [ "$code" = "401" ]; then break; fi
-              sleep 6
+          # Both the CSV (default) and PDF (?format=pdf) variants must reject anon.
+          for PATH_Q in "/api/reports/sessions" "/api/reports/sessions?format=pdf"; do
+            for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+              code=000
+              for i in 1 2 3 4 5; do
+                code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$PATH_Q" || echo 000)
+                # 401 is the pass; anything else (esp. 200) is retried in case the
+                # fresh deploy is still propagating, then failed below.
+                if [ "$code" = "401" ]; then break; fi
+                sleep 6
+              done
+              echo "GET $BASE$PATH_Q -> HTTP $code"
+              if [ "$code" != "401" ]; then
+                echo "::error::$BASE$PATH_Q must require auth (got $code) — manager export would leak session data"
+                fail=1
+              fi
             done
-            echo "GET $BASE/api/reports/sessions -> HTTP $code"
-            if [ "$code" != "401" ]; then
-              echo "::error::$BASE/api/reports/sessions must require auth (got $code) — manager export would leak session data"
-              fail=1
-            fi
           done
           if [ "$fail" != "0" ]; then
             echo "::error::Manager reporting export auth-gate verification failed"
             exit 1
           fi
-          echo "✅ /api/reports/sessions rejects anonymous callers (401) on both hosts"
+          echo "✅ /api/reports/sessions (CSV + PDF) rejects anonymous callers (401) on both hosts"
 
       - name: Verify home page is copy-clean (org copy rule, Phase 4)
         # The public home page (`/`) previously described "AI-generated

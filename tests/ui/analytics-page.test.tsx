@@ -46,6 +46,12 @@ describe('AnalyticsPage — manager reporting export', () => {
     expect(link).toHaveAttribute('href', '/api/reports/sessions');
   });
 
+  it('renders a Download PDF link to the same report in PDF form', () => {
+    render(<AnalyticsPage />);
+    const link = screen.getByRole('link', { name: /download pdf/i });
+    expect(link).toHaveAttribute('href', '/api/reports/sessions?format=pdf');
+  });
+
   it('keeps the surface copy-clean (never the word "AI")', () => {
     const { container } = render(<AnalyticsPage />);
     expect(container.textContent ?? '').not.toMatch(/\bAI\b/);
