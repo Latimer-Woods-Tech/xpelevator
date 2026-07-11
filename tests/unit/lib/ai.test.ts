@@ -221,6 +221,63 @@ describe('lib/ai — emotional-state determinism (E-root #3)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Persona owns the customer's name (E-root #4, #16). Previously the prompt
+// injected a hash-picked name from a fixed CUSTOMER_NAMES pool AND the persona
+// text — two conflicting names in one prompt (e.g. "Name: Marcus Webb" beside a
+// persona naming the customer "Sandra"), which the model had to reconcile mid-
+// roleplay. The pool is gone: the persona is the sole source of identity, and a
+// directive holds the name fixed for the whole call.
+
+describe('lib/ai — persona owns the name (E-root #4)', () => {
+  // The full former CUSTOMER_NAMES pool — none of these may leak into a prompt
+  // built from a persona that does not mention them.
+  const RETIRED_NAME_POOL = [
+    'Marcus Webb', 'Sandra Okafor', 'David Chen', 'Patricia Nguyen',
+    'Robert Castillo', 'Linda Kowalski', 'James Osei', 'Karen Yamamoto',
+    'Thomas Mbeki', 'Angela Rivera', 'Charles Petrov', 'Margaret Johansson',
+  ];
+
+  it('never injects a hardcoded pool name for a persona that has none', () => {
+    // Try every scenario name whose hash would have selected each pool slot.
+    for (const scenario of ['Internet Outage', 'Billing Dispute', 'Late Delivery', 'x', 'zzz', 'A B C']) {
+      const prompt = buildSessionSystemPrompt(scenario, SAMPLE_SCRIPT, 'session-abc');
+      for (const name of RETIRED_NAME_POOL) {
+        expect(prompt).not.toContain(name);
+      }
+    }
+  });
+
+  it('no longer emits the injected "- Name:" identity line', () => {
+    const prompt = buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT, 'session-abc');
+    expect(prompt).not.toMatch(/^- Name: /m);
+  });
+
+  it('keeps the persona as the source of identity', () => {
+    const prompt = buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT, 'session-abc');
+    expect(prompt).toContain(`- Persona: ${SAMPLE_SCRIPT.customerPersona}`);
+  });
+
+  it('surfaces a name the persona itself provides (persona owns it)', () => {
+    const named = {
+      ...SAMPLE_SCRIPT,
+      customerPersona: 'Sandra, a frustrated elderly customer who lost her internet.',
+    };
+    const prompt = buildSessionSystemPrompt('Internet Outage', named, 'session-abc');
+    expect(prompt).toContain('Sandra');
+    // and no competing pool name alongside it
+    for (const name of RETIRED_NAME_POOL) {
+      expect(prompt).not.toContain(name);
+    }
+  });
+
+  it('instructs the customer to hold one fixed name for the whole call', () => {
+    const prompt = buildSessionSystemPrompt('Internet Outage', SAMPLE_SCRIPT, 'session-abc');
+    expect(prompt).toMatch(/ONE fixed name/);
+    expect(prompt.toLowerCase()).toContain('never change it');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 describe('lib/ai — generateResponse', () => {
   it('returns the message content', async () => {
