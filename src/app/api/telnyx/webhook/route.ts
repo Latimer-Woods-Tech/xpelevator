@@ -162,7 +162,7 @@ async function handleEvent(
         const script = (scenario?.script ?? {}) as Record<string, unknown>;
 
         // Generate AI opening line via Groq
-        const systemPromptOpening = buildSessionSystemPrompt(state.scenarioName, script);
+        const systemPromptOpening = buildSessionSystemPrompt(state.scenarioName, script, state.sessionId);
         const client = getGroqClient();
         const opening = await client.chatCompletion({
           model: 'llama-3.3-70b-versatile',
@@ -294,7 +294,7 @@ async function handleEvent(
         // Append the current agent turn so Groq has it in context
         groqMessages.push({ role: 'user' as const, content: transcript });
 
-        const systemPromptGather = buildSessionSystemPrompt(state.scenarioName, script);
+        const systemPromptGather = buildSessionSystemPrompt(state.scenarioName, script, state.sessionId);
         const client = getGroqClient();
         const aiReply = await client.chatCompletion({
           model: 'llama-3.3-70b-versatile',
