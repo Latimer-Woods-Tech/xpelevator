@@ -6,8 +6,9 @@
  * source of truth without prop-drilling.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Message, SimulationSession as Session } from '@/types';
+import { splitSpeechChunks } from '@/lib/speech';
 
 export interface ChatSessionState {
   session: Session | null;
@@ -19,6 +20,13 @@ export interface ChatSessionState {
   ended: boolean;
   /** Full text of the most recent AI message — consumed by voice mode for TTS */
   lastAiMessage: string | null;
+  /**
+   * Complete, speak-ready sentence chunks, appended in order as the reply
+   * streams in. Voice mode speaks each entry the moment it lands so the first
+   * audio starts on the first clause instead of after the whole response.
+   * Reset to `[]` at the start of every send.
+   */
+  speechChunks: string[];
   sendMessage: (content: string, silent?: boolean) => Promise<void>;
   endConversation: () => void;
   setSession: React.Dispatch<React.SetStateAction<Session | null>>;
@@ -33,6 +41,10 @@ export function useChatSession(sessionId: string): ChatSessionState {
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
   const [lastAiMessage, setLastAiMessage] = useState<string | null>(null);
+  const [speechChunks, setSpeechChunks] = useState<string[]>([]);
+  // Chars of the current reply already emitted as speech chunks (survives
+  // re-renders; threaded through splitSpeechChunks across SSE frames).
+  const speechConsumedRef = useRef(0);
 
   // ── 1. Load session on mount ────────────────────────────────────────────────
   useEffect(() => {
@@ -64,6 +76,8 @@ export function useChatSession(sessionId: string): ChatSessionState {
       setStreamingText('');
       setError(null);
       setLastAiMessage(null);
+      setSpeechChunks([]);
+      speechConsumedRef.current = 0;
 
       // Optimistic agent message (skip for silent system signals like [START])
       if (!silent) {
@@ -98,6 +112,14 @@ export function useChatSession(sessionId: string): ChatSessionState {
           let accumulated = '';
           let responseProcessed = false; // Prevent duplicate 'done' event handling
 
+          // Speak whatever remains once the stream ends (the trailing partial
+          // sentence, or a whole short reply that had no interior boundary).
+          const flushSpeech = (full: string) => {
+            const { chunks } = splitSpeechChunks(full, speechConsumedRef.current, true);
+            speechConsumedRef.current = full.length;
+            if (chunks.length) setSpeechChunks(prev => [...prev, ...chunks]);
+          };
+
           outer: while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -112,11 +134,22 @@ export function useChatSession(sessionId: string): ChatSessionState {
                 if (data.type === 'chunk') {
                   accumulated += data.content;
                   setStreamingText(accumulated);
+                  // Emit any sentences that just became complete so voice mode
+                  // can speak them immediately (no whole-response dead air).
+                  const { chunks, consumed } = splitSpeechChunks(
+                    accumulated,
+                    speechConsumedRef.current
+                  );
+                  if (chunks.length) {
+                    speechConsumedRef.current = consumed;
+                    setSpeechChunks(prev => [...prev, ...chunks]);
+                  }
                 } else if (data.type === 'done' && !responseProcessed) {
                   responseProcessed = true;
                   // Clear streaming text first to prevent flash of duplicate content
                   setStreamingText('');
-                  
+                  flushSpeech(accumulated);
+
                   const aiMsg: Message = {
                     id: crypto.randomUUID(),
                     role: 'CUSTOMER',
@@ -129,7 +162,8 @@ export function useChatSession(sessionId: string): ChatSessionState {
                   responseProcessed = true;
                   // Clear streaming text first
                   setStreamingText('');
-             
+                  flushSpeech(accumulated);
+
                   const aiMsg: Message = {
                     id: crypto.randomUUID(),
                     role: 'CUSTOMER',
@@ -186,6 +220,7 @@ export function useChatSession(sessionId: string): ChatSessionState {
     error,
     ended,
     lastAiMessage,
+    speechChunks,
     sendMessage,
     endConversation,
   };

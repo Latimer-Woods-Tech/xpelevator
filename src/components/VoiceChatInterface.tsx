@@ -80,7 +80,7 @@ export type VoiceChatInterfaceProps = Pick<
   | 'streamingText'
   | 'sending'
   | 'error'
-  | 'lastAiMessage'
+  | 'speechChunks'
   | 'sendMessage'
   | 'endConversation'
 >;
@@ -120,7 +120,7 @@ export default function VoiceChatInterface({
   streamingText,
   sending,
   error,
-  lastAiMessage,
+  speechChunks,
   sendMessage,
   endConversation,
 }: VoiceChatInterfaceProps) {
@@ -185,55 +185,81 @@ export default function VoiceChatInterface({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingText]);
 
-  // ── Speak AI message via TTS when lastAiMessage changes ────────────────────
+  // ── Keep `sending` reachable from TTS callbacks without re-binding them ─────
+  const sendingRef = useRef(sending);
   useEffect(() => {
-    if (!lastAiMessage || phase === 'unsupported') return;
+    sendingRef.current = sending;
+  }, [sending]);
 
-    const synth = window.speechSynthesis;
-    synth.cancel();
-    setPhase('ai-speaking');
+  // ── Speak one sentence with the persona-/script-selected voice ─────────────
+  const speakSentence = useCallback(
+    (text: string) => {
+      const synth = window.speechSynthesis;
+      if (!synth) return;
 
-    const utter = new SpeechSynthesisUtterance(lastAiMessage);
-    utter.rate = 1.0;
-    utter.pitch = 1.0;
-    utter.volume = 1.0;
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 1.0;
+      utter.pitch = 1.0;
+      utter.volume = 1.0;
 
-    // Use the user-/script-selected voice, falling back to best available English voice
-    const pickBest = (voiceList: SpeechSynthesisVoice[]) =>
-      voiceList.find(v => v.lang.startsWith('en') &&
-        (v.name.includes('Natural') || v.name.includes('Neural') || v.name.includes('Online'))) ??
-      voiceList.find(v => v.lang.startsWith('en-US')) ??
-      voiceList.find(v => v.lang.startsWith('en')) ??
-      null;
-
-    const applyVoice = (voiceList: SpeechSynthesisVoice[]) => {
+      // User-/script-selected voice, falling back to best available English one.
+      const pickBest = (voiceList: SpeechSynthesisVoice[]) =>
+        voiceList.find(v => v.lang.startsWith('en') &&
+          (v.name.includes('Natural') || v.name.includes('Neural') || v.name.includes('Online'))) ??
+        voiceList.find(v => v.lang.startsWith('en-US')) ??
+        voiceList.find(v => v.lang.startsWith('en')) ??
+        null;
+      const voices = synth.getVoices();
       const voice = selectedVoiceName
-        ? (voiceList.find(v => v.name === selectedVoiceName) ?? pickBest(voiceList))
-        : pickBest(voiceList);
+        ? (voices.find(v => v.name === selectedVoiceName) ?? pickBest(voices))
+        : pickBest(voices);
       if (voice) utter.voice = voice;
-    };
 
-    const currentVoices = synth.getVoices();
-    if (currentVoices.length > 0) {
-      applyVoice(currentVoices);
-    } else {
-      // Voices may not be loaded yet — wait for them
-      synth.onvoiceschanged = () => {
-        applyVoice(synth.getVoices());
-        synth.onvoiceschanged = null;
+      // Return to idle only once the whole reply has been spoken AND the stream
+      // has finished — never between the customer's sentences (that would let
+      // hands-free grab the mic mid-reply).
+      const settle = () => {
+        if (!synth.speaking && !synth.pending && !sendingRef.current) {
+          setPhase(p => (p === 'ai-speaking' ? 'idle' : p));
+        }
       };
+      utter.onend = settle;
+      utter.onerror = settle;
+
+      synth.speak(utter);
+    },
+    [selectedVoiceName]
+  );
+
+  // ── Speak reply sentences incrementally as they stream in ──────────────────
+  // (Previously: wait for the full response, then speak it all at once — the
+  // multi-second dead air every turn. First audio now lands on the first
+  // complete clause.)
+  const spokenChunkCountRef = useRef(0);
+  useEffect(() => {
+    if (phase === 'unsupported') return;
+    // A new send resets the chunk list to []; re-sync our cursor.
+    if (speechChunks.length < spokenChunkCountRef.current) spokenChunkCountRef.current = 0;
+    if (speechChunks.length === spokenChunkCountRef.current) return;
+
+    setPhase('ai-speaking');
+    for (let i = spokenChunkCountRef.current; i < speechChunks.length; i++) {
+      speakSentence(speechChunks[i]);
     }
-
-    utter.onend = () => setPhase('idle');
-    utter.onerror = () => setPhase('idle'); // fall through to idle on TTS error
-
-    synth.speak(utter);
-  }, [lastAiMessage]); // eslint-disable-line react-hooks/exhaustive-deps
+    spokenChunkCountRef.current = speechChunks.length;
+  }, [speechChunks, phase, speakSentence]);
 
   // ── Track sending state ─────────────────────────────────────────────────────
   useEffect(() => {
     if (sending && phase !== 'ai-speaking') setPhase('processing');
   }, [sending]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Land in idle if the stream ends after the last sentence finished speaking ─
+  useEffect(() => {
+    if (sending || phase !== 'ai-speaking') return;
+    const synth = window.speechSynthesis;
+    if (synth && !synth.speaking && !synth.pending) setPhase('idle');
+  }, [sending, phase]);
 
   // ── Cleanup on unmount ──────────────────────────────────────────────────────
   useEffect(() => {
