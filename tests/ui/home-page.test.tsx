@@ -98,6 +98,15 @@ describe('Home page — unauthenticated state', () => {
     await renderHome();
     expect(screen.queryByRole('button', { name: /sign out/i })).not.toBeInTheDocument();
   });
+
+  // Org copy rule: "AI" must never appear as a standalone word in user-facing
+  // copy (same guard the pricing page carries). The Sessions card previously
+  // read "AI-generated performance scores"; it now reads "weighted performance
+  // scores" — this asserts the banned word does not creep back.
+  it('never says the banned word "AI"', async () => {
+    const { container } = await renderHome();
+    expect(container.textContent ?? '').not.toMatch(/\bAI\b/);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
