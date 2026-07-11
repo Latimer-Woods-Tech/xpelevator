@@ -535,13 +535,19 @@ async function endSession(
   }));
 
   let scores: Array<{ criteriaId: string; score: number; justification: string }> = [];
-  if (transcript.length >= 2) {
+  const scorable = transcript.length >= 2 && criteria.length > 0;
+  if (scorable) {
     try {
       scores = await scoreSession(transcript, criteria as any);
     } catch (err) {
       console.error('[chat] Auto-scoring failed:', err);
     }
   }
+  // A scorable session that produced zero scores is a scoring-engine failure
+  // (expired credential, parse failure, empty judge output) — not a genuinely
+  // unscored call. Surface it so the client shows "couldn't score this session"
+  // instead of a silent zero the manager can't distinguish from a bad call.
+  const scoringFailed = scorable && scores.length === 0;
 
   // Save scores
   if (scores.length > 0) {
@@ -609,5 +615,5 @@ async function endSession(
     GROUP BY ss.id, s.id, jt.id
   `;
 
-  return NextResponse.json({ session: finalSessionResult[0], ended: true });
+  return NextResponse.json({ session: finalSessionResult[0], ended: true, scoringFailed });
 }

@@ -22,6 +22,7 @@ import {
   buildSessionSystemPrompt,
   generateResponse,
   scoreSession,
+  parseScoreRows,
   streamNextCustomerMessage,
   customerModelForDifficulty,
   resolveScenarioDifficulty,
@@ -353,7 +354,7 @@ describe('lib/ai — scoreSession', () => {
     expect(result[1].score).toBe(1); // clamped from -3
   });
 
-  it('returns [] when the model returns malformed JSON', async () => {
+  it('returns [] when the model returns unrecoverable garbage', async () => {
     fetchMock.mockResolvedValueOnce(completionResponse('NOT VALID JSON {{{'));
 
     const result = await scoreSession(
@@ -361,6 +362,28 @@ describe('lib/ai — scoreSession', () => {
       SAMPLE_CRITERIA
     );
     expect(result).toEqual([]);
+  });
+
+  it('recovers scores from a response wrapped in prose (E-root #8)', async () => {
+    // The 8B judge routinely prepends/appends prose — previously this threw in
+    // JSON.parse and discarded the entire session's scores (a silent zero).
+    const raw =
+      'Here is my evaluation of the call:\n' +
+      '[{"criteriaIndex":1,"score":8,"justification":"Empathetic."},' +
+      '{"criteriaIndex":2,"score":6,"justification":"Partial fix."}]\n' +
+      'Overall the agent did well.';
+    fetchMock.mockResolvedValueOnce(completionResponse(raw));
+
+    const result = await scoreSession(
+      [
+        { role: 'CUSTOMER' as const, content: 'My internet is down.' },
+        { role: 'AGENT' as const, content: 'Let me help.' },
+      ],
+      SAMPLE_CRITERIA
+    );
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({ criteriaId: 'c1', score: 8 });
+    expect(result[1]).toMatchObject({ criteriaId: 'c2', score: 6 });
   });
 
   it('filters out criteria indices that are out of range', async () => {
@@ -376,6 +399,61 @@ describe('lib/ai — scoreSession', () => {
     );
     expect(result).toHaveLength(1); // only the valid one
     expect(result[0].criteriaId).toBe('c1');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('lib/ai — parseScoreRows (resilient recovery, E-root #8)', () => {
+  it('parses a clean JSON array', () => {
+    const rows = parseScoreRows(
+      '[{"criteriaIndex":1,"score":7,"justification":"Good."}]'
+    );
+    expect(rows).toEqual([{ criteriaIndex: 1, score: 7, justification: 'Good.' }]);
+  });
+
+  it('strips markdown code fences', () => {
+    const rows = parseScoreRows(
+      '```json\n[{"criteriaIndex":1,"score":5,"justification":"OK."}]\n```'
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].score).toBe(5);
+  });
+
+  it('recovers an array buried in leading and trailing prose', () => {
+    const rows = parseScoreRows(
+      'Here you go:\n[{"criteriaIndex":1,"score":9,"justification":"Great."}]\nThanks!'
+    );
+    expect(rows).toEqual([{ criteriaIndex: 1, score: 9, justification: 'Great.' }]);
+  });
+
+  it('accepts a bare object (not wrapped in an array)', () => {
+    const rows = parseScoreRows('{"criteriaIndex":2,"score":4,"justification":"Weak."}');
+    expect(rows).toEqual([{ criteriaIndex: 2, score: 4, justification: 'Weak.' }]);
+  });
+
+  it('salvages valid objects when one row in the array is malformed', () => {
+    // A truncated/garbled middle object must not sink the whole session.
+    const raw =
+      '[{"criteriaIndex":1,"score":8,"justification":"Solid."}, {broken, ' +
+      '{"criteriaIndex":2,"score":6,"justification":"Adequate."}]';
+    const rows = parseScoreRows(raw);
+    expect(rows).toHaveLength(2);
+    expect(rows.map(r => r.criteriaIndex)).toEqual([1, 2]);
+  });
+
+  it('returns [] for unrecoverable garbage', () => {
+    expect(parseScoreRows('NOT VALID JSON {{{')).toEqual([]);
+    expect(parseScoreRows('')).toEqual([]);
+    expect(parseScoreRows('The agent did fine, no JSON here.')).toEqual([]);
+  });
+
+  it('drops rows missing the required numeric fields', () => {
+    const rows = parseScoreRows(
+      '[{"criteriaIndex":1,"score":7,"justification":"Ok."},' +
+      '{"justification":"no index or score"},{"criteriaIndex":"x","score":3}]'
+    );
+    expect(rows).toEqual([{ criteriaIndex: 1, score: 7, justification: 'Ok.' }]);
   });
 });
 
