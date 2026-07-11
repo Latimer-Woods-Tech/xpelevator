@@ -22,7 +22,7 @@ export default function SimulationPage() {
     sending,
     error,
     ended,
-    lastAiMessage,
+    speechChunks,
     loading,
     sendMessage,
     endConversation,
@@ -166,7 +166,7 @@ export default function SimulationPage() {
     return (
       <VoiceChatInterface
         {...sharedProps}
-        lastAiMessage={lastAiMessage}
+        speechChunks={speechChunks}
       />
     );
   }

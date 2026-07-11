@@ -33,6 +33,14 @@
 | R-023 | Security headers (CSP, HSTS, nosniff, X-Frame-Options DENY, Referrer/Permissions-Policy) on every response | live | deploy gate on live domain + pages.dev (PR #30, run 28759891246) |
 | R-024 | No secrets in source or `wrangler.toml`; app secrets are CF Pages secrets | live | grep of repo; `wrangler.toml` carries placeholders only |
 
+## Experience (Phase E — conversation realism)
+
+Founder directive (#16, 2026-07-10): the conversation "is currently a half speed sparring session vs a real life simulation." Phase E-root #2: voice mode waited for the full model reply before speaking a single word (TTS fired only on the SSE `done` event) → multi-second dead air every turn.
+
+| ID | Requirement | Status | Verification |
+|---|---|---|---|
+| R-030 | Voice mode speaks the customer reply **incrementally** — first audio starts on the first complete sentence as the stream arrives, not after the whole response | live | pure boundary logic `src/lib/speech.ts` (unit: `tests/unit/lib/speech.test.ts`, 100% lines); `useChatSession` emits `speechChunks` per sentence; `VoiceChatInterface` speaks each as it lands. Listen-test: multi-sentence reply begins audibly before the reply finishes |
+
 ## Non-functional
 
 | ID | Requirement | Status | Verification |
