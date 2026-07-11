@@ -35,6 +35,7 @@ export async function GET(request: Request) {
       SELECT
         ss.id,
         ss.type,
+        ss.scoring_status as "scoringStatus",
         ss.ended_at   as "endedAt",
         ss.created_at as "createdAt",
         u.email       as "traineeEmail",

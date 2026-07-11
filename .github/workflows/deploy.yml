@@ -26,7 +26,68 @@ env:
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
 jobs:
+  # Apply any pending Prisma migrations to the live Neon DB BEFORE the new worker
+  # is deployed. `deploy` needs this, so code that reads a new column can never go
+  # live ahead of the column existing (the migrate-vs-deploy race). Backs up first
+  # (org schema standard, PLATFORM_STANDARDS §6) and is a no-op when up to date.
+  migrate:
+    runs-on: ubuntu-latest
+    name: Backup + migrate live Neon DB
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Backup DB + build migration baseline plan (dry-run evidence)
+        run: node scripts/db-backup-and-guard.mjs
+
+      - name: Upload DB backup artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neon-backup-${{ github.run_id }}
+          path: backup/
+          retention-days: 30
+
+      - name: Compute direct (non-pooled) URL for migrations
+        run: |
+          # Prisma migrate needs a direct connection (advisory locks / DDL);
+          # Neon's -pooler endpoint (PgBouncer txn mode) breaks that. Strip it.
+          DIRECT="$(printf '%s' "$DATABASE_URL" | sed 's/-pooler//g')"
+          echo "::add-mask::$DIRECT"
+          echo "DIRECT_DATABASE_URL=$DIRECT" >> "$GITHUB_ENV"
+
+      - name: Migrate status BEFORE (dry-run)
+        run: DATABASE_URL="$DIRECT_DATABASE_URL" npx prisma migrate status || true
+
+      - name: Baseline already-present, unrecorded migrations
+        run: |
+          if [ -s baseline.txt ]; then
+            while IFS= read -r m; do
+              [ -z "$m" ] && continue
+              echo "Baselining $m as applied (resolve --applied)"
+              DATABASE_URL="$DIRECT_DATABASE_URL" npx prisma migrate resolve --applied "$m"
+            done < baseline.txt
+          else
+            echo "No migrations to baseline."
+          fi
+
+      - name: prisma migrate deploy
+        run: DATABASE_URL="$DIRECT_DATABASE_URL" npx prisma migrate deploy
+
+      - name: Migrate status AFTER (must be up to date)
+        run: DATABASE_URL="$DIRECT_DATABASE_URL" npx prisma migrate status
+
   deploy:
+    needs: migrate
     runs-on: ubuntu-latest
     name: Build, deploy to LWT, verify
 

@@ -1,0 +1,13 @@
+-- Distinguish a scoring-engine FAILURE from a genuinely un-scored session.
+--
+-- Before this column, a completed session that produced zero Score rows was
+-- ambiguous: it could be a short/non-scorable call OR the scoring engine failing
+-- (expired credential, un-parseable judge output) — the exact "managers don't
+-- trust the /10 scores" kill-signal. `scoring_status` records which one it was at
+-- end-of-session so the manager reporting export can show it.
+--
+-- Additive + nullable + no default → backward-compatible and lock-cheap
+-- (metadata-only on PostgreSQL). Existing completed rows stay NULL
+-- (pre-instrumentation, status unknown); new sessions record
+-- SCORED | FAILED | NOT_SCORABLE.
+ALTER TABLE "simulation_sessions" ADD COLUMN IF NOT EXISTS "scoring_status" TEXT;

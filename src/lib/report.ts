@@ -31,6 +31,11 @@ export interface ReportSession {
   jobTitle: string | null;
   scenario: string | null;
   scores: ReportScore[];
+  /**
+   * Raw end-of-session scoring outcome (`SCORED` | `FAILED` | `NOT_SCORABLE`),
+   * or `null`/`undefined` for sessions completed before the column existed.
+   */
+  scoringStatus?: string | null;
 }
 
 /** A flattened, export-ready summary of a single session. */
@@ -44,9 +49,14 @@ export interface ReportRow {
   criteriaScored: number;
   averageScore: number | null;
   weightedAverage: number | null;
+  /** Human-readable scoring outcome for the manager (see {@link scoringLabel}). */
+  scoring: string;
 }
 
-/** Column order for the CSV — stable so downstream consumers can rely on it. */
+/**
+ * Column order for the CSV — stable so downstream consumers can rely on it.
+ * `Scoring` is appended last so the historical column positions never shift.
+ */
 export const REPORT_COLUMNS: readonly string[] = [
   'Session ID',
   'Date',
@@ -57,7 +67,31 @@ export const REPORT_COLUMNS: readonly string[] = [
   'Criteria Scored',
   'Average Score',
   'Weighted Average',
+  'Scoring',
 ];
+
+/**
+ * Map a session to a human-readable scoring outcome the manager can trust.
+ *
+ * Prefers the explicit end-of-session `scoringStatus`; for older rows that
+ * predate the column (`null`/`undefined`) it infers from whether scores landed,
+ * so a legacy report still reads sensibly. The key distinction this exposes:
+ * `Failed` (the scoring engine broke) is NOT the same as `Not scorable` (too
+ * short / no criteria) — both otherwise show an empty score.
+ */
+export function scoringLabel(session: ReportSession): string {
+  switch (session.scoringStatus) {
+    case 'SCORED':
+      return 'Scored';
+    case 'FAILED':
+      return 'Failed';
+    case 'NOT_SCORABLE':
+      return 'Not scorable';
+    default:
+      // Pre-instrumentation row: infer from the score data we do have.
+      return (session.scores ?? []).length > 0 ? 'Scored' : 'Unknown';
+  }
+}
 
 /** Round to one decimal place, or `null` when there is nothing to average. */
 function round1(value: number | null): number | null {
@@ -90,6 +124,7 @@ export function sessionToReportRow(session: ReportSession): ReportRow {
     criteriaScored: count,
     averageScore: count > 0 ? round1(simpleSum / count) : null,
     weightedAverage: weightTotal > 0 ? round1(weightedSum / weightTotal) : null,
+    scoring: scoringLabel(session),
   };
 }
 
@@ -110,6 +145,7 @@ export function sessionsToCsv(sessions: readonly ReportSession[]): string {
     r.criteriaScored,
     r.averageScore,
     r.weightedAverage,
+    r.scoring,
   ]);
   return toCsv(REPORT_COLUMNS, rows);
 }
@@ -120,16 +156,19 @@ export function sessionsToCsv(sessions: readonly ReportSession[]): string {
  * leaving a hair of slack. The full UUID is shortened to an 8-char reference so
  * the page stays readable; the CSV remains the machine-precise, full-id artifact.
  */
+// Widths are PDF points and still sum to 522 (inside the 532pt printable area):
+// Trainee 118→92 and Scenario 96→82 give up 40pt for the new 'Scoring' column.
 const PDF_COLUMNS: readonly PdfColumn[] = [
   { header: 'Session', width: 54 },
   { header: 'Date', width: 56 },
-  { header: 'Trainee', width: 118 },
+  { header: 'Trainee', width: 92 },
   { header: 'Job Title', width: 84 },
-  { header: 'Scenario', width: 96 },
+  { header: 'Scenario', width: 82 },
   { header: 'Mode', width: 34 },
   { header: '#', width: 18 },
   { header: 'Avg', width: 30 },
   { header: 'Wtd', width: 32 },
+  { header: 'Scoring', width: 40 },
 ];
 
 /** Format a nullable one-decimal score for the PDF (`-` when unscored). */
@@ -155,6 +194,7 @@ export function sessionsToPdf(sessions: readonly ReportSession[]): Uint8Array {
     r.criteriaScored,
     pdfScore(r.averageScore),
     pdfScore(r.weightedAverage),
+    r.scoring,
   ]);
 
   const generated = new Date().toISOString().slice(0, 10);

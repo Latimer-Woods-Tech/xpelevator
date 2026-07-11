@@ -559,6 +559,21 @@ async function endSession(
     }
   }
 
+  // Persist WHY a session has (or lacks) scores so the manager report can tell a
+  // scoring-engine failure apart from a genuinely un-scorable call — a `null`
+  // score in the analytics/CSV/PDF is otherwise indistinguishable between the
+  // two, which is the "managers don't trust the /10 scores" kill-signal.
+  const scoringStatus = !scorable
+    ? 'NOT_SCORABLE'
+    : scores.length > 0
+      ? 'SCORED'
+      : 'FAILED';
+  await sql`
+    UPDATE simulation_sessions
+    SET scoring_status = ${scoringStatus}
+    WHERE id = ${sessionId}
+  `;
+
   // Return final session state
   const finalSessionResult = await sql`
     SELECT 
@@ -566,6 +581,7 @@ async function endSession(
       ss.org_id as "orgId",
       ss.user_id as "userId",
       ss.status,
+      ss.scoring_status as "scoringStatus",
       ss.type,
       json_build_object(
         'id', s.id,
