@@ -28,9 +28,17 @@ interface TypeBreakdown {
   avg: number | null;
 }
 
+interface ScoringHealth {
+  scored: number;
+  failed: number;
+  notScorable: number;
+  unknown: number;
+}
+
 interface AnalyticsData {
   totalSessions: number;
   overallAvg: number | null;
+  scoringHealth?: ScoringHealth;
   scoreTrend: TrendPoint[];
   byJobTitle: JobBreakdown[];
   byCriteria: CriteriaBreakdown[];
@@ -206,6 +214,11 @@ export default function AnalyticsPage() {
               />
             </div>
 
+            {/* ── Scoring health ──────────────────────────────────────────── */}
+            {data.scoringHealth && (
+              <ScoringHealthSection health={data.scoringHealth} />
+            )}
+
             {/* ── Score trend ─────────────────────────────────────────────── */}
             <Section title="Score Trend (last 60 days)">
               <p className="text-slate-400 text-xs mb-4">
@@ -297,6 +310,56 @@ function StatCard({
     <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
       <p className="text-slate-400 text-xs mb-1">{label}</p>
       <p className={`text-2xl font-bold ${textColor}`}>{value}</p>
+    </div>
+  );
+}
+
+function ScoringHealthSection({ health }: { health: ScoringHealth }) {
+  const { scored, failed, notScorable, unknown } = health;
+  return (
+    <Section title="Scoring Health">
+      <p className="text-slate-400 text-xs mb-4">
+        Whether each completed session actually produced a score. A{' '}
+        <span className="text-red-400 font-medium">Failed</span> session is one
+        the scoring engine could not score (not a low score) — distinct from a{' '}
+        <span className="text-slate-300 font-medium">Not scorable</span> session
+        that was too short to score. Same outcome the CSV/PDF export records.
+      </p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <HealthChip label="Scored" value={scored} tone="good" />
+        <HealthChip label="Failed" value={failed} tone={failed > 0 ? 'bad' : 'muted'} />
+        <HealthChip label="Not scorable" value={notScorable} tone="muted" />
+        <HealthChip label="Unknown" value={unknown} tone="muted" />
+      </div>
+      {failed > 0 && (
+        <p className="text-red-400 text-xs mt-4">
+          ⚠️ {failed} session{failed !== 1 ? 's' : ''} could not be scored —
+          check the scoring engine before trusting the averages above.
+        </p>
+      )}
+    </Section>
+  );
+}
+
+function HealthChip({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: 'good' | 'bad' | 'muted';
+}) {
+  const valueColor =
+    tone === 'good'
+      ? 'text-green-400'
+      : tone === 'bad'
+      ? 'text-red-400'
+      : 'text-white';
+  return (
+    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+      <p className="text-slate-400 text-xs mb-1">{label}</p>
+      <p className={`text-2xl font-bold ${valueColor}`}>{value}</p>
     </div>
   );
 }
