@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   REPORT_COLUMNS,
+  scoringLabel,
   sessionToReportRow,
   sessionsToReportRows,
   sessionsToCsv,
@@ -64,6 +65,57 @@ describe('sessionToReportRow', () => {
   it('substitutes a placeholder for a missing trainee email', () => {
     const row = sessionToReportRow({ ...base, traineeEmail: null });
     expect(row.trainee).toBe('(unknown)');
+  });
+});
+
+describe('scoringLabel', () => {
+  it('maps the explicit end-of-session statuses to manager-readable labels', () => {
+    expect(scoringLabel({ ...base, scoringStatus: 'SCORED' })).toBe('Scored');
+    expect(scoringLabel({ ...base, scoringStatus: 'FAILED' })).toBe('Failed');
+    expect(scoringLabel({ ...base, scoringStatus: 'NOT_SCORABLE' })).toBe(
+      'Not scorable'
+    );
+  });
+
+  it('distinguishes a scoring FAILURE from a genuinely un-scorable call', () => {
+    // Both show no score, but the manager must be able to tell them apart.
+    const failed = scoringLabel({ ...base, scores: [], scoringStatus: 'FAILED' });
+    const notScorable = scoringLabel({
+      ...base,
+      scores: [],
+      scoringStatus: 'NOT_SCORABLE',
+    });
+    expect(failed).toBe('Failed');
+    expect(notScorable).toBe('Not scorable');
+    expect(failed).not.toBe(notScorable);
+  });
+
+  it('infers a label for pre-instrumentation rows with no scoringStatus', () => {
+    // Legacy row with scores but no status column value → still reads as Scored.
+    expect(scoringLabel({ ...base, scoringStatus: null })).toBe('Scored');
+    // Legacy row with neither status nor scores → Unknown (not a false "Scored").
+    expect(scoringLabel({ ...base, scores: [], scoringStatus: undefined })).toBe(
+      'Unknown'
+    );
+  });
+});
+
+describe('scoring column in the export', () => {
+  it('carries the Scoring column as the last CSV field', () => {
+    expect(REPORT_COLUMNS[REPORT_COLUMNS.length - 1]).toBe('Scoring');
+    const failed: ReportSession = { ...base, scores: [], scoringStatus: 'FAILED' };
+    const csv = sessionsToCsv([failed]);
+    const [header, dataLine] = csv.trim().split('\r\n');
+    expect(header.split(',').length).toBe(REPORT_COLUMNS.length);
+    // Row still has one cell per column and ends with the Failed status.
+    const cells = dataLine.split(',');
+    expect(cells.length).toBe(REPORT_COLUMNS.length);
+    expect(cells[cells.length - 1]).toBe('Failed');
+  });
+
+  it('exposes the scoring outcome on the flattened row', () => {
+    const row = sessionToReportRow({ ...base, scoringStatus: 'FAILED' });
+    expect(row.scoring).toBe('Failed');
   });
 });
 
