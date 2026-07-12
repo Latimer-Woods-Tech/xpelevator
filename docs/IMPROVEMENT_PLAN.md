@@ -122,11 +122,22 @@ score and tenant boundaries defensible.
 - [x] **P2-12 Smoke tests must fail loudly.**
   `tests/smoke/api.smoke.test.ts:35-42` silently passes when the host is
   unreachable.
-- [ ] **P2-13 Dependency audit.** GitHub reports 61 Dependabot vulnerabilities
-  on the default branch (3 critical, 26 high). Triage at
-  `github.com/Latimer-Woods-Tech/xpelevator/security/dependabot`, upgrade or
-  remove affected packages, and enable Dependabot PRs so this doesn't
-  accumulate again.
+- [~] **P2-13 Dependency audit.** Triaged (2026-07-12). Findings:
+  - **Production surface is small:** `npm audit --omit=dev` reports only 2
+    (a high in `next` + a transitive moderate in `postcss`). The `next`
+    advisory range covers the entire 15.x line (fix is in 16.x), so clearing
+    it needs a **Next 15→16 migration** — a discrete change gated on a full
+    OpenNext build + deploy-verify, not a blind bump.
+  - **The criticals/highs are dev-only:** vitest / vite / `@vitest/browser`
+    (2 critical) and `ws` via wrangler (high). `npm audit fix` (non-breaking)
+    clears the criticals but silently bumps vitest 4.0→4.1, which **breaks the
+    UI test harness** — so it needs a dedicated test-tooling upgrade, not an
+    inline fix. `--force` additionally does wrangler 3→4 (breaking).
+  - **Done now:** added `.github/dependabot.yml` (grouped weekly npm +
+    actions updates; majors isolated) so these surface as reviewable PRs and
+    stop accumulating.
+  - **Follow-ups:** (1) Next 15→16 migration PR; (2) test-tooling bump
+    (vitest 4.1 + wrangler 4) with harness fixes.
 
 ## Phase 3a — UI/UX makeover (~2–3 weeks)
 
