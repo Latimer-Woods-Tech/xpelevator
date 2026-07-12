@@ -528,6 +528,37 @@ jobs:
           fi
           echo "✅ /api/branding/[slug] is public and 404s an unknown slug on both hosts"
 
+      - name: Verify self-context /api/me is auth-gated (Phase 4)
+        # GET /api/me returns the CALLER'S OWN identity + org context (id, slug,
+        # kind, plan, parentOrgId, canManageClients) — the bootstrap primitive
+        # the operator workspace reads before any other call (R-051). It is
+        # self-scoped (org looked up by the session's own orgId, never a request
+        # id) and MUST require auth: the /api/* middleware matcher gates the path
+        # and requireAuth double-checks in the handler. Permanent regression
+        # gate: an anonymous GET must be 401 on both hosts (a 200 here would mean
+        # a caller's identity/org is exposed pre-sign-in).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/me" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/me (anon) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/me must require auth (got $code) — caller identity/org exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Self-context /api/me auth-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /api/me rejects anonymous GET (401) on both hosts"
+
       - name: Verify manager reporting export is auth-gated (Phase 4)
         # The manager CSV export (GET /api/reports/sessions) returns a tenant's
         # completed-session scores — it is ADMIN-only and org-scoped, and must
