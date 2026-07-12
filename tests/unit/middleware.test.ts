@@ -70,4 +70,12 @@ describe('middleware auth gate', () => {
     const res = middleware(anonRequest('/api/orgs/org-1/branding'));
     expect(res.status).toBe(401);
   });
+
+  it('gates the self-context route /api/me (R-051) — never public', () => {
+    // /api/me returns the caller's own identity + org context and MUST require
+    // auth. A near-miss to the public /api/branding prefix, so this pins that it
+    // is not accidentally opened.
+    const res = middleware(anonRequest('/api/me'));
+    expect(res.status).toBe(401);
+  });
 });
