@@ -21,6 +21,58 @@ export interface Branding {
 /** A validated partial update — only the keys the caller actually sent. */
 export type BrandingPatch = Partial<Branding>;
 
+/**
+ * The brand-safe projection served to ANONYMOUS callers by the public,
+ * slug-keyed read (`GET /api/branding/[slug]`) that powers the client-facing
+ * render surface (R-050).
+ *
+ * It carries ONLY the four white-label fields plus the org slug the caller
+ * already knows — never the internal org `name`, `plan`, `parentOrgId`, id, or
+ * any member/tenant data. That is the whole security contract of the public
+ * read: an operator's brand is meant to be seen, the tenant behind it is not.
+ * The internal org name is deliberately NOT exposed as a fallback — a null
+ * `displayName` means "fall back to the platform default" on the render side.
+ */
+export interface PublicBranding {
+  slug: string;
+  displayName: string | null;
+  logoUrl: string | null;
+  primaryColor: string | null;
+  accentColor: string | null;
+}
+
+/**
+ * Project a stored org's slug + branding down to the brand-safe `PublicBranding`
+ * shape. The single source of truth for what the anonymous read may expose — it
+ * copies each field explicitly (never spreads the row) so a new sensitive
+ * column added to `organizations` can never leak through this projection.
+ */
+export function toPublicBranding(
+  input: { slug: string } & Branding
+): PublicBranding {
+  return {
+    slug: input.slug,
+    displayName: input.displayName,
+    logoUrl: input.logoUrl,
+    primaryColor: input.primaryColor,
+    accentColor: input.accentColor,
+  };
+}
+
+/**
+ * Whether any white-label field is set. `false` means the org has no custom
+ * brand and the render surface should fall back to the platform default. Used
+ * by the client shell to decide between the branded and default presentation.
+ */
+export function hasBranding(b: Branding): boolean {
+  return (
+    b.displayName !== null ||
+    b.logoUrl !== null ||
+    b.primaryColor !== null ||
+    b.accentColor !== null
+  );
+}
+
 /** Minimal shape of the authenticated caller. */
 export interface OrgManager {
   role?: 'ADMIN' | 'MEMBER';

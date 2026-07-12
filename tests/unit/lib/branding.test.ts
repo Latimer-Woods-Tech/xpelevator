@@ -6,6 +6,8 @@ import {
   parseBrandingBody,
   mergeBranding,
   canManageOrgBranding,
+  toPublicBranding,
+  hasBranding,
   type Branding,
 } from '@/lib/branding';
 
@@ -175,5 +177,78 @@ describe('canManageOrgBranding', () => {
     expect(canManageOrgBranding({ id: ORG }, { role: 'MEMBER', orgId: null })).toBe(false);
     expect(canManageOrgBranding({ id: ORG }, { role: 'MEMBER', orgId: ORG })).toBe(false);
     expect(canManageOrgBranding({ id: ORG }, {})).toBe(false);
+  });
+});
+
+describe('toPublicBranding', () => {
+  it('projects slug + the four brand-safe fields', () => {
+    const out = toPublicBranding({
+      slug: 'acme',
+      displayName: 'Acme Training',
+      logoUrl: 'https://cdn.acme.example/logo.svg',
+      primaryColor: '#112233',
+      accentColor: '#445566',
+    });
+    expect(out).toEqual({
+      slug: 'acme',
+      displayName: 'Acme Training',
+      logoUrl: 'https://cdn.acme.example/logo.svg',
+      primaryColor: '#112233',
+      accentColor: '#445566',
+    });
+  });
+
+  it('carries nulls through unchanged (no brand set)', () => {
+    const out = toPublicBranding({
+      slug: 'plain',
+      displayName: null,
+      logoUrl: null,
+      primaryColor: null,
+      accentColor: null,
+    });
+    expect(out).toEqual({
+      slug: 'plain',
+      displayName: null,
+      logoUrl: null,
+      primaryColor: null,
+      accentColor: null,
+    });
+  });
+
+  it('exposes ONLY brand-safe keys — never leaks an extra field', () => {
+    // Guards the security contract: even if a caller passes a row with a
+    // sensitive field spread in, the projection copies fields explicitly and
+    // drops everything else.
+    const out = toPublicBranding({
+      slug: 'acme',
+      displayName: 'Acme',
+      logoUrl: null,
+      primaryColor: null,
+      accentColor: null,
+      // extra fields a real org row would carry — must NOT appear on the output
+      ...({ name: 'Acme Internal LLC', plan: 'ENTERPRISE', parentOrgId: 'p1', id: 'org-9' } as unknown as Branding),
+    });
+    expect(Object.keys(out).sort()).toEqual(
+      ['accentColor', 'displayName', 'logoUrl', 'primaryColor', 'slug'].sort()
+    );
+    expect(out as Record<string, unknown>).not.toHaveProperty('name');
+    expect(out as Record<string, unknown>).not.toHaveProperty('plan');
+    expect(out as Record<string, unknown>).not.toHaveProperty('parentOrgId');
+    expect(out as Record<string, unknown>).not.toHaveProperty('id');
+  });
+});
+
+describe('hasBranding', () => {
+  const none: Branding = { displayName: null, logoUrl: null, primaryColor: null, accentColor: null };
+
+  it('is false when every field is null', () => {
+    expect(hasBranding(none)).toBe(false);
+  });
+
+  it('is true when any single field is set', () => {
+    expect(hasBranding({ ...none, displayName: 'Acme' })).toBe(true);
+    expect(hasBranding({ ...none, logoUrl: 'https://x.example/l.png' })).toBe(true);
+    expect(hasBranding({ ...none, primaryColor: '#000000' })).toBe(true);
+    expect(hasBranding({ ...none, accentColor: '#ffffff' })).toBe(true);
   });
 });

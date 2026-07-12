@@ -41,9 +41,14 @@ const PUBLIC_EXACT_ROUTES = [
   '/api/telnyx/webhook', // Has its own signature verification
 ];
 
-// Routes whose SUBPATHS are also public (prefix match). Only NextAuth needs this
-// (it serves many paths under /api/auth/*).
-const PUBLIC_PREFIX_ROUTES = ['/api/auth'];
+// Routes whose SUBPATHS are also public (prefix match).
+//   - /api/auth      — NextAuth serves many paths under /api/auth/*
+//   - /api/branding  — the client-facing brand read `/api/branding/[slug]` is
+//     public by design (R-050): it returns ONLY brand-safe fields (name / logo /
+//     colors, no tenant data) so an operator's brand can render on the login
+//     shell before sign-in. It is read-only — there is no write verb under this
+//     prefix (the admin write path is the gated `/api/orgs/[id]/branding`).
+const PUBLIC_PREFIX_ROUTES = ['/api/auth', '/api/branding'];
 
 export default function middleware(req: NextRequest) {
   // TESTING MODE: Bypass auth checks if DISABLE_AUTH is set — never in production.

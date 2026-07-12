@@ -2,15 +2,44 @@
 
 import { signIn } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
-import { useState, Suspense } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import type { PublicBranding } from '@/lib/branding';
 
+// Client-facing white-label render surface (issue #16, Phase 4, R-050). When a
+// trainee arrives via an operator's slug (`/auth/signin?org=<slug>`), the shell
+// fetches the operator's brand-safe branding (`GET /api/branding/[slug]`, public)
+// and presents the operator's name / logo / colors instead of the platform
+// default — so the workspace looks like the operator's product, not ours. When
+// no `org` slug is present, or the org has no custom brand, it falls back to the
+// default XPElevator presentation unchanged.
 function SignInForm() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') ?? '/';
+  const orgSlug = searchParams.get('org');
 
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
   const [githubLoading, setGithubLoading] = useState(false);
+  const [branding, setBranding] = useState<PublicBranding | null>(null);
+
+  // Load the operator's brand when an `org` slug is present. Same-origin,
+  // brand-safe read; any failure (unknown slug → 404, network) silently falls
+  // back to the platform default — branding is presentation, never a gate.
+  useEffect(() => {
+    if (!orgSlug) return;
+    let cancelled = false;
+    fetch(`/api/branding/${encodeURIComponent(orgSlug)}`)
+      .then(res => (res.ok ? res.json() : null))
+      .then((data: PublicBranding | null) => {
+        if (!cancelled && data) setBranding(data);
+      })
+      .catch(() => {
+        /* brand read is best-effort — keep the default presentation */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgSlug]);
 
   const handleCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,12 +55,33 @@ function SignInForm() {
     setGithubLoading(false);
   };
 
+  const primary = branding?.primaryColor ?? null;
+  const accent = branding?.accentColor ?? null;
+  const primaryBtnStyle = primary ? { backgroundColor: primary } : undefined;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-10">
+          {branding?.logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- external operator logo; https-only + length-capped at write time
+            <img
+              src={branding.logoUrl}
+              alt={branding.displayName ?? 'Organization logo'}
+              className="mx-auto mb-4 h-12 w-auto max-w-[220px] object-contain"
+            />
+          ) : null}
           <h1 className="text-4xl font-bold mb-2">
-            XP<span className="text-blue-400">Elevator</span>
+            {branding?.displayName ? (
+              <span>{branding.displayName}</span>
+            ) : (
+              <>
+                XP
+                <span className="text-blue-400" style={accent ? { color: accent } : undefined}>
+                  Elevator
+                </span>
+              </>
+            )}
           </h1>
           <p className="text-slate-400 text-sm">Sign in to start your training</p>
         </div>
@@ -74,6 +124,7 @@ function SignInForm() {
           <button
             type="submit"
             disabled={loading || !username.trim()}
+            style={primaryBtnStyle}
             className="w-full px-5 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed rounded-xl text-sm font-semibold transition-colors"
           >
             {loading ? 'Signing in…' : 'Continue'}
