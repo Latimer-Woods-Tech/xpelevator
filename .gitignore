@@ -38,6 +38,8 @@ buildlog.txt
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the committed template must be tracked
+!.env.example
 
 # secrets
 secrets.txt

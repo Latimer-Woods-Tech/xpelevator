@@ -12,7 +12,7 @@ This document tracks the product roadmap, identifies gaps in the current plan, a
 |------|--------|-------|
 | Architecture documented | ✅ Done | C4 + Mermaid diagrams in ARCHITECTURE.md (updated Feb 21 2026) |
 | Next.js scaffolded | ✅ Done | App Router, TS, Tailwind v4, React 19 |
-| Prisma schema | ✅ Done | 10 models, 4 enums; migration baseline applied |
+| Prisma schema | ✅ Done | 9 models, 5 enums; migration baseline applied |
 | Neon DB tables | ✅ Done | 10 tables; seed data loaded |
 | API routes (full CRUD) | ✅ Done | jobs, scenarios, criteria, simulations, scoring, analytics, orgs, telnyx, auth |
 | Edge runtime | ✅ Done | All routes: `export const runtime = 'edge'`; Neon HTTP adapter |

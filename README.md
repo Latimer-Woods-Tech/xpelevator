@@ -1,14 +1,22 @@
 # XPElevator
 
-Virtual customer simulator for training employees on customer interactions. Employees select a job title, triggering phone or chat simulations with AI-powered virtual customers, then receive scoring on updatable criteria.
+Virtual-customer training simulator. Trainees pick a job title and a scenario,
+run a simulated customer conversation (chat, browser voice, or a real phone
+call), and get scored out of 10 against weighted, per-role criteria. The buyer
+is the training **operator** — a consultancy or L&D shop that resells practice
+seats to its own clients. See [`docs/VISION.md`](./docs/VISION.md).
 
 ## Tech Stack
 
-- **Frontend**: Next.js 16 (App Router, TypeScript, Tailwind CSS)
-- **Database**: Neon Postgres with Prisma ORM
-- **AI**: Groq / Grok for virtual customer responses
-- **Voice**: Telnyx for phone simulations
-- **Hosting**: Cloudflare Pages + Workers
+- **Frontend**: Next.js 15 (App Router, TypeScript, React 19, Tailwind CSS v4)
+- **Database**: Neon Postgres (queried over the serverless HTTP driver);
+  Prisma owns the schema and migrations
+- **Simulated customers & scoring**: Groq (Llama 3.1 / 3.3)
+- **Voice / phone**: browser Web Speech API, and Telnyx Call Control for real
+  phone calls
+- **Hosting**: Cloudflare Workers via `@opennextjs/cloudflare` (Pages project
+  `xpelevator-sim`)
+- **Auth**: Auth.js (NextAuth v5), JWT sessions
 - **Domain**: xpelevator.com
 
 ## Getting Started
@@ -18,13 +26,11 @@ Virtual customer simulator for training employees on customer interactions. Empl
    npm install
    ```
 
-2. **Set up environment variables** — copy `.env.example` to `.env` and fill in:
-   - `DATABASE_URL` — Neon Postgres connection string
-   - `CLOUDFLARE_API_TOKEN`
-   - `TELNYX_API_KEY`
-   - `GROQ_API_KEY` / `GROK_API_KEY`
+2. **Set up environment variables** — copy `.env.example` to `.env` and fill in
+   at least the required three (`DATABASE_URL`, `AUTH_SECRET`, `GROQ_API_KEY`).
+   The file documents the optional voice/phone and auth variables.
 
-3. **Generate Prisma client**:
+3. **Generate the Prisma client**:
    ```bash
    npx prisma generate
    ```
@@ -36,44 +42,59 @@ Virtual customer simulator for training employees on customer interactions. Empl
 
 5. Open [http://localhost:3000](http://localhost:3000)
 
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Next.js dev server |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | ESLint (must be zero errors) |
+| `npm run test:unit` | Deterministic unit tests (mocked) |
+| `npm run test:ui` | React component render tests |
+| `npm run test:coverage:ci` | Coverage gate over `src/lib` |
+| `npm run deploy` | Build with OpenNext + deploy to Cloudflare |
+
 ## Project Structure
 
 ```
 src/
 ├── app/
-│   ├── page.tsx              # Landing page
-│   ├── simulate/page.tsx     # Job title selector + scenario cards
-│   ├── admin/page.tsx        # CRUD admin for scoring criteria
-│   ├── sessions/page.tsx     # Past simulation sessions
-│   └── api/
-│       ├── jobs/             # Job titles API
-│       ├── criteria/         # Scoring criteria API
-│       ├── simulations/      # Simulation sessions API
-│       └── scoring/          # Score submission API
-├── lib/
-│   └── prisma.ts             # Prisma client singleton
+│   ├── page.tsx                    # Landing page
+│   ├── simulate/                   # Job/scenario picker + active session UI
+│   ├── sessions/                   # Past sessions + detail w/ score breakdown
+│   ├── analytics/                  # Score trends + scoring-health dashboard
+│   ├── admin/                      # Criteria / jobs / scenarios / links CRUD
+│   ├── pricing/                    # Operator-facing seat catalog
+│   └── api/                        # Route handlers (raw SQL over Neon HTTP)
+├── lib/                            # Pure, unit-tested helpers (ai, scoring,
+│                                   #   tenant guards, limits, csv/pdf, telnyx…)
 prisma/
-└── schema.prisma             # Database schema (7 models, 3 enums)
+└── schema.prisma                   # 9 models, 5 enums
 docs/
-└── ARCHITECTURE.md           # C4 diagrams, schema docs, key flows
+├── VISION.md                       # North star (buyer, monetization, kill-signals)
+├── ARCHITECTURE.md                 # C4 diagrams, schema, key flows
+└── IMPROVEMENT_PLAN.md             # Phased engineering roadmap
 ```
 
 ## Database
 
-7 tables: `job_titles`, `scenarios`, `criteria`, `job_criteria`, `simulation_sessions`, `chat_messages`, `scores`
+9 models / 5 enums (`prisma/schema.prisma`). Core tables: `organizations`,
+`users`, `job_titles`, `scenarios`, `criteria`, `job_criteria`,
+`simulation_sessions`, `chat_messages`, `scores`.
 
-Managed via Prisma ORM pointing to Neon Postgres (project: `aged-butterfly-52244878`).
+Prisma owns the schema and migrations; the application code queries Neon
+directly with parameterized raw SQL (the Prisma client is not used on the
+Cloudflare Workers runtime — see `docs/LESSONS_LEARNED.md`).
 
 ## Deployment
 
-Deployed to Cloudflare Pages at [xpelevator.com](https://xpelevator.com).
+Built with `@opennextjs/cloudflare` and deployed to the Cloudflare Pages
+project `xpelevator-sim`, served at [xpelevator.com](https://xpelevator.com).
+CI (`.github/workflows/ci.yml`) gates typecheck, lint, tests, and coverage;
+the deploy workflow re-runs those checks, migrates the Neon DB, then deploys
+and self-verifies (`/api/health`, auth gates, tenant isolation, security
+headers).
 
 ## License
 
 Private project.
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.

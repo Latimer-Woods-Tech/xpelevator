@@ -87,7 +87,7 @@ Auth: NextAuth v5 JWT — /admin protected; all other routes open (BL-046)
 | `src/auth.ts` | NextAuth v5 config (GitHub + Credentials, JWT) |
 | `src/middleware.ts` | Edge middleware — protects `/admin` routes |
 | `src/types/index.ts` | Shared TS types + SSE event payload shapes |
-| `prisma/schema.prisma` | Full DB schema (10 models, 4 enums) |
+| `prisma/schema.prisma` | Full DB schema (9 models, 5 enums) |
 | `prisma/seed.ts` | Idempotent seed data (`npm run seed`) |
 | `wrangler.toml` | Cloudflare Pages deployment config |
 | `open-next.config.ts` | `@opennextjs/cloudflare` adapter config |

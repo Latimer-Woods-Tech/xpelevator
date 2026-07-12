@@ -26,11 +26,40 @@ env:
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
 jobs:
+  # CI gate — the same fast static + deterministic checks as ci.yml, run here so
+  # a failing typecheck/lint/test can never migrate the live DB or ship. deploy.yml
+  # and ci.yml both fire on push to main independently, so without this gate a red
+  # CI does not stop a deploy. migrate (and therefore deploy) needs this to pass.
+  ci-gate:
+    runs-on: ubuntu-latest
+    name: CI gate (typecheck + lint + tests)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint (zero errors)
+        run: npm run lint
+      - name: Unit tests
+        run: npm run test:unit
+      - name: UI tests
+        run: npm run test:ui
+      - name: Coverage gate (src/lib)
+        run: npm run test:coverage:ci
+
   # Apply any pending Prisma migrations to the live Neon DB BEFORE the new worker
   # is deployed. `deploy` needs this, so code that reads a new column can never go
   # live ahead of the column existing (the migrate-vs-deploy race). Backs up first
   # (org schema standard, PLATFORM_STANDARDS §6) and is a no-op when up to date.
   migrate:
+    needs: ci-gate
     runs-on: ubuntu-latest
     name: Backup + migrate live Neon DB
     env:

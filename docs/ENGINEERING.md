@@ -75,7 +75,7 @@ See [Database Management](#database-management) for details on the Neon branchin
 ```
 xpelevator/
 ├── prisma/
-│   ├── schema.prisma           # Single source of truth for DB schema (10 models, 4 enums)
+│   ├── schema.prisma           # Single source of truth for DB schema (9 models, 5 enums)
 │   ├── seed.ts                 # Idempotent seed: job titles, criteria, scenarios, job-criteria links
 │   ├── prisma.config.ts        # Prisma CLI config (replaces deprecated package.json#prisma)
 │   └── migrations/             # SQL migration history (prisma migrate)

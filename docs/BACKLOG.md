@@ -168,7 +168,7 @@ Format: `[ID] Title — Priority | Status | Notes`
 | ID | Title | Sprint |
 |----|-------|--------|
 | — | Next.js App Router scaffolding | Phase 1 |
-| — | Prisma schema (10 models, 4 enums) | Phase 1 |
+| — | Prisma schema (9 models, 5 enums) | Phase 1 |
 | — | Neon DB tables + seed data | Phase 1 |
 | — | API routes: jobs, criteria, simulations, scoring | Phase 2 |
 | — | UI pages: home, simulate (selector), admin (criteria), sessions | Phase 2 |

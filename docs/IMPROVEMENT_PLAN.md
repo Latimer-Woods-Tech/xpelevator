@@ -96,7 +96,7 @@ score and tenant boundaries defensible.
   `src/lib/prisma.ts`, or move queries back behind it. Stop maintaining both.
 - [x] **P2-5 Make ESLint real.** `eslint.config.mjs` extends nothing and
   ignores `tests/**`; `eslint-config-next` is installed but unused. Wire it in.
-- [ ] **P2-6 Gate deploys on CI.** `deploy.yml` fires on every push to `main`
+- [x] **P2-6 Gate deploys on CI.** `deploy.yml` fires on every push to `main`
   with no dependency on `ci.yml`. Add branch protection / workflow dependency.
 - [ ] **P2-7 CI-gate the API routes.** Integration tests hit live Neon+Groq
   and never run in CI; `src/app/api/**` has zero enforced coverage. Make them
@@ -111,7 +111,7 @@ score and tenant boundaries defensible.
   (fold useful checks into smoke/uptime), stale `phase1-*`/`phase2-*`
   workflows, `src/lib/http-agent-polyfill.ts`. Add `*.log`/`*.exit` to
   `.gitignore`.
-- [ ] **P2-10 Fix the README + doc drift.** README says Next.js 16 (it's 15),
+- [x] **P2-10 Fix the README + doc drift.** README says Next.js 16 (it's 15),
   "7 models, 3 enums" (schema has 9/5, internal docs say 10/4 — all three
   wrong), contains "Deploy on Vercel" boilerplate, references a nonexistent
   `.env.example`, and uses "AI" in copy that the deploy pipeline bans
