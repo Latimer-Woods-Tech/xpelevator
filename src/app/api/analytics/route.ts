@@ -29,10 +29,8 @@ export async function GET() {
     const { session: authSession } = await requireAuth();
     const userOrgId = authSession.user.orgId;
 
-    // Multi-tenancy: filter sessions by org (user's org + global if any)
-    const orgFilter = userOrgId
-      ? { OR: [{ orgId: userOrgId }, { orgId: null }] }
-      : { orgId: null };
+    // Multi-tenancy: sessions are filtered to the caller's org (+ global) in
+    // the WHERE clause of the query below.
 
     // Fetch all completed sessions with scores and criteria
     const rawSessions = await sql`

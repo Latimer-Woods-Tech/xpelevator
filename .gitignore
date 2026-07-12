@@ -30,6 +30,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# build/scratch logs & exit-code captures (never commit)
+*.log
+*.exit
+build-output*.txt
+buildlog.txt
+
 # env files (can opt-in for committing if needed)
 .env*
 

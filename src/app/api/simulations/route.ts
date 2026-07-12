@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/auth';
 import { sql } from '@/lib/db';
-import { requireAuth, AuthError, getAuthOrNull } from '@/lib/auth-api';
+import { requireAuth, AuthError } from '@/lib/auth-api';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
 import { canReadResource } from '@/lib/tenant-guard';
 import { MAX_SESSIONS_PER_DAY } from '@/lib/limits';
@@ -143,18 +142,13 @@ export async function POST(request: Request) {
 // List simulation sessions
 export async function GET(request: Request) {
   try {
-    console.log('[simulations/GET] Starting request');
     // Require authentication to list sessions
     const authResult = await requireAuth();
-    console.log('[simulations/GET] Auth passed:', { userId: authResult.session.user.id, role: authResult.session.user.role });
-
-    const { searchParams } = new URL(request.url);
 
     // User sees only their own sessions (or org sessions if admin)
     const userId = authResult.session.user.id;
     const userRole = authResult.session.user.role;
     const orgId = authResult.session.user.orgId;
-    console.log('[simulations/GET] Query params:', { userId, userRole, orgId });
 
     // Admins can see all sessions in their org; members see only their own
     const sessions = userRole === 'ADMIN' && orgId
@@ -261,7 +255,6 @@ export async function GET(request: Request) {
           ORDER BY ss.created_at DESC
         `;
 
-    console.log('[simulations/GET] Query completed, sessions count:', sessions.length);
     const isAdmin = userRole === 'ADMIN';
     const safe = (sessions as Array<{ scenario?: unknown }>).map((s) =>
       sanitizeSessionScenario(s, isAdmin)

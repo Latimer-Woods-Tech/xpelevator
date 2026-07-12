@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     result.error = {
       message: error instanceof Error ? error.message : String(error),
       type: error?.constructor?.name || 'Unknown',
-      // @ts-ignore - Groq SDK might have specific error fields
+      // @ts-expect-error - Groq SDK might have specific error fields
       status: error?.status,
     };
   }

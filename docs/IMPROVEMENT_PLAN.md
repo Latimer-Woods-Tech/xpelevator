@@ -94,7 +94,7 @@ score and tenant boundaries defensible.
   `tests/integration/helpers/db.ts` imports it); all runtime queries are raw
   SQL. Either commit to schema-as-migration-tool-only and delete
   `src/lib/prisma.ts`, or move queries back behind it. Stop maintaining both.
-- [ ] **P2-5 Make ESLint real.** `eslint.config.mjs` extends nothing and
+- [x] **P2-5 Make ESLint real.** `eslint.config.mjs` extends nothing and
   ignores `tests/**`; `eslint-config-next` is installed but unused. Wire it in.
 - [ ] **P2-6 Gate deploys on CI.** `deploy.yml` fires on every push to `main`
   with no dependency on `ci.yml`. Add branch protection / workflow dependency.
@@ -105,7 +105,7 @@ score and tenant boundaries defensible.
 - [ ] **P2-8 Test the voice/phone path.** No tests for `api/telnyx/call`,
   `api/telnyx/webhook`, `useChatSession`, or any interface component — the
   differentiating feature is nearly untested.
-- [ ] **P2-9 Repo cleanup.** Delete ~23 committed build logs
+- [x] **P2-9 Repo cleanup.** Delete ~23 committed build logs
   (`*.log`, `*.exit`, `build-output*.txt`, `hi.*`, `which.log`), the `.bak`
   test, `fix-data.sql`, `install.bat`, `wait-and-test.py`, `validate.mjs`
   (fold useful checks into smoke/uptime), stale `phase1-*`/`phase2-*`
@@ -116,10 +116,10 @@ score and tenant boundaries defensible.
   wrong), contains "Deploy on Vercel" boilerplate, references a nonexistent
   `.env.example`, and uses "AI" in copy that the deploy pipeline bans
   elsewhere. Create a real `.env.example`.
-- [ ] **P2-11 Quiet the hot-path logging.** PII/prompt content is logged on
+- [x] **P2-11 Quiet the hot-path logging.** PII/prompt content is logged on
   every request (`chat/route.ts:32,150`, `simulations/route.ts:101,109`,
   `telnyx/webhook/route.ts:245`). Strip or gate behind a debug flag.
-- [ ] **P2-12 Smoke tests must fail loudly.**
+- [x] **P2-12 Smoke tests must fail loudly.**
   `tests/smoke/api.smoke.test.ts:35-42` silently passes when the host is
   unreachable.
 - [ ] **P2-13 Dependency audit.** GitHub reports 61 Dependabot vulnerabilities

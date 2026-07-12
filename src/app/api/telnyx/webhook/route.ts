@@ -242,7 +242,8 @@ async function handleEvent(
         if (!state) break;
 
         const transcriptionData = payload.transcription_data;
-        console.log(`[telnyx] call.transcription: is_final=${transcriptionData?.is_final}, transcript='${transcriptionData?.transcript?.slice(0, 80) ?? ''}', language=${transcriptionData?.language}`);
+        // Log metadata only — never the transcript text (caller PII).
+        console.log(`[telnyx] call.transcription: is_final=${transcriptionData?.is_final}, language=${transcriptionData?.language}`);
         if (!transcriptionData?.is_final) {
           // Partial result — ignore, wait for is_final=true
           break;

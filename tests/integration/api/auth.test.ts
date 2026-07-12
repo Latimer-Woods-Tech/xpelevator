@@ -132,10 +132,10 @@ describe('auth.ts — conditional GitHub provider guard', () => {
   });
 
   it('exports { handlers, signIn, signOut, auth }', async () => {
-    const module = await import('@/auth');
-    expect(module).toHaveProperty('handlers');
-    expect(module).toHaveProperty('signIn');
-    expect(module).toHaveProperty('signOut');
-    expect(module).toHaveProperty('auth');
+    const authModule = await import('@/auth');
+    expect(authModule).toHaveProperty('handlers');
+    expect(authModule).toHaveProperty('signIn');
+    expect(authModule).toHaveProperty('signOut');
+    expect(authModule).toHaveProperty('auth');
   });
 });

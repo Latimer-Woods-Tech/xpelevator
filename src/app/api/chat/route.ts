@@ -26,14 +26,10 @@ export async function POST(request: Request) {
     const userOrgId = authSession.user.orgId;
     const userRole = authSession.user.role;
 
-    console.log('[Chat API] POST request received');
     const body = await request.json();
     const { sessionId, content } = body as { sessionId: string; content: string };
 
-    console.log('[Chat API] Request body:', { sessionId: sessionId?.substring(0, 8), content: content?.substring(0, 50) });
-
     if (!sessionId || !content?.trim()) {
-      console.error('[Chat API] Missing required fields');
       return NextResponse.json({ error: 'sessionId and content are required' }, { status: 400 });
     }
     // Every turn is a billable LLM call — cap message size so oversized bodies
@@ -46,7 +42,6 @@ export async function POST(request: Request) {
     }
 
     // ── 1. Load session ───────────────────────────────────────────────────────
-    console.log('[Chat API] Loading session:', sessionId);
     const sessionResult = await sql`
       SELECT 
         ss.id,
@@ -89,14 +84,10 @@ export async function POST(request: Request) {
 
     // Multi-tenancy: verify user can access this session (owner or same-org admin)
     if (!canAccessSession(session, { id: userId, role: userRole, orgId: userOrgId })) {
-      console.error('[Chat API] Access denied for session:', sessionId);
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    console.log('[Chat API] Session loaded:', { status: session.status, type: session.type, scenario: session.scenario.name });
-
     if (session.status === 'COMPLETED' || session.status === 'CANCELLED') {
-      console.error('[Chat API] Session already closed');
       return NextResponse.json({ error: 'Session is already closed' }, { status: 400 });
     }
 
@@ -168,9 +159,6 @@ export async function POST(request: Request) {
     const customerModel = customerModelForDifficulty(
       resolveScenarioDifficulty(session.scenario.script)
     );
-    console.log('[Chat API] Customer model:', customerModel);
-    console.log('[Chat API] System prompt length:', systemPrompt.length);
-    console.log('[Chat API] System prompt preview:', systemPrompt.substring(0, 150) + '...');
 
     // Include the just-saved agent message in history (skip [START] signal)
     const history = [
@@ -180,8 +168,6 @@ export async function POST(request: Request) {
       })),
       ...(isStartSignal ? [] : [{ role: 'AGENT' as const, content: content.trim() }]),
     ];
-    console.log('[Chat API] Conversation history length:', history.length);
-    console.log('[Chat API] Is start signal:', isStartSignal);
 
     // ── 5. Stream AI response ─────────────────────────────────────────────────
     const encoder = new TextEncoder();
