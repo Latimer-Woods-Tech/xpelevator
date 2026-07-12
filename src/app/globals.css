@@ -8,27 +8,60 @@
   100% { transform: scaleY(1.0);  }
 }
 
+/* ── Design tokens ───────────────────────────────────────────────────────────
+   Brand + surface colors live here as CSS variables so the whole product can be
+   re-skinned from one place — and so per-operator white-label theming can
+   override them at runtime (e.g. an inline <style> or data-attribute on <html>)
+   without touching component classes. Everything below is dark-first (the
+   product's committed look); a light override can be layered later.
+
+   White-label: override --brand / --brand-strong / --brand-contrast per org to
+   change the accent everywhere. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0f1e;      /* app background base (slate-950/blue tint) */
+  --foreground: #f1f5f9;      /* primary text (slate-100) */
+
+  --surface: rgb(30 41 59 / 0.5);     /* card fill (slate-800/50) */
+  --surface-border: rgb(51 65 85);    /* card border (slate-700) */
+  --surface-hover-border: var(--brand);
+
+  --brand: #3b82f6;           /* primary accent (blue-500) */
+  --brand-strong: #2563eb;    /* hover/active (blue-600) */
+  --brand-soft: #60a5fa;      /* wordmark accent (blue-400) */
+  --brand-contrast: #ffffff;  /* text on brand */
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-contrast: var(--brand-contrast);
+  --color-surface: var(--surface);
+  --color-surface-border: var(--surface-border);
+  /* Intentionally use the loaded Geist font (previously overridden by Arial). */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Use the design-token font stack. The old hard-coded Arial here silently
+     overrode the Geist font loaded in layout.tsx — the whole app rendered in
+     Arial. */
+  font-family: var(--font-sans);
+}
+
+/* App background gradient — one utility instead of the same three-color
+   gradient hand-copied across ~15 files. Token-driven so a re-skin flows
+   through automatically. */
+.app-gradient {
+  background-image: linear-gradient(
+    to bottom right,
+    #0f172a,
+    var(--background),
+    #0f172a
+  );
 }

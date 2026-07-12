@@ -1,128 +1,77 @@
 
-import Link from 'next/link';
 import { auth, signOut } from '@/auth';
+import { PageShell, Container, Card, Wordmark } from '@/components/ui';
+import { TopNav } from '@/components/ui/TopNav';
+
+const CARDS: Array<{ href: string; icon: string; title: string; body: string }> = [
+  {
+    href: '/simulate',
+    icon: '🎯',
+    title: 'Start Simulation',
+    body: 'Select a job title and practice customer interactions via phone or chat.',
+  },
+  {
+    href: '/sessions',
+    icon: '📊',
+    title: 'View Sessions',
+    body: 'Review completed simulation sessions, full transcripts, and automated performance scores.',
+  },
+  {
+    href: '/admin',
+    icon: '⚙️',
+    title: 'Admin Panel',
+    body: 'Manage job titles, scenarios, scoring criteria, and job–criteria assignments.',
+  },
+  {
+    href: '/analytics',
+    icon: '📈',
+    title: 'Analytics',
+    body: 'Track score trends over time, per-criteria performance, and phone vs chat breakdowns.',
+  },
+];
 
 export default async function Home() {
   const session = await auth();
   const user = session?.user;
 
+  async function handleSignOut() {
+    'use server';
+    await signOut({ redirectTo: '/auth/signin' });
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white">
-      {/* Header bar */}
-      <header className="border-b border-slate-800">
-        <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
-          <span className="text-sm font-semibold">
-            XP<span className="text-blue-400">Elevator</span>
-          </span>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/pricing"
-              className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
-            >
-              Pricing
-            </Link>
-            <Link
-              href="/admin"
-              className="text-xs px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 transition-colors"
-            >
-              Admin
-            </Link>
-            {user ? (
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-slate-300">
-                  Welcome, <span className="font-medium text-white">{user.name}</span>
-                </span>
-                <form
-                  action={async () => {
-                    'use server';
-                    await signOut({ redirectTo: '/auth/signin' });
-                  }}
-                >
-                  <button
-                    type="submit"
-                    className="text-xs px-3 py-1.5 rounded-lg bg-red-800/60 hover:bg-red-700/60 transition-colors"
-                  >
-                    Sign out
-                  </button>
-                </form>
-              </div>
-            ) : (
-              <Link
-                href="/auth/signin"
-                className="text-xs px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 transition-colors"
-              >
-                Sign in
-              </Link>
-            )}
+    <PageShell>
+      <TopNav user={user} signOutAction={user ? handleSignOut : undefined} />
+
+      <main>
+        <Container className="py-20">
+          <div className="mb-16 text-center">
+            <h1 className="mb-4 text-5xl font-bold tracking-tight">
+              <Wordmark />
+            </h1>
+            <p className="mx-auto max-w-2xl text-xl text-slate-300">
+              Virtual customer simulator for training employees on real-world interactions.
+              Practice phone calls and chat conversations, scored against customizable criteria.
+            </p>
           </div>
-        </div>
-      </header>
 
-      <div className="max-w-4xl mx-auto px-6 py-20">
-        <div className="text-center mb-16">
-          <h1 className="text-5xl font-bold mb-4 tracking-tight">
-            XP<span className="text-blue-400">Elevator</span>
-          </h1>
-          <p className="text-xl text-slate-300 max-w-2xl mx-auto">
-            Virtual customer simulator for training employees on real-world interactions.
-            Practice phone calls and chat conversations, scored against customizable criteria.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Link
-            href="/simulate"
-            className="group block p-8 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-blue-500 transition-all hover:shadow-lg hover:shadow-blue-500/10"
-          >
-            <div className="text-3xl mb-4">🎯</div>
-            <h2 className="text-xl font-semibold mb-2 group-hover:text-blue-400 transition-colors">
-              Start Simulation
-            </h2>
-            <p className="text-slate-400 text-sm">
-              Select a job title and practice customer interactions via phone or chat.
-            </p>
-          </Link>
-
-          <Link
-            href="/sessions"
-            className="group block p-8 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-blue-500 transition-all hover:shadow-lg hover:shadow-blue-500/10"
-          >
-            <div className="text-3xl mb-4">📊</div>
-            <h2 className="text-xl font-semibold mb-2 group-hover:text-blue-400 transition-colors">
-              View Sessions
-            </h2>
-            <p className="text-slate-400 text-sm">
-              Review completed simulation sessions, full transcripts, and automated performance scores.
-            </p>
-          </Link>
-
-          <Link
-            href="/admin"
-            className="group block p-8 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-blue-500 transition-all hover:shadow-lg hover:shadow-blue-500/10"
-          >
-            <div className="text-3xl mb-4">⚙️</div>
-            <h2 className="text-xl font-semibold mb-2 group-hover:text-blue-400 transition-colors">
-              Admin Panel
-            </h2>
-            <p className="text-slate-400 text-sm">
-              Manage job titles, scenarios, scoring criteria, and job–criteria assignments.
-            </p>
-          </Link>
-
-          <Link
-            href="/analytics"
-            className="group block p-8 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-blue-500 transition-all hover:shadow-lg hover:shadow-blue-500/10"
-          >
-            <div className="text-3xl mb-4">📈</div>
-            <h2 className="text-xl font-semibold mb-2 group-hover:text-blue-400 transition-colors">
-              Analytics
-            </h2>
-            <p className="text-slate-400 text-sm">
-              Track score trends over time, per-criteria performance, and phone vs chat breakdowns.
-            </p>
-          </Link>
-        </div>
-      </div>
-    </div>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {CARDS.map((c) => (
+              <a key={c.href} href={c.href} className="group block">
+                <Card interactive className="h-full p-8">
+                  <div className="mb-4 text-3xl" aria-hidden="true">
+                    {c.icon}
+                  </div>
+                  <h2 className="mb-2 text-xl font-semibold transition-colors group-hover:text-brand-soft">
+                    {c.title}
+                  </h2>
+                  <p className="text-sm text-slate-400">{c.body}</p>
+                </Card>
+              </a>
+            ))}
+          </div>
+        </Container>
+      </main>
+    </PageShell>
   );
 }

@@ -17,7 +17,7 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 
 // ── Mock the auth module ──────────────────────────────────────────────────────
 const mockAuth = vi.fn();
@@ -80,15 +80,19 @@ describe('Home page — unauthenticated state', () => {
 
   it('shows all 4 navigation cards', async () => {
     await renderHome();
-    expect(screen.getByRole('link', { name: /start simulation/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /view sessions/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /admin panel/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /analytics/i })).toBeInTheDocument();
+    // Scope to <main> — the persistent TopNav also links to these sections, so
+    // an unscoped query would be ambiguous (e.g. two "Analytics" links).
+    const main = within(screen.getByRole('main'));
+    expect(main.getByRole('link', { name: /start simulation/i })).toBeInTheDocument();
+    expect(main.getByRole('link', { name: /view sessions/i })).toBeInTheDocument();
+    expect(main.getByRole('link', { name: /admin panel/i })).toBeInTheDocument();
+    expect(main.getByRole('link', { name: /analytics/i })).toBeInTheDocument();
   });
 
   it('start simulation card links to /simulate', async () => {
     await renderHome();
-    expect(screen.getByRole('link', { name: /start simulation/i })).toHaveAttribute(
+    const main = within(screen.getByRole('main'));
+    expect(main.getByRole('link', { name: /start simulation/i })).toHaveAttribute(
       'href',
       '/simulate'
     );
