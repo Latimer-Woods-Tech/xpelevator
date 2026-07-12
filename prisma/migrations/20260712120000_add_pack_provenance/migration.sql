@@ -24,6 +24,10 @@ ALTER TABLE "scenarios"  ADD COLUMN IF NOT EXISTS "pack_version" INTEGER;
 --    partial indexes (no PG15 `NULLS NOT DISTINCT` dependency):
 --      * org-scoped roles are unique per (org_id, name);
 --      * legacy global roles (org_id IS NULL) stay unique by name.
+--    The live DB backs `job_titles_name_key` with a UNIQUE CONSTRAINT (not a
+--    bare index), so drop the constraint (which removes its backing index);
+--    the DROP INDEX fallback covers environments where it is a plain index.
+ALTER TABLE "job_titles" DROP CONSTRAINT IF EXISTS "job_titles_name_key";
 DROP INDEX IF EXISTS "job_titles_name_key";
 CREATE UNIQUE INDEX IF NOT EXISTS "job_titles_org_name_key"
   ON "job_titles" ("org_id", "name") WHERE "org_id" IS NOT NULL;
