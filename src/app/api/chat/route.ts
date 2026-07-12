@@ -10,6 +10,7 @@ import {
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
+import { MAX_AGENT_MESSAGE_CHARS, exceedsTurnRate } from '@/lib/limits';
 
 
 // POST /api/chat
@@ -35,6 +36,14 @@ export async function POST(request: Request) {
       console.error('[Chat API] Missing required fields');
       return NextResponse.json({ error: 'sessionId and content are required' }, { status: 400 });
     }
+    // Every turn is a billable LLM call — cap message size so oversized bodies
+    // can't inflate token spend (and prompt-stuff the customer model).
+    if (content.length > MAX_AGENT_MESSAGE_CHARS) {
+      return NextResponse.json(
+        { error: `Message too long (max ${MAX_AGENT_MESSAGE_CHARS} characters)` },
+        { status: 400 }
+      );
+    }
 
     // ── 1. Load session ───────────────────────────────────────────────────────
     console.log('[Chat API] Loading session:', sessionId);
@@ -54,7 +63,8 @@ export async function POST(request: Request) {
           json_agg(
             json_build_object(
               'role', m.role,
-              'content', m.content
+              'content', m.content,
+              'timestamp', m.timestamp
             ) ORDER BY m.timestamp
           ) FILTER (WHERE m.id IS NOT NULL),
           '[]'
@@ -88,6 +98,19 @@ export async function POST(request: Request) {
     if (session.status === 'COMPLETED' || session.status === 'CANCELLED') {
       console.error('[Chat API] Session already closed');
       return NextResponse.json({ error: 'Session is already closed' }, { status: 400 });
+    }
+
+    // Turn throttle: a human can't reply in under MIN_TURN_INTERVAL_MS; a
+    // script hammering the endpoint burns Groq tokens. Enforced against DB
+    // message timestamps so it holds across Worker isolates.
+    const lastAgentMessage = [...(session.messages as Array<{ role: string; timestamp?: string }>)]
+      .reverse()
+      .find(m => m.role === 'AGENT');
+    if (exceedsTurnRate(lastAgentMessage?.timestamp, Date.now())) {
+      return NextResponse.json(
+        { error: 'Too many messages — slow down' },
+        { status: 429 }
+      );
     }
 
     // ── 2. Save agent message ─────────────────────────────────────────────────

@@ -70,15 +70,17 @@ describe('canAccessSession', () => {
     ).toBe(false);
   });
 
-  it('treats null and undefined orgId as equal for a global-scope admin', () => {
-    // A no-org admin may read no-org ("global") sessions — the current
-    // single-tenant behavior the create/scoring paths already allow.
+  it('DENIES a null-org admin reading another null-org user\'s session', () => {
+    // "No org" is not a shared tenant: every self-registered user has
+    // org_id = NULL, so a null-null match would let any null-org ADMIN read
+    // every self-registered user's transcripts. Null-org sessions are
+    // owner-only.
     expect(
       canAccessSession(
         { userId: 'someone', orgId: null },
         { id: 'admin', role: 'ADMIN', orgId: undefined }
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('DENIES a null-org admin reading an org-scoped session', () => {

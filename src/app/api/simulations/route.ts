@@ -3,7 +3,10 @@ import { auth } from '@/auth';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError, getAuthOrNull } from '@/lib/auth-api';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
+import { canReadResource } from '@/lib/tenant-guard';
+import { MAX_SESSIONS_PER_DAY } from '@/lib/limits';
 
+const SIMULATION_TYPES = ['CHAT', 'VOICE', 'PHONE'] as const;
 
 // Start a new simulation session
 export async function POST(request: Request) {
@@ -14,10 +17,55 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { jobTitleId, scenarioId, type } = body;
 
+    if (typeof jobTitleId !== 'string' || !jobTitleId || typeof scenarioId !== 'string' || !scenarioId) {
+      return NextResponse.json({ error: 'jobTitleId and scenarioId are required' }, { status: 400 });
+    }
+    if (!SIMULATION_TYPES.includes(type)) {
+      return NextResponse.json(
+        { error: `type must be one of ${SIMULATION_TYPES.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
     // Use the authenticated user's DB ID if available
     const userId: string = authResult.session.user.id;
     const dbUserId: string | null = authResult.session.user.dbUserId ?? null;
     const orgId: string | null = authResult.session.user.orgId ?? null;
+
+    // Tenant scope on create: the scenario and job title must be global or
+    // belong to the caller's org — otherwise a session against another
+    // tenant's scenario would leak its script through the session payload.
+    const refRows = await sql`
+      SELECT
+        (SELECT org_id FROM scenarios WHERE id = ${scenarioId}) as "scenarioOrgId",
+        (SELECT id FROM scenarios WHERE id = ${scenarioId}) as "scenarioExists",
+        (SELECT org_id FROM job_titles WHERE id = ${jobTitleId}) as "jobOrgId",
+        (SELECT id FROM job_titles WHERE id = ${jobTitleId}) as "jobExists"
+    `;
+    const refs: any = refRows[0];
+    if (!refs.scenarioExists || !refs.jobExists) {
+      return NextResponse.json({ error: 'Scenario or job title not found' }, { status: 404 });
+    }
+    if (
+      !canReadResource(refs.scenarioOrgId, orgId) ||
+      !canReadResource(refs.jobOrgId, orgId)
+    ) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
+    // Abuse guard: cap sessions per user per rolling 24h (each session drives
+    // billable LLM traffic). DB-backed so it holds across Worker isolates.
+    const countRows = await sql`
+      SELECT COUNT(*)::int as "count"
+      FROM simulation_sessions
+      WHERE user_id = ${userId} AND created_at > NOW() - interval '24 hours'
+    `;
+    if ((countRows[0]?.count ?? 0) >= MAX_SESSIONS_PER_DAY) {
+      return NextResponse.json(
+        { error: 'Daily session limit reached — try again tomorrow' },
+        { status: 429 }
+      );
+    }
 
     // Create session using raw SQL (compatible with Cloudflare Workers)
     const created = await sql`

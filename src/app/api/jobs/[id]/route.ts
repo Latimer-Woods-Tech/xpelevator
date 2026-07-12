@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { canMutateResource } from '@/lib/tenant-guard';
 
 
 export async function PUT(
@@ -23,7 +24,9 @@ export async function PUT(
       return NextResponse.json({ error: 'Job title not found' }, { status: 404 });
     }
     const existing: any = existingRows[0];
-    if (existing.orgId && existing.orgId !== userOrgId) {
+    // Same-org only; global (null-org) rows are the shared catalog and are
+    // mutable only by platform (null-org) admins — never by tenant admins.
+    if (!canMutateResource(existing.orgId, userOrgId)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
@@ -75,7 +78,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Job title not found' }, { status: 404 });
     }
     const existing: any = existingRows[0];
-    if (existing.orgId && existing.orgId !== userOrgId) {
+    // Same-org only; global (null-org) rows are the shared catalog and are
+    // mutable only by platform (null-org) admins — never by tenant admins.
+    if (!canMutateResource(existing.orgId, userOrgId)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
