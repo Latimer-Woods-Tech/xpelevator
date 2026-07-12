@@ -403,6 +403,49 @@ jobs:
           fi
           echo "✅ POST /api/scenario-packs/import rejects anonymous callers (401) on both hosts"
 
+      - name: Verify operator client-management is admin-gated (Phase 4)
+        # The operator→client hierarchy API (/api/orgs/[id]/clients) lets an
+        # OPERATOR admin LIST and CREATE the client orgs beneath them. Both verbs
+        # are ADMIN-only and strictly tenant-scoped (an operator admin may only
+        # manage their OWN operator's clients). Neither may ever be anonymous:
+        # the /api/* middleware matcher gates the path and the handler double-
+        # checks ADMIN + canManageOrgClients. Permanent regression gate: an
+        # anonymous GET and POST must both get 401 on both hosts (a 200/500 here
+        # would mean the client-management write path or tenant data is exposed).
+        run: |
+          set -e
+          fail=0
+          OP="11111111-1111-1111-1111-111111111111"
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            # GET (list clients) — anon must be 401
+            gcode=000
+            for i in 1 2 3 4 5; do
+              gcode=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/orgs/$OP/clients" || echo 000)
+              if [ "$gcode" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/orgs/$OP/clients (anon) -> HTTP $gcode"
+            if [ "$gcode" != "401" ]; then
+              echo "::error::$BASE/api/orgs/[id]/clients GET must require auth (got $gcode) — client-list tenant data exposed"
+              fail=1
+            fi
+            # POST (create client) — anon must be 401
+            pcode=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+              -H 'Content-Type: application/json' \
+              -d '{"name":"gate-probe"}' \
+              "$BASE/api/orgs/$OP/clients" || echo 000)
+            echo "POST $BASE/api/orgs/$OP/clients (anon) -> HTTP $pcode"
+            if [ "$pcode" != "401" ]; then
+              echo "::error::$BASE/api/orgs/[id]/clients POST must require auth (got $pcode) — client-create write path exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Operator client-management admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /api/orgs/[id]/clients rejects anonymous GET + POST (401) on both hosts"
+
       - name: Verify manager reporting export is auth-gated (Phase 4)
         # The manager CSV export (GET /api/reports/sessions) returns a tenant's
         # completed-session scores — it is ADMIN-only and org-scoped, and must

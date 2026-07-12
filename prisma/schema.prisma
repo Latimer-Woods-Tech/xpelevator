@@ -11,11 +11,18 @@ datasource db {
 // ── Organisation / multi-tenant models ──────────────────────────────────────────
 
 model Organization {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  plan      OrgPlan  @default(FREE)
-  createdAt DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  plan        OrgPlan  @default(FREE)
+  kind        OrgKind  @default(STANDALONE)
+  parentOrgId String?  @map("parent_org_id") // set when this org is a CLIENT owned by an OPERATOR
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Operator→client hierarchy (issue #16, Phase 4). A CLIENT org points at the
+  // OPERATOR org that owns it; an OPERATOR org has many client children.
+  parent   Organization?  @relation("OrgHierarchy", fields: [parentOrgId], references: [id])
+  children Organization[] @relation("OrgHierarchy")
 
   users       User[]
   jobTitles   JobTitle[]
@@ -23,6 +30,7 @@ model Organization {
   criteria    Criteria[]
   sessions    SimulationSession[]
 
+  @@index([parentOrgId])
   @@map("organizations")
 }
 
@@ -206,4 +214,10 @@ enum OrgPlan {
   FREE
   PRO
   ENTERPRISE
+}
+
+enum OrgKind {
+  STANDALONE // a plain tenant (today's default) — no parent, no children
+  OPERATOR   // owns CLIENT orgs beneath it (the channel buyer)
+  CLIENT     // owned by an OPERATOR
 }
