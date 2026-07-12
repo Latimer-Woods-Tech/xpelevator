@@ -243,6 +243,13 @@ describe('verifyTelnyxWebhook', () => {
     expect(ok).toBe(true);
   });
 
+  it('fails closed in production when no public key is configured', async () => {
+    (process.env as Record<string, string>).NODE_ENV = 'production';
+    const { mod } = await loadAuthApi();
+    const ok = await mod.verifyTelnyxWebhook(new Headers(), '{}');
+    expect(ok).toBe(false);
+  });
+
   it('returns false when signature or timestamp headers are missing', async () => {
     process.env.TELNYX_PUBLIC_KEY = 'AAAA'; // presence is enough to require headers
     const { mod } = await loadAuthApi();

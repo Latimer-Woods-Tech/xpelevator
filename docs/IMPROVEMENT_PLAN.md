@@ -13,27 +13,29 @@
 
 Security items that make the product unsafe to expose to real tenants.
 
-- [ ] **P0-1 Rotate the leaked Cloudflare API token.** `DEPLOYMENT_STATUS.md:11`
+- [~] **P0-1 Rotate the leaked Cloudflare API token.** `DEPLOYMENT_STATUS.md:11`
   contains a plaintext `CLOUDFLARE_API_TOKEN` + account ID, present in git
   history. Rotate in the Cloudflare dashboard, delete the file, treat the
-  account ID as exposed. *(Dashboard action — cannot be done from the repo.)*
-- [ ] **P0-2 Authenticate `/api/telnyx/call`.**
+  account ID as exposed. *(File removed from the branch 2026-07-12; token
+  rotation is a Cloudflare-dashboard action still pending, and the value
+  remains in git history until rotated or history is purged.)*
+- [x] **P0-2 Authenticate `/api/telnyx/call`.**
   `src/app/api/telnyx/call/route.ts:26-114` has no `requireAuth` and no
   `canAccessSession`; middleware only checks cookie *presence*
   (`src/middleware.ts:53-70`). Anyone can dial arbitrary E.164 numbers on the
   Telnyx account (toll fraud) and wipe any session's transcript via the
   unconditional `DELETE FROM chat_messages` at line 93. Add
   `requireAuth` + ownership check; remove or gate the transcript reset.
-- [ ] **P0-3 Close open registration.** Credentials provider
+- [x] **P0-3 Close open registration.** Credentials provider
   (`src/auth.ts:52-95`) ignores the password and auto-creates a `MEMBER` for
   any string containing `@` unless `CREDENTIALS_REQUIRE_EXISTING === 'true'`.
   Default to closed in production; implement real password verification (or
   OAuth-only).
-- [ ] **P0-4 Make trainee self-scoring impossible.** `POST /api/scoring`
+- [x] **P0-4 Make trainee self-scoring impossible.** `POST /api/scoring`
   (`src/app/api/scoring/route.ts:35-50`) lets the session *owner* write
   arbitrary scores that flow into analytics and manager reports. Gate to
   `requireAuth(request, 'ADMIN')` (auto-scoring stays server-side).
-- [ ] **P0-5 Fail closed on webhook verification.**
+- [x] **P0-5 Fail closed on webhook verification.**
   `verifyTelnyxWebhook` returns `true` when `TELNYX_PUBLIC_KEY` is unset —
   even in production (`src/lib/auth-api.ts:170-175`). Reject instead.
 
