@@ -118,28 +118,98 @@ score and tenant boundaries defensible.
 - [ ] **P2-12 Smoke tests must fail loudly.**
   `tests/smoke/api.smoke.test.ts:35-42` silently passes when the host is
   unreachable.
+- [ ] **P2-13 Dependency audit.** GitHub reports 61 Dependabot vulnerabilities
+  on the default branch (3 critical, 26 high). Triage at
+  `github.com/Latimer-Woods-Tech/xpelevator/security/dependabot`, upgrade or
+  remove affected packages, and enable Dependabot PRs so this doesn't
+  accumulate again.
 
-## Phase 3 — UI/UX makeover & scalability (~2–4 weeks)
+## Phase 3a — UI/UX makeover (~2–3 weeks)
 
-*Detailed findings in the UI/UX and scalability sections of the review; this
-phase is populated from them.*
+The app is functional but scaffold-grade. For the operator channel model —
+operators demo this to *their* clients — the bar is "sellable and
+white-label-able."
 
-- [ ] **P3-1 Design system pass** — extract shared Button/Card/Modal/Table
-  components, consistent spacing/type scale, replace `alert()`/`confirm()`
-  with proper dialogs and toasts; confirmation on destructive admin actions.
-- [ ] **P3-2 White-label readiness** — the operator channel model requires
-  operators to demo to their clients: theme tokens (logo, palette) per org
-  rather than hard-coded branding.
-- [ ] **P3-3 Accessibility baseline** — semantic landmarks, focus management
-  in modals, keyboard-navigable admin tables, contrast audit.
-- [ ] **P3-4 Mobile-usable trainee surfaces** — chat/voice/phone interfaces
-  responsive; trainees will use phones.
-- [ ] **P3-5 Replace the 1s DB-poll SSE loop** for phone transcripts
-  (`chat/route.ts:386-498`, up to 300 heavy queries per connected client per
-  call) with push-based state (Durable Object or webhook-driven notify).
-- [ ] **P3-6 Analytics at scale** — pre-aggregate or paginate; avoid
-  whole-table scans per dashboard load as sessions grow.
-- [ ] **P3-7 Pagination on list endpoints** (sessions, reports).
+- [ ] **P3a-1 Theming layer + design tokens (highest impact).** Every surface
+  hard-codes the same gradient/palette; the background class alone is
+  copy-pasted across ~15 files, the card primitive ~20×. The pricing page
+  sells "brand the experience as your own" (`pricing/page.tsx:60`) but no
+  theming hook exists. Move brand color/logo/product-name into CSS variables +
+  Tailwind theme tokens, driven per-org.
+- [ ] **P3a-2 Remove vendor/dev leakage from client-facing surfaces.** The
+  Debug Tools panel ("Test GROQ API", console monkey-patching) renders on
+  every admin tab in production (`admin/page.tsx:1058-1105`); the phone setup
+  screen shows "Telnyx will dial…" and literal env-var names to trainees
+  (`PhoneInterface.tsx:179,201-203`); "🤖" and "GROQ" appear despite the
+  no-"AI" copy rule the deploy pipeline enforces elsewhere.
+- [ ] **P3a-3 Replace ~25 `alert()`/`confirm()` calls in admin** with a toast
+  system + confirmation modal (`admin/page.tsx:78-85,236-243,359-366,786-832`).
+  Nothing signals "prototype" faster in a demo.
+- [ ] **P3a-4 Persistent app shell.** No global nav exists — every page
+  hand-rolls "← Back to Home" and cross-section navigation bounces through
+  the landing page. Add a top nav/sidebar (Simulate / Sessions / Analytics /
+  Admin + user menu).
+- [ ] **P3a-5 Shared component kit.** Extract `Button`, `Card`, `Badge`,
+  `ScoreBar`, `PageShell`, `StatCard` and a single `scoreColor()` util — score
+  color thresholds currently *differ between pages* (4-tier in
+  `simulate/[sessionId]/page.tsx:96-103` vs 3-tier in `sessions/page.tsx:109`),
+  so the same score renders different colors on different screens. A
+  `useCrudResource` hook removes ~200 lines of repeated admin scaffolding.
+- [ ] **P3a-6 Real icon set instead of emoji** (themeable, consistent
+  cross-platform, `aria-hidden`-able).
+- [ ] **P3a-7 Fix the font regression.** Geist is loaded in `layout.tsx` but
+  `globals.css:30-34` overrides body font with Arial — the intended typography
+  never renders. Establish a type scale.
+- [ ] **P3a-8 Admin at scale.** Search + pagination for Criteria/Scenarios;
+  bulk save for Job↔Criteria (currently one network call per toggle,
+  `admin/page.tsx:621-639`); duplicate-scenario action; loading skeletons for
+  admin/analytics/session-detail.
+- [ ] **P3a-9 Accessibility pass.** `aria-live` on streaming chat, keyboard
+  path for push-to-talk (`VoiceChatInterface.tsx:518` is mouse/touch only),
+  focus management on opened forms, `aria-hidden` on decorative emoji, raise
+  `slate-500/600` text to AA contrast, don't convey status by color alone.
+- [ ] **P3a-10 Mobile hardening.** Chat/voice shells use `min-h-screen` with a
+  non-sticky composer — the mobile keyboard covers the input. Switch to
+  `h-dvh` + `sticky bottom-0`; make the analytics trend chart responsive
+  (hard-coded 600px at `analytics/page.tsx:82`); admin tab bar wrap on narrow
+  screens.
+
+## Phase 3b — Scalability (~2–3 weeks, overlaps 3a)
+
+Current honest ceiling: low tens of concurrent live sessions; analytics is the
+first hard failure as data grows (full-history aggregation in JS per request).
+
+- [ ] **P3b-1 Push analytics into SQL.** `analytics/route.ts:38-72` selects
+  every completed session × score row with no LIMIT and reduces in JS —
+  ~500k rows marshaled per dashboard load at 100k sessions. Rewrite as SQL
+  `AVG/GROUP BY/date_trunc` aggregates with a 60-day window; add
+  `Cache-Control: private, max-age=60`. Longer term: incremental rollup table
+  updated at end-of-session.
+- [ ] **P3b-2 Paginate all list/report endpoints.** Zero LIMIT/OFFSET anywhere;
+  `simulations/route.ts:112-214` returns all sessions; reports build a
+  PDF/CSV of the entire history in-Worker (`reports/sessions/route.ts:34-63`).
+- [ ] **P3b-3 Add query-shape indexes.** Composite `(org_id, status,
+  ended_at)` for analytics/reports; `db_user_id` (used in the reports join,
+  unindexed); `created_at` for list ordering.
+- [ ] **P3b-4 Batch score inserts** (also P2-3) — one multi-row INSERT instead
+  of 5–10 serialized Neon HTTP round trips per session end.
+- [ ] **P3b-5 Cache the auth lookup.** `requireAuth` does a `SELECT FROM
+  users` on every authenticated request (`auth-api.ts:81-96`); embed
+  role/orgId in the JWT to cut ~1 DB round trip from every call.
+- [ ] **P3b-6 Kill the phone-transcript poll.** `chat/route.ts:386-478` runs
+  the heaviest query in the codebase once per second per connected viewer for
+  up to 5 minutes. Stopgap: widen interval, slim the query. Real fix: a
+  per-session **Durable Object** that holds call state and pushes SSE — also
+  fixes Telnyx webhook event-ordering races.
+- [ ] **P3b-7 Cap Groq token growth.** Full transcript is resent every turn —
+  O(turns²) token cost (`ai.ts:246-259`); use a sliding window. Phone always
+  uses the 70B model — apply the difficulty tiering there too
+  (`telnyx/webhook/route.ts:167,300`).
+- [ ] **P3b-8 Queue end-of-session scoring.** Move scoring off the
+  request/webhook path onto a Cloudflare Queue with retries (pairs with the
+  existing `scoring_status` tracking).
+- [ ] **P3b-9 Consider Hyperdrive/pooling** in front of Neon to amortize
+  per-query HTTP overhead (currently raw `neon()` driver, `db.ts:14`).
 
 ## Phase 4 — Monetization (after trust is solid)
 
