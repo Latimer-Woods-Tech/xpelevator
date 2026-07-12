@@ -490,6 +490,44 @@ jobs:
           fi
           echo "✅ /api/orgs/[id]/branding rejects anonymous GET + PUT (401) on both hosts"
 
+      - name: Verify client-facing brand read is public + brand-safe (Phase 4)
+        # The client-facing render surface (R-050) reads an operator's brand via
+        # the PUBLIC, slug-keyed GET /api/branding/[slug] so the brand can show
+        # on the login shell before sign-in. Unlike the admin write path, this
+        # MUST be reachable anonymously — but it must expose ONLY brand-safe
+        # fields and never a tenant. Permanent regression gate: an anonymous GET
+        # for a slug that cannot exist returns 404 (proves the route is PUBLIC —
+        # a 401 would mean the middleware prefix regressed — and that an unknown
+        # slug yields a clean 404, not a 200/500). Checked on both hosts.
+        run: |
+          set -e
+          fail=0
+          # A slug that no org can hold (uppercase + underscores are not slug chars).
+          SLUG="__no_such_org__$$"
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/branding/$SLUG" || echo 000)
+              # 404 is the pass. 401 (auth wall regressed) or 200/500 are retried
+              # during propagation, then failed below.
+              if [ "$code" = "404" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/branding/$SLUG (anon) -> HTTP $code"
+            if [ "$code" = "401" ]; then
+              echo "::error::$BASE/api/branding/[slug] must be PUBLIC (got 401) — the render surface can't read the brand pre-sign-in"
+              fail=1
+            elif [ "$code" != "404" ]; then
+              echo "::error::$BASE/api/branding/[slug] should 404 for an unknown slug (got $code)"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Client-facing brand-read verification failed"
+            exit 1
+          fi
+          echo "✅ /api/branding/[slug] is public and 404s an unknown slug on both hosts"
+
       - name: Verify manager reporting export is auth-gated (Phase 4)
         # The manager CSV export (GET /api/reports/sessions) returns a tenant's
         # completed-session scores — it is ADMIN-only and org-scoped, and must
