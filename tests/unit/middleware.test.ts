@@ -39,4 +39,17 @@ describe('middleware auth gate', () => {
       expect(res.status, `${path} should be gated`).toBe(401);
     }
   });
+
+  it('lets anonymous callers reach the public /api/scenario-packs catalog', () => {
+    const res = middleware(anonRequest('/api/scenario-packs'));
+    expect(passedThrough(res)).toBe(true);
+  });
+
+  it('gates the admin import subpath — a public route does NOT expose subpaths', () => {
+    // Regression guard: /api/scenario-packs is public (exact), but the write
+    // action /api/scenario-packs/import must stay gated at the middleware (the
+    // handler also enforces ADMIN). A prefix-match public rule would leak it.
+    const res = middleware(anonRequest('/api/scenario-packs/import'));
+    expect(res.status).toBe(401);
+  });
 });

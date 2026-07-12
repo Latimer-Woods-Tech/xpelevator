@@ -43,8 +43,17 @@ model User {
 model JobTitle {
   id          String   @id @default(uuid())
   orgId       String?  @map("org_id")       // null = global (available to all orgs)
-  name        String   @unique
+  // NOTE: `name` uniqueness is org-scoped, not global — enforced by the partial
+  // indexes `job_titles_org_name_key` (org-scoped) + `job_titles_global_name_key`
+  // (legacy globals) in migration 20260712120000_add_pack_provenance. Prisma
+  // can't express partial-predicate uniqueness in the schema, so no `@unique`
+  // here; the DB is the source of truth for that constraint.
+  name        String
   description String?
+  // Pack-import provenance (migration 20260712120000): which starter pack this
+  // role came from and at what catalog version. NULL for hand-authored roles.
+  sourcePackId String? @map("source_pack_id")
+  packVersion  Int?    @map("pack_version")
   createdAt   DateTime @default(now()) @map("created_at")
 
   org          Organization?       @relation(fields: [orgId], references: [id])
@@ -63,6 +72,14 @@ model Scenario {
   description String?
   type        SimulationType
   script      Json         @default("{}")
+  // Pack-import provenance (migration 20260712120000). `sourcePackId` +
+  // `sourceScenarioKey` are the idempotency key for re-import — a partial unique
+  // index `scenarios_org_pack_scenario_key` on (org_id, source_pack_id,
+  // source_scenario_key) enforces one row per pack scenario per org. NULL for
+  // hand-authored scenarios. `packVersion` stamps the catalog version imported.
+  sourcePackId      String? @map("source_pack_id")
+  sourceScenarioKey String? @map("source_scenario_key")
+  packVersion       Int?    @map("pack_version")
   createdAt   DateTime     @default(now()) @map("created_at")
 
   org      Organization? @relation(fields: [orgId], references: [id])

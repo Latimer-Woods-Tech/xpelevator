@@ -26,7 +26,12 @@ import type { NextRequest } from 'next/server';
 // Note: /api/jobs, /api/scenarios and /api/criteria are deliberately NOT here —
 // their reads are authenticated (Phase 2). /api/scenarios in particular leaked
 // each scenario's hidden hints to anonymous callers.
-const PUBLIC_ROUTES = [
+//
+// Matched by EXACT path — a public route does NOT make its subpaths public. In
+// particular `/api/scenario-packs` (the public catalog) is public, but
+// `/api/scenario-packs/import` (the admin import) is NOT: it stays gated here
+// AND double-checks ADMIN in its handler.
+const PUBLIC_EXACT_ROUTES = [
   '/',
   '/auth/signin',
   '/auth/signout',
@@ -34,8 +39,11 @@ const PUBLIC_ROUTES = [
   '/api/plans', // Public seat-plan catalog for the operator pricing/signup surface — no secrets, no tenant data
   '/api/scenario-packs', // Public starter scenario-library catalog (operator inventory) — hidden-mechanic-safe, no scripts, no tenant data
   '/api/telnyx/webhook', // Has its own signature verification
-  '/api/auth', // NextAuth handlers
 ];
+
+// Routes whose SUBPATHS are also public (prefix match). Only NextAuth needs this
+// (it serves many paths under /api/auth/*).
+const PUBLIC_PREFIX_ROUTES = ['/api/auth'];
 
 export default function middleware(req: NextRequest) {
   // TESTING MODE: Bypass auth checks if DISABLE_AUTH is set — never in production.
@@ -46,8 +54,11 @@ export default function middleware(req: NextRequest) {
 
   const { pathname } = req.nextUrl;
 
-  // Allow public routes
-  if (PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(route + '/'))) {
+  // Allow public routes — exact match, plus the explicit prefix allow-list.
+  if (
+    PUBLIC_EXACT_ROUTES.includes(pathname) ||
+    PUBLIC_PREFIX_ROUTES.some((route) => pathname === route || pathname.startsWith(route + '/'))
+  ) {
     return NextResponse.next();
   }
 

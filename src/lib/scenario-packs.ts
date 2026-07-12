@@ -369,6 +369,150 @@ export function getScenarioPack(id: string): ScenarioPack | undefined {
   return SCENARIO_PACKS.find((pack) => pack.id === id);
 }
 
+// ── Import plan (admin "import pack → org") ──────────────────────────────────
+//
+// The admin import materialises a pack into org-scoped `job_titles` + `scenarios`
+// rows. This is the pure, DB-free half — it derives the exact rows to write from
+// a pack + an orgId, so the route stays a thin executor and the shaping logic is
+// unit-testable without a live database. The write itself is idempotent on the
+// pack/scenario `key` (see the route + `20260712120000_add_pack_provenance`),
+// so re-importing a pack never duplicates and never clobbers an operator's
+// later edits — the "freeze a pack for a client even if the public pack later
+// improves" property the founder called for. `packVersion` is stamped on every
+// row so drift from an improved public pack is detectable in a later slice.
+
+/** The `job_titles` row an import materialises (org-scoped, pack-provenanced). */
+export interface JobTitleImportRow {
+  orgId: string;
+  name: string;
+  description: string;
+  sourcePackId: string;
+  packVersion: number;
+}
+
+/** A `scenarios` row an import materialises (org-scoped, pack-provenanced). */
+export interface ScenarioImportRow {
+  orgId: string;
+  name: string;
+  description: string;
+  type: SimulationType;
+  /** Full hidden-mechanic script — persona / objective / hints. Server-side only. */
+  script: PackScenarioScript;
+  sourcePackId: string;
+  /** Stable per-scenario key — the idempotency key for re-import. */
+  sourceScenarioKey: string;
+  packVersion: number;
+}
+
+/** The complete set of rows a pack import writes into one org. */
+export interface PackImportPlan {
+  packId: string;
+  packVersion: number;
+  orgId: string;
+  jobTitle: JobTitleImportRow;
+  scenarios: ScenarioImportRow[];
+}
+
+/**
+ * Derive the exact rows an "import this pack into my org" action must write.
+ * Pure — no DB, no auth, no network. The route executes this plan with
+ * `ON CONFLICT DO NOTHING` against the org-scoped provenance indexes, so the
+ * result is idempotent on `(orgId, sourcePackId, sourceScenarioKey)`.
+ *
+ * @param pack  The starter pack to materialise.
+ * @param orgId The org the rows belong to (never null — imports are tenant-scoped).
+ */
+export function buildPackImportPlan(pack: ScenarioPack, orgId: string): PackImportPlan {
+  return {
+    packId: pack.id,
+    packVersion: PACK_CATALOG_VERSION,
+    orgId,
+    jobTitle: {
+      orgId,
+      name: pack.jobTitle.name,
+      description: pack.jobTitle.description,
+      sourcePackId: pack.id,
+      packVersion: PACK_CATALOG_VERSION,
+    },
+    scenarios: pack.scenarios.map((s) => ({
+      orgId,
+      name: s.name,
+      description: s.summary,
+      type: s.type,
+      script: s.script,
+      sourcePackId: pack.id,
+      sourceScenarioKey: s.key,
+      packVersion: PACK_CATALOG_VERSION,
+    })),
+  };
+}
+
+// ── Modality / cost profile ──────────────────────────────────────────────────
+//
+// A lightweight, pure read of what a pack costs to *run* (founder note on the
+// #55 import slice: "carry a lightweight modality/cost profile into the admin
+// import path — expected turn count, voice/phone latency risk, whether the
+// scenario needs interruption handling — so operators understand why two
+// scenarios can look similar in the catalog but behave very differently in live
+// training"). Surfaced on the import preview/response so an operator sees the
+// operational shape before committing a pack to a client workspace.
+
+/** Coarse latency risk of running a pack, driven by its heaviest modality. */
+export type PackLatencyRisk = 'low' | 'medium' | 'high';
+
+/** Per-difficulty rough turn estimate — a planning heuristic, not a guarantee. */
+const ESTIMATED_TURNS: Record<ScenarioDifficulty, number> = { easy: 4, medium: 6, hard: 8 };
+
+/** The operational shape of a pack — how it behaves in live training. */
+export interface PackModalityProfile {
+  totalScenarios: number;
+  /** Scenario counts per practice modality. */
+  byModality: Record<SimulationType, number>;
+  /**
+   * Coarse latency risk of the pack's heaviest channel: PHONE (real carrier
+   * round-trip) → high, VOICE (browser speech) → medium, CHAT-only → low.
+   */
+  latencyRisk: PackLatencyRisk;
+  /**
+   * True when the pack contains a real-time voice channel (VOICE or PHONE) — the
+   * trainee can talk over the customer, so the run needs interruption handling.
+   */
+  needsInterruptionHandling: boolean;
+  /** Rough total turn count across the pack (sum of the per-difficulty estimate). */
+  estimatedTurnsTotal: number;
+  /** One-line operator-facing summary of the above. */
+  note: string;
+}
+
+/**
+ * Compute the pure {@link PackModalityProfile} for a pack. No DB, no network.
+ */
+export function packModalityProfile(pack: ScenarioPack): PackModalityProfile {
+  const byModality: Record<SimulationType, number> = { CHAT: 0, VOICE: 0, PHONE: 0 };
+  let estimatedTurnsTotal = 0;
+  for (const s of pack.scenarios) {
+    byModality[s.type] += 1;
+    estimatedTurnsTotal += ESTIMATED_TURNS[s.script.difficulty];
+  }
+  const latencyRisk: PackLatencyRisk =
+    byModality.PHONE > 0 ? 'high' : byModality.VOICE > 0 ? 'medium' : 'low';
+  const needsInterruptionHandling = byModality.PHONE > 0 || byModality.VOICE > 0;
+  const channels = (['CHAT', 'VOICE', 'PHONE'] as SimulationType[])
+    .filter((m) => byModality[m] > 0)
+    .join(' + ');
+  const note = needsInterruptionHandling
+    ? `${pack.scenarios.length} scenarios (${channels}); real-time voice present — expect interruption handling and ${latencyRisk} latency.`
+    : `${pack.scenarios.length} scenarios (${channels}); text-only — low latency, no interruption handling.`;
+  return {
+    totalScenarios: pack.scenarios.length,
+    byModality,
+    latencyRisk,
+    needsInterruptionHandling,
+    estimatedTurnsTotal,
+    note,
+  };
+}
+
 // ── Public catalog (hidden-mechanic-safe) ────────────────────────────────────
 
 /** A single scenario as exposed on the public catalog — never carries `script`. */
