@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { Criteria, JobTitle, Scenario } from '@/types';
+import { useToast, useConfirm } from '@/components/ui/feedback';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 // (Criteria, JobTitle, Scenario imported from @/types)
@@ -53,6 +54,8 @@ function TabIntro({ icon, title, description }: { icon: string; title: string; d
 // ─── Criteria Tab ────────────────────────────────────────────────────────────
 
 function CriteriaTab() {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [items, setItems] = useState<Criteria[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -75,15 +78,17 @@ function CriteriaTab() {
     } else {
       res = await fetch('/api/criteria', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
     }
-    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Save failed: ${(body as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); toast.error(`Save failed: ${(body as any).error || res.statusText}`); return; }
     setEditingId(null); setShowForm(false); setForm(blankCriteria); refresh();
+    toast.success('Criteria saved');
   };
 
   const remove = async (id: string) => {
-    if (!confirm('Delete this criteria?')) return;
+    if (!(await confirm({ title: 'Delete criteria', message: 'Delete this criteria?', confirmLabel: 'Delete' }))) return;
     const res = await fetch(`/api/criteria/${id}`, { method: 'DELETE' });
-    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Delete failed: ${(body as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); toast.error(`Delete failed: ${(body as any).error || res.statusText}`); return; }
     refresh();
+    toast.success('Criteria deleted');
   };
 
   const startEdit = (c: Criteria) => {
@@ -211,6 +216,8 @@ function CriteriaTab() {
 // ─── Job Titles Tab ──────────────────────────────────────────────────────────
 
 function JobTitlesTab() {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [items, setItems] = useState<JobTitle[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -233,15 +240,17 @@ function JobTitlesTab() {
     } else {
       res = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
     }
-    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Save failed: ${(body as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); toast.error(`Save failed: ${(body as any).error || res.statusText}`); return; }
     setEditingId(null); setShowForm(false); setForm(blankJob); refresh();
+    toast.success('Job title saved');
   };
 
   const remove = async (id: string) => {
-    if (!confirm('Delete this job title? This may affect linked scenarios.')) return;
+    if (!(await confirm({ title: 'Delete job title', message: 'Delete this job title? This may affect linked scenarios.', confirmLabel: 'Delete' }))) return;
     const res = await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
-    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Delete failed: ${(body as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); toast.error(`Delete failed: ${(body as any).error || res.statusText}`); return; }
     refresh();
+    toast.success('Job title deleted');
   };
 
   const startEdit = (j: JobTitle) => {
@@ -323,6 +332,8 @@ function JobTitlesTab() {
 // ─── Scenarios Tab ───────────────────────────────────────────────────────────
 
 function ScenariosTab() {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [jobs, setJobs] = useState<JobTitle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -356,15 +367,17 @@ function ScenariosTab() {
     } else {
       res = await fetch('/api/scenarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     }
-    if (!res.ok) { const body2 = await res.json().catch(() => ({})); alert(`Save failed: ${(body2 as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body2 = await res.json().catch(() => ({})); toast.error(`Save failed: ${(body2 as any).error || res.statusText}`); return; }
     setEditingId(null); setShowForm(false); setForm(blankScenario); refresh();
+    toast.success('Scenario saved');
   };
 
   const remove = async (id: string) => {
-    if (!confirm('Delete this scenario?')) return;
+    if (!(await confirm({ title: 'Delete scenario', message: 'Delete this scenario?', confirmLabel: 'Delete' }))) return;
     const res = await fetch(`/api/scenarios/${id}`, { method: 'DELETE' });
-    if (!res.ok) { const body2 = await res.json().catch(() => ({})); alert(`Delete failed: ${(body2 as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body2 = await res.json().catch(() => ({})); toast.error(`Delete failed: ${(body2 as any).error || res.statusText}`); return; }
     refresh();
+    toast.success('Scenario deleted');
   };
 
   const startEdit = (s: Scenario) => {
@@ -744,6 +757,8 @@ const PLAN_COLORS: Record<string, string> = {
 };
 
 function OrgsTab() {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -783,10 +798,11 @@ function OrgsTab() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
     });
-    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Create failed: ${(body as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); toast.error(`Create failed: ${(body as any).error || res.statusText}`); return; }
     setForm({ name: '', plan: 'FREE' });
     setShowForm(false);
     refresh();
+    toast.success('Organization created');
   };
 
   const changePlan = async (orgId: string, plan: Org['plan']) => {
@@ -795,19 +811,21 @@ function OrgsTab() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan }),
     });
-    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Plan update failed: ${(body as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); toast.error(`Plan update failed: ${(body as any).error || res.statusText}`); return; }
     refresh();
+    toast.success('Plan updated');
   };
 
   const deleteOrg = async (org: Org) => {
-    if (!confirm(`Delete org "${org.name}"? This will fail if sessions exist.`)) return;
+    if (!(await confirm({ title: 'Delete organization', message: `Delete org "${org.name}"? This will fail if sessions exist.`, confirmLabel: 'Delete' }))) return;
     const res = await fetch(`/api/orgs/${org.id}`, { method: 'DELETE' });
     if (res.status === 409) {
-      alert('Cannot delete: this org has simulation sessions. Remove sessions first.');
+      toast.error('Cannot delete: this org has simulation sessions. Remove sessions first.');
       return;
     }
-    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Delete failed: ${(body as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); toast.error(`Delete failed: ${(body as any).error || res.statusText}`); return; }
     refresh();
+    toast.success('Organization deleted');
   };
 
   const inviteMember = async (orgId: string) => {
@@ -817,20 +835,22 @@ function OrgsTab() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
     });
-    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Invite failed: ${(body as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); toast.error(`Invite failed: ${(body as any).error || res.statusText}`); return; }
     setInviteEmail('');
     loadMembers(orgId);
+    toast.success('Member invited');
   };
 
   const removeMember = async (orgId: string, userId: string) => {
-    if (!confirm('Remove this member from the org?')) return;
+    if (!(await confirm({ title: 'Remove member', message: 'Remove this member from the org?', confirmLabel: 'Remove' }))) return;
     const res = await fetch(`/api/orgs/${orgId}/members`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),
     });
-    if (!res.ok) { const body = await res.json().catch(() => ({})); alert(`Remove failed: ${(body as any).error || res.statusText}`); return; }
+    if (!res.ok) { const body = await res.json().catch(() => ({})); toast.error(`Remove failed: ${(body as any).error || res.statusText}`); return; }
     loadMembers(orgId);
+    toast.success('Member removed');
   };
 
   return (

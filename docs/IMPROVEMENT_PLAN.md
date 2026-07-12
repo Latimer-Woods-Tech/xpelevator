@@ -157,7 +157,7 @@ white-label-able."
   screen shows "Telnyx will dial…" and literal env-var names to trainees
   (`PhoneInterface.tsx:179,201-203`); "🤖" and "GROQ" appear despite the
   no-"AI" copy rule the deploy pipeline enforces elsewhere.
-- [ ] **P3a-3 Replace ~25 `alert()`/`confirm()` calls in admin** with a toast
+- [x] **P3a-3 Replace ~25 `alert()`/`confirm()` calls in admin** with a toast
   system + confirmation modal (`admin/page.tsx:78-85,236-243,359-366,786-832`).
   Nothing signals "prototype" faster in a demo.
 - [x] **P3a-4 Persistent app shell.** No global nav exists — every page

@@ -115,7 +115,9 @@ export function Button({
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
+  ref?: React.Ref<HTMLButtonElement>;
 }) {
+  // React 19 ref-as-prop — `ref` flows through {...props} to the button.
   return <button className={buttonClass(variant, size, className)} {...props} />;
 }
 
