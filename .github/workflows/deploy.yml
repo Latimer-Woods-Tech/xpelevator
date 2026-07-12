@@ -352,6 +352,40 @@ jobs:
           fi
           echo "✅ /api/scenario-packs is public + hidden-mechanic-safe and /library is public + copy-clean"
 
+      - name: Verify pack import is admin-gated (Phase 4)
+        # The admin "import pack → org" action (POST /api/scenario-packs/import)
+        # WRITES org-scoped job_titles + scenarios rows carrying the hidden
+        # scenario scripts. It is ADMIN-only + strictly tenant-scoped. Unlike the
+        # public catalog GET at the parent path, this write subpath must NEVER be
+        # anonymous: the middleware now matches public routes EXACTLY (a public
+        # route no longer exposes its subpaths), and the handler double-checks
+        # ADMIN. Permanent regression gate: an anonymous POST must get 401 on both
+        # hosts (a 200/500 here would mean the write path or the DB is exposed).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                -H 'Content-Type: application/json' \
+                -d '{"packId":"saas-support-essentials"}' \
+                "$BASE/api/scenario-packs/import" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "POST $BASE/api/scenario-packs/import (anon) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/scenario-packs/import must require auth (got $code) — pack-import write path exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Pack-import admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ POST /api/scenario-packs/import rejects anonymous callers (401) on both hosts"
+
       - name: Verify manager reporting export is auth-gated (Phase 4)
         # The manager CSV export (GET /api/reports/sessions) returns a tenant's
         # completed-session scores — it is ADMIN-only and org-scoped, and must

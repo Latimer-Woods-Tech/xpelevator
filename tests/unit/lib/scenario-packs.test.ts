@@ -4,6 +4,8 @@ import {
   PACK_CATALOG_VERSION,
   getScenarioPack,
   getPublicPackCatalog,
+  buildPackImportPlan,
+  packModalityProfile,
 } from '@/lib/scenario-packs';
 
 // Deterministic: the pack catalog is pure data + pure helpers — no DB, no auth,
@@ -92,6 +94,100 @@ describe('scenario-packs — starter library data', () => {
     const first = SCENARIO_PACKS[0];
     expect(getScenarioPack(first.id)?.name).toBe(first.name);
     expect(getScenarioPack('no-such-pack')).toBeUndefined();
+  });
+});
+
+describe('buildPackImportPlan — admin import materialisation', () => {
+  const orgId = 'org-abc-123';
+
+  it('stamps every row with the caller org, pack id, and catalog version', () => {
+    for (const pack of SCENARIO_PACKS) {
+      const plan = buildPackImportPlan(pack, orgId);
+      expect(plan.orgId).toBe(orgId);
+      expect(plan.packId).toBe(pack.id);
+      expect(plan.packVersion).toBe(PACK_CATALOG_VERSION);
+      expect(plan.jobTitle.orgId).toBe(orgId);
+      expect(plan.jobTitle.name).toBe(pack.jobTitle.name);
+      expect(plan.jobTitle.sourcePackId).toBe(pack.id);
+      expect(plan.jobTitle.packVersion).toBe(PACK_CATALOG_VERSION);
+      expect(plan.scenarios.length).toBe(pack.scenarios.length);
+    }
+  });
+
+  it('carries the full hidden-mechanic script through to the scenario rows', () => {
+    const pack = SCENARIO_PACKS[0];
+    const plan = buildPackImportPlan(pack, orgId);
+    plan.scenarios.forEach((row, i) => {
+      const src = pack.scenarios[i];
+      expect(row.orgId).toBe(orgId);
+      expect(row.name).toBe(src.name);
+      // summary becomes the (trainee-visible) description; the concealed
+      // mechanics ride along in `script`, written server-side only.
+      expect(row.description).toBe(src.summary);
+      expect(row.type).toBe(src.type);
+      expect(row.script).toEqual(src.script);
+      expect(row.sourcePackId).toBe(pack.id);
+      expect(row.sourceScenarioKey).toBe(src.key);
+      expect(row.packVersion).toBe(PACK_CATALOG_VERSION);
+    });
+  });
+
+  it('produces idempotency keys unique within the plan', () => {
+    for (const pack of SCENARIO_PACKS) {
+      const plan = buildPackImportPlan(pack, orgId);
+      const keys = plan.scenarios.map((s) => `${s.sourcePackId}:${s.sourceScenarioKey}`);
+      expect(new Set(keys).size).toBe(keys.length);
+    }
+  });
+});
+
+describe('packModalityProfile — operational shape (founder cost-profile note)', () => {
+  it('counts scenarios per modality and totals to the pack size', () => {
+    for (const pack of SCENARIO_PACKS) {
+      const p = packModalityProfile(pack);
+      expect(p.totalScenarios).toBe(pack.scenarios.length);
+      expect(p.byModality.CHAT + p.byModality.VOICE + p.byModality.PHONE).toBe(
+        pack.scenarios.length,
+      );
+    }
+  });
+
+  it('flags real-time voice (VOICE/PHONE) as needing interruption handling', () => {
+    for (const pack of SCENARIO_PACKS) {
+      const p = packModalityProfile(pack);
+      const hasRealtime = pack.scenarios.some((s) => s.type === 'VOICE' || s.type === 'PHONE');
+      expect(p.needsInterruptionHandling).toBe(hasRealtime);
+      if (p.byModality.PHONE > 0) expect(p.latencyRisk).toBe('high');
+      else if (p.byModality.VOICE > 0) expect(p.latencyRisk).toBe('medium');
+      else expect(p.latencyRisk).toBe('low');
+      expect(p.estimatedTurnsTotal).toBeGreaterThan(0);
+      expect(p.note.trim()).not.toBe('');
+      expect(p.note).not.toMatch(/\bAI\b/);
+    }
+  });
+
+  it('rates a chat-only pack low-latency with no interruption handling', () => {
+    const chatOnly = {
+      id: 'chat-only',
+      vertical: 'x',
+      name: 'x',
+      description: 'x',
+      jobTitle: { name: 'r', description: 'd' },
+      scenarios: [
+        {
+          key: 'a',
+          name: 'A',
+          summary: 's',
+          type: 'CHAT' as const,
+          script: { customerPersona: 'p', customerObjective: 'o', difficulty: 'easy' as const },
+        },
+      ],
+    };
+    const p = packModalityProfile(chatOnly);
+    expect(p.latencyRisk).toBe('low');
+    expect(p.needsInterruptionHandling).toBe(false);
+    expect(p.byModality).toEqual({ CHAT: 1, VOICE: 0, PHONE: 0 });
+    expect(p.estimatedTurnsTotal).toBe(4);
   });
 });
 
