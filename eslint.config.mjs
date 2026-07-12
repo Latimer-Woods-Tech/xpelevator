@@ -40,6 +40,27 @@ const eslintConfig = [
   },
 
   {
+    // P2-4 boundary: production routes must query Neon via '@/lib/db' (raw SQL),
+    // never the Prisma client — it has runtime incompatibilities on the Workers
+    // edge. Prisma stays schema/migrations + test-tooling only.
+    files: ["src/app/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@/lib/prisma",
+              message:
+                "Do not use the Prisma client in application code — query Neon via '@/lib/db' (raw SQL). Prisma is schema/migrations + test-tooling only (see src/lib/prisma.ts).",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
     // Tests are linted too (they were previously blanket-ignored), but test
     // code legitimately uses non-null assertions on captured config.
     files: ["tests/**/*.{ts,tsx}"],

@@ -78,7 +78,7 @@ score and tenant boundaries defensible.
 
 ## Phase 2 — Engineering consolidation (~2 weeks)
 
-- [ ] **P2-1 Extract a session repository + scoring service.** The 50-line
+- [x] **P2-1 Extract a session repository + scoring service.** The 50-line
   session `json_agg` SELECT is copy-pasted ~5× in `chat/route.ts` and again in
   `simulations/route.ts`; `endSession` (`chat/route.ts:500-575`) and the Telnyx
   webhook (`telnyx/webhook/route.ts:316-358`) independently re-implement
@@ -87,10 +87,10 @@ score and tenant boundaries defensible.
   throughout `docs/LESSONS_LEARNED.md`.
 - [ ] **P2-2 Decompose `chat/route.ts` (636 lines)** into transport (SSE),
   service (turn logic, resolution detection), and repo layers.
-- [ ] **P2-3 Batch score inserts.** N sequential Neon HTTP round-trips per
+- [x] **P2-3 Batch score inserts.** N sequential Neon HTTP round-trips per
   session end (`chat/route.ts:553-559`, `scoring/route.ts:41-50`,
   `telnyx/webhook/route.ts:348-353`) → single multi-row INSERT.
-- [ ] **P2-4 Decide Prisma's role.** Prisma client is production-dead (only
+- [x] **P2-4 Decide Prisma's role.** Prisma client is production-dead (only
   `tests/integration/helpers/db.ts` imports it); all runtime queries are raw
   SQL. Either commit to schema-as-migration-tool-only and delete
   `src/lib/prisma.ts`, or move queries back behind it. Stop maintaining both.

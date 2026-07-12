@@ -3,7 +3,6 @@ import { sql } from '@/lib/db';
 import {
   buildSessionSystemPrompt,
   streamNextCustomerMessage,
-  scoreSession,
   customerModelForDifficulty,
   resolveScenarioDifficulty,
 } from '@/lib/ai';
@@ -11,6 +10,7 @@ import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
 import { MAX_AGENT_MESSAGE_CHARS, exceedsTurnRate } from '@/lib/limits';
+import { finalizeAndScoreSession } from '@/lib/session-scoring';
 
 
 // POST /api/chat
@@ -514,74 +514,15 @@ async function endSession(
 ) {
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 
-  // Mark session COMPLETED
-  await sql`
-    UPDATE simulation_sessions
-    SET status = 'COMPLETED', ended_at = NOW()
-    WHERE id = ${sessionId}
-  `;
-
-  // Resolve scoring criteria for this session's job title (active only). This
-  // is fetched here — at end-of-session — rather than on every conversational
-  // turn, so the criteria join stays off the streamed-reply hot path. Falls
-  // back to all active criteria if the job has no explicit links (unchanged
-  // scoring semantics vs. the previous per-turn load).
-  let criteria = await sql`
-    SELECT c.id, c.name, c.description, c.weight
-    FROM simulation_sessions ss
-    JOIN job_criteria jc ON jc.job_title_id = ss.job_title_id
-    JOIN criteria c ON c.id = jc.criteria_id
-    WHERE ss.id = ${sessionId} AND c.active = true
-  `;
-  if (criteria.length === 0) {
-    criteria = await sql`SELECT id, name, description, weight FROM criteria WHERE active = true`;
-  }
-
-  // Auto-score using AI
+  // Mark COMPLETED, score the transcript, and persist scores + scoring_status
+  // via the shared end-of-session path (identical to the phone path). The
+  // transcript is session.messages as of the turn that ended the session —
+  // criteria resolution stays off the per-turn hot path by living in here.
   const transcript = session.messages.map((m: { role: string; content: string }) => ({
     role: m.role as 'CUSTOMER' | 'AGENT',
     content: m.content,
   }));
-
-  let scores: Array<{ criteriaId: string; score: number; justification: string }> = [];
-  const scorable = transcript.length >= 2 && criteria.length > 0;
-  if (scorable) {
-    try {
-      scores = await scoreSession(transcript, criteria as any);
-    } catch (err) {
-      console.error('[chat] Auto-scoring failed:', err);
-    }
-  }
-  // A scorable session that produced zero scores is a scoring-engine failure
-  // (expired credential, parse failure, empty judge output) — not a genuinely
-  // unscored call. Surface it so the client shows "couldn't score this session"
-  // instead of a silent zero the manager can't distinguish from a bad call.
-  const scoringFailed = scorable && scores.length === 0;
-
-  // Save scores
-  if (scores.length > 0) {
-    for (const s of scores) {
-      await sql`
-        INSERT INTO scores (id, session_id, criteria_id, score, feedback, scored_at)
-        VALUES (gen_random_uuid(), ${sessionId}, ${s.criteriaId}, ${s.score}, ${s.justification}, NOW())
-      `;
-    }
-  }
-
-  // Persist WHY a session has (or lacks) scores so the manager report can tell a
-  // scoring-engine failure apart from a genuinely un-scorable call — a `null`
-  // score in the analytics/CSV/PDF is otherwise indistinguishable between the
-  // two, which is the "managers don't trust the /10 scores" kill-signal.
-  const scoringStatus = !scorable
-    ? 'NOT_SCORABLE'
-    : scores.length > 0
-      ? 'SCORED'
-      : 'FAILED';
-  await sql`
-    UPDATE simulation_sessions
-    SET scoring_status = ${scoringStatus}
-    WHERE id = ${sessionId}
-  `;
+  const { scoringFailed } = await finalizeAndScoreSession(sessionId, transcript);
 
   // Return final session state
   const finalSessionResult = await sql`
