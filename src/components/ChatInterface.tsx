@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react';
 import MessageBubble from './MessageBubble';
+import { ChatIcon, UserIcon } from './ui/icons';
 import type { ChatSessionState } from '@/hooks/useChatSession';
 
 export type ChatInterfaceProps = Pick<
@@ -49,7 +50,7 @@ export default function ChatInterface({
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xl">💬</span>
+              <ChatIcon className="h-5 w-5 text-brand-soft" />
               <h1 className="font-semibold">{session?.scenario.name}</h1>
             </div>
             <p className="text-sm text-slate-400">{session?.jobTitle.name}</p>
@@ -88,7 +89,7 @@ export default function ChatInterface({
           {/* Streaming AI response */}
           {streamingText && (
             <div className="flex items-start gap-3">
-              <span className="text-2xl flex-shrink-0" aria-hidden="true">👤</span>
+              <UserIcon className="h-6 w-6 shrink-0 text-slate-400" />
               <div className="bg-slate-700/60 border border-slate-600 rounded-2xl rounded-tl-none px-4 py-3 max-w-[80%]">
                 <p className="text-white text-sm whitespace-pre-wrap">{streamingText}</p>
                 <span className="inline-block w-1 h-4 bg-blue-400 animate-pulse ml-0.5" />
@@ -99,7 +100,7 @@ export default function ChatInterface({
           {/* Thinking indicator */}
           {sending && !streamingText && (
             <div className="flex items-start gap-3">
-              <span className="text-2xl flex-shrink-0" aria-hidden="true">👤</span>
+              <UserIcon className="h-6 w-6 shrink-0 text-slate-400" />
               <div className="bg-slate-700/60 border border-slate-600 rounded-2xl rounded-tl-none px-4 py-3">
                 <div className="flex gap-1">
                   <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]" />

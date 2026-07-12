@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import MessageBubble from './MessageBubble';
+import { PhoneIcon, UserIcon } from './ui/icons';
 import type { ChatSessionState } from '@/hooks/useChatSession';
 import type { Message } from '@/types';
 
@@ -155,7 +156,7 @@ export default function PhoneInterface({
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xl">📞</span>
+              <PhoneIcon className="h-5 w-5 text-brand-soft" />
               <h1 className="font-semibold">{session?.scenario.name}</h1>
             </div>
             <p className="text-sm text-slate-400">{session?.jobTitle.name}</p>
@@ -173,7 +174,7 @@ export default function PhoneInterface({
         <div className="max-w-3xl mx-auto">
           {callStatus === 'idle' && (
             <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-8 max-w-sm mx-auto text-center">
-              <div className="text-5xl mb-6">📞</div>
+              <PhoneIcon className="mx-auto mb-6 h-12 w-12 text-brand-soft" />
               <h2 className="text-xl font-semibold mb-2">Ready to Call</h2>
               <p className="text-slate-400 text-sm mb-6">
                 We&apos;ll dial your number and connect you to the customer.
@@ -210,8 +211,8 @@ export default function PhoneInterface({
               <div className="relative inline-flex items-center justify-center mb-8">
                 <span className="absolute inline-flex h-24 w-24 rounded-full bg-green-500 opacity-20 animate-ping" />
                 <span className="absolute inline-flex h-16 w-16 rounded-full bg-green-500 opacity-30 animate-ping [animation-delay:0.3s]" />
-                <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-green-600 text-2xl">
-                  📞
+                <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-green-600">
+                  <PhoneIcon className="h-6 w-6 text-white" />
                 </span>
               </div>
               <p className="text-slate-300 text-lg font-medium">Dialing {phoneNumber}…</p>
@@ -243,7 +244,7 @@ export default function PhoneInterface({
                 {/* "Customer is thinking…" indicator */}
                 {customerIsThinking && (
                   <div className="flex items-center gap-3">
-                    <span className="text-2xl flex-shrink-0">👤</span>
+                    <UserIcon className="h-6 w-6 shrink-0 text-slate-400" />
                     <div className="bg-slate-700/60 border border-slate-600 rounded-2xl rounded-tl-none px-4 py-3">
                       <span className="flex gap-1 items-center">
                         <span className="h-2 w-2 rounded-full bg-slate-400 animate-bounce [animation-delay:0ms]" />

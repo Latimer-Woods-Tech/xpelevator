@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { PageShell, Container, Button, ButtonLink } from '@/components/ui';
 import { TopNav } from '@/components/ui/TopNav';
+import { PhoneIcon, ChatIcon, AlertTriangleIcon } from '@/components/ui/icons';
 import { scoreBarClass, scoreTextClass } from '@/lib/score-color';
 
 interface TrendPoint {
@@ -170,7 +171,7 @@ export default function AnalyticsPage() {
           <p className="text-slate-400">Loading analytics…</p>
         ) : error ? (
           <div className="text-center py-12">
-            <p className="text-2xl mb-3" aria-hidden="true">⚠️</p>
+            <AlertTriangleIcon className="mx-auto mb-3 h-8 w-8 text-rose-400" />
             <p className="text-rose-400 mb-2 font-medium">Could not load analytics</p>
             <p className="text-slate-400 text-sm mb-6">{error}</p>
             <Button onClick={load}>Retry</Button>
@@ -258,7 +259,9 @@ export default function AnalyticsPage() {
                 {data.byType.map(t => (
                   <div key={t.type} className="space-y-2">
                     <div className="flex items-center gap-2 text-sm font-medium">
-                      <span>{t.type === 'PHONE' ? '📞' : '💬'}</span>
+                      {t.type === 'PHONE'
+                        ? <PhoneIcon className="h-4 w-4 text-brand-soft" />
+                        : <ChatIcon className="h-4 w-4 text-brand-soft" />}
                       <span>{t.type}</span>
                       <span className="text-slate-400 font-normal">— {t.sessions} sessions</span>
                     </div>

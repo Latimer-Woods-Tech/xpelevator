@@ -170,7 +170,7 @@ white-label-able."
   `simulate/[sessionId]/page.tsx:96-103` vs 3-tier in `sessions/page.tsx:109`),
   so the same score renders different colors on different screens. A
   `useCrudResource` hook removes ~200 lines of repeated admin scaffolding.
-- [ ] **P3a-6 Real icon set instead of emoji** (themeable, consistent
+- [x] **P3a-6 Real icon set instead of emoji** (themeable, consistent
   cross-platform, `aria-hidden`-able).
 - [x] **P3a-7 Fix the font regression.** Geist is loaded in `layout.tsx` but
   `globals.css:30-34` overrides body font with Arial — the intended typography

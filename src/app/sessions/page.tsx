@@ -6,6 +6,7 @@ import { useSession, signOut } from 'next-auth/react';
 import type { SimulationSession as Session, ScoreItem } from '@/types';
 import { PageShell, Container, Card, Badge, Button, ButtonLink, ScoreBar } from '@/components/ui';
 import { TopNav } from '@/components/ui/TopNav';
+import { PhoneIcon, ChatIcon, AlertTriangleIcon } from '@/components/ui/icons';
 import { scoreTextClass } from '@/lib/score-color';
 
 function statusTone(status: string): 'success' | 'warning' | 'neutral' {
@@ -63,7 +64,7 @@ export default function SessionsPage() {
             <p className="text-slate-400">Loading sessions…</p>
           ) : error ? (
             <div className="py-12 text-center">
-              <p className="mb-3 text-2xl" aria-hidden="true">⚠️</p>
+              <AlertTriangleIcon className="mx-auto mb-3 h-8 w-8 text-rose-400" />
               <p className="mb-2 font-medium text-rose-400">Could not load sessions</p>
               <p className="mb-6 text-sm text-slate-400">{error}</p>
               <Button onClick={loadSessions}>Retry</Button>
@@ -81,9 +82,9 @@ export default function SessionsPage() {
                   <Card key={session.id} className="p-6">
                     <div className="mb-3 flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
-                        <span className="text-xl" aria-hidden="true">
-                          {session.type === 'PHONE' ? '📞' : '💬'}
-                        </span>
+                        {session.type === 'PHONE'
+                          ? <PhoneIcon className="h-5 w-5 text-brand-soft" />
+                          : <ChatIcon className="h-5 w-5 text-brand-soft" />}
                         <div>
                           <h2 className="font-semibold">{session.scenario.name}</h2>
                           <p className="text-sm text-slate-400">{session.jobTitle.name}</p>

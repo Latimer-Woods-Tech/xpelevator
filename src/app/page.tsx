@@ -1,30 +1,36 @@
-
+import type { ComponentType } from 'react';
 import { auth, signOut } from '@/auth';
 import { PageShell, Container, Card, Wordmark } from '@/components/ui';
 import { TopNav } from '@/components/ui/TopNav';
+import { TargetIcon, BarChartIcon, SettingsIcon, TrendingUpIcon } from '@/components/ui/icons';
 
-const CARDS: Array<{ href: string; icon: string; title: string; body: string }> = [
+const CARDS: Array<{
+  href: string;
+  Icon: ComponentType<{ className?: string }>;
+  title: string;
+  body: string;
+}> = [
   {
     href: '/simulate',
-    icon: '🎯',
+    Icon: TargetIcon,
     title: 'Start Simulation',
     body: 'Select a job title and practice customer interactions via phone or chat.',
   },
   {
     href: '/sessions',
-    icon: '📊',
+    Icon: BarChartIcon,
     title: 'View Sessions',
     body: 'Review completed simulation sessions, full transcripts, and automated performance scores.',
   },
   {
     href: '/admin',
-    icon: '⚙️',
+    Icon: SettingsIcon,
     title: 'Admin Panel',
     body: 'Manage job titles, scenarios, scoring criteria, and job–criteria assignments.',
   },
   {
     href: '/analytics',
-    icon: '📈',
+    Icon: TrendingUpIcon,
     title: 'Analytics',
     body: 'Track score trends over time, per-criteria performance, and phone vs chat breakdowns.',
   },
@@ -59,9 +65,7 @@ export default async function Home() {
             {CARDS.map((c) => (
               <a key={c.href} href={c.href} className="group block">
                 <Card interactive className="h-full p-8">
-                  <div className="mb-4 text-3xl" aria-hidden="true">
-                    {c.icon}
-                  </div>
+                  <c.Icon className="mb-4 h-8 w-8 text-brand-soft" />
                   <h2 className="mb-2 text-xl font-semibold transition-colors group-hover:text-brand-soft">
                     {c.title}
                   </h2>
