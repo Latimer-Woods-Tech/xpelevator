@@ -31,6 +31,12 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+// The page now renders the shared TopNav, which reads the session.
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { name: 'Manager' } }, status: 'authenticated' }),
+  signOut: vi.fn(),
+}));
+
 import AnalyticsPage from '@/app/analytics/page';
 
 describe('AnalyticsPage — manager reporting export', () => {

@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useSession, signOut } from 'next-auth/react';
+import { PageShell, Container, Button, ButtonLink } from '@/components/ui';
+import { TopNav } from '@/components/ui/TopNav';
+import { scoreBarClass, scoreTextClass } from '@/lib/score-color';
 
 interface TrendPoint {
   date: string;
@@ -48,22 +51,13 @@ interface AnalyticsData {
 function ScoreBar({ value, max = 10 }: { value: number | null; max?: number }) {
   if (value === null) return <span className="text-slate-500 text-sm">—</span>;
   const pct = (value / max) * 100;
-  const color =
-    value >= 8 ? 'bg-green-500' : value >= 5 ? 'bg-yellow-400' : 'bg-red-500';
+  // Shared score scale (score-color.ts) — was a divergent 3-tier threshold.
   return (
     <div className="flex items-center gap-3">
       <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full ${scoreBarClass(value)}`} style={{ width: `${pct}%` }} />
       </div>
-      <span
-        className={`text-sm font-semibold w-8 text-right ${
-          value >= 8
-            ? 'text-green-400'
-            : value >= 5
-            ? 'text-yellow-400'
-            : 'text-red-400'
-        }`}
-      >
+      <span className={`text-sm font-semibold w-8 text-right ${scoreTextClass(value)}`}>
         {value.toFixed(1)}
       </span>
     </div>
@@ -117,6 +111,7 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
 }
 
 export default function AnalyticsPage() {
+  const { data: authSession } = useSession();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -149,24 +144,22 @@ export default function AnalyticsPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white">
-      <div className="max-w-5xl mx-auto px-6 py-12">
-        <Link href="/" className="text-blue-400 hover:text-blue-300 text-sm mb-8 inline-block">
-          &larr; Back to Home
-        </Link>
-
+    <PageShell>
+      <TopNav user={authSession?.user} signOutAction={authSession?.user ? () => signOut() : undefined} />
+      <main>
+      <Container size="lg" className="py-12">
         <div className="flex items-center justify-between mb-8 gap-4">
           <h1 className="text-3xl font-bold">Analytics</h1>
           <div className="flex items-center gap-2">
             <a
               href="/api/reports/sessions"
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+              className="px-4 py-2 bg-brand hover:bg-brand-strong text-brand-contrast rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
             >
               Download CSV
             </a>
             <a
               href="/api/reports/sessions?format=pdf"
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+              className="px-4 py-2 bg-brand hover:bg-brand-strong text-brand-contrast rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
             >
               Download PDF
             </a>
@@ -174,25 +167,18 @@ export default function AnalyticsPage() {
         </div>
 
         {loading ? (
-          <p className="text-slate-400">Loading analytics...</p>
+          <p className="text-slate-400">Loading analytics…</p>
         ) : error ? (
           <div className="text-center py-12">
-            <p className="text-2xl mb-3">⚠️</p>
-            <p className="text-red-400 mb-2 font-medium">Could not load analytics</p>
+            <p className="text-2xl mb-3" aria-hidden="true">⚠️</p>
+            <p className="text-rose-400 mb-2 font-medium">Could not load analytics</p>
             <p className="text-slate-400 text-sm mb-6">{error}</p>
-            <button
-              onClick={load}
-              className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors"
-            >
-              Retry
-            </button>
+            <Button onClick={load}>Retry</Button>
           </div>
         ) : !data || data.totalSessions === 0 ? (
           <div className="text-center py-12">
             <p className="text-slate-400 mb-4">No completed sessions yet.</p>
-            <Link href="/simulate" className="text-blue-400 hover:text-blue-300">
-              Start a simulation &rarr;
-            </Link>
+            <ButtonLink href="/simulate" variant="ghost">Start a simulation →</ButtonLink>
           </div>
         ) : (
           <div className="space-y-8">
@@ -283,8 +269,9 @@ export default function AnalyticsPage() {
             </Section>
           </div>
         )}
-      </div>
-    </div>
+      </Container>
+      </main>
+    </PageShell>
   );
 }
 
