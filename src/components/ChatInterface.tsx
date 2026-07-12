@@ -88,7 +88,7 @@ export default function ChatInterface({
           {/* Streaming AI response */}
           {streamingText && (
             <div className="flex items-start gap-3">
-              <span className="text-2xl flex-shrink-0">🤖</span>
+              <span className="text-2xl flex-shrink-0" aria-hidden="true">👤</span>
               <div className="bg-slate-700/60 border border-slate-600 rounded-2xl rounded-tl-none px-4 py-3 max-w-[80%]">
                 <p className="text-white text-sm whitespace-pre-wrap">{streamingText}</p>
                 <span className="inline-block w-1 h-4 bg-blue-400 animate-pulse ml-0.5" />
@@ -99,7 +99,7 @@ export default function ChatInterface({
           {/* Thinking indicator */}
           {sending && !streamingText && (
             <div className="flex items-start gap-3">
-              <span className="text-2xl flex-shrink-0">🤖</span>
+              <span className="text-2xl flex-shrink-0" aria-hidden="true">👤</span>
               <div className="bg-slate-700/60 border border-slate-600 rounded-2xl rounded-tl-none px-4 py-3">
                 <div className="flex gap-1">
                   <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]" />

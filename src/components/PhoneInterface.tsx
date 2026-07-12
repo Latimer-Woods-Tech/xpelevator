@@ -176,7 +176,7 @@ export default function PhoneInterface({
               <div className="text-5xl mb-6">📞</div>
               <h2 className="text-xl font-semibold mb-2">Ready to Call</h2>
               <p className="text-slate-400 text-sm mb-6">
-                Telnyx will dial your number and connect you to the virtual customer.
+                We&apos;ll dial your number and connect you to the customer.
               </p>
               <div className="text-left mb-4">
                 <label className="block text-sm text-slate-400 mb-1">
@@ -199,7 +199,7 @@ export default function PhoneInterface({
                 Start Call
               </button>
               <p className="text-xs text-slate-500 mt-3">
-                Requires TELNYX_API_KEY + TELNYX_CONNECTION_ID configured.
+                Standard carrier rates may apply to the call.
               </p>
             </div>
           )}

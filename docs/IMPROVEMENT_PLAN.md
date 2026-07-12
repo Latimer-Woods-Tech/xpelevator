@@ -145,13 +145,13 @@ The app is functional but scaffold-grade. For the operator channel model —
 operators demo this to *their* clients — the bar is "sellable and
 white-label-able."
 
-- [ ] **P3a-1 Theming layer + design tokens (highest impact).** Every surface
+- [x] **P3a-1 Theming layer + design tokens (highest impact).** Every surface
   hard-codes the same gradient/palette; the background class alone is
   copy-pasted across ~15 files, the card primitive ~20×. The pricing page
   sells "brand the experience as your own" (`pricing/page.tsx:60`) but no
   theming hook exists. Move brand color/logo/product-name into CSS variables +
   Tailwind theme tokens, driven per-org.
-- [ ] **P3a-2 Remove vendor/dev leakage from client-facing surfaces.** The
+- [x] **P3a-2 Remove vendor/dev leakage from client-facing surfaces.** The
   Debug Tools panel ("Test GROQ API", console monkey-patching) renders on
   every admin tab in production (`admin/page.tsx:1058-1105`); the phone setup
   screen shows "Telnyx will dial…" and literal env-var names to trainees
@@ -160,11 +160,11 @@ white-label-able."
 - [ ] **P3a-3 Replace ~25 `alert()`/`confirm()` calls in admin** with a toast
   system + confirmation modal (`admin/page.tsx:78-85,236-243,359-366,786-832`).
   Nothing signals "prototype" faster in a demo.
-- [ ] **P3a-4 Persistent app shell.** No global nav exists — every page
+- [x] **P3a-4 Persistent app shell.** No global nav exists — every page
   hand-rolls "← Back to Home" and cross-section navigation bounces through
   the landing page. Add a top nav/sidebar (Simulate / Sessions / Analytics /
   Admin + user menu).
-- [ ] **P3a-5 Shared component kit.** Extract `Button`, `Card`, `Badge`,
+- [x] **P3a-5 Shared component kit.** Extract `Button`, `Card`, `Badge`,
   `ScoreBar`, `PageShell`, `StatCard` and a single `scoreColor()` util — score
   color thresholds currently *differ between pages* (4-tier in
   `simulate/[sessionId]/page.tsx:96-103` vs 3-tier in `sessions/page.tsx:109`),
@@ -172,7 +172,7 @@ white-label-able."
   `useCrudResource` hook removes ~200 lines of repeated admin scaffolding.
 - [ ] **P3a-6 Real icon set instead of emoji** (themeable, consistent
   cross-platform, `aria-hidden`-able).
-- [ ] **P3a-7 Fix the font regression.** Geist is loaded in `layout.tsx` but
+- [x] **P3a-7 Fix the font regression.** Geist is loaded in `layout.tsx` but
   `globals.css:30-34` overrides body font with Arial — the intended typography
   never renders. Establish a type scale.
 - [ ] **P3a-8 Admin at scale.** Search + pagination for Criteria/Scenarios;
@@ -183,7 +183,7 @@ white-label-able."
   path for push-to-talk (`VoiceChatInterface.tsx:518` is mouse/touch only),
   focus management on opened forms, `aria-hidden` on decorative emoji, raise
   `slate-500/600` text to AA contrast, don't convey status by color alone.
-- [ ] **P3a-10 Mobile hardening.** Chat/voice shells use `min-h-screen` with a
+- [x] **P3a-10 Mobile hardening.** Chat/voice shells use `min-h-screen` with a
   non-sticky composer — the mobile keyboard covers the input. Switch to
   `h-dvh` + `sticky bottom-0`; make the analytics trend chart responsive
   (hard-coded 600px at `analytics/page.tsx:82`); admin tab bar wrap on narrow

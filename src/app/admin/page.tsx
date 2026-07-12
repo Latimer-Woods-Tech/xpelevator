@@ -452,7 +452,7 @@ function ScenariosTab() {
             <div>
               <label className="block text-xs text-slate-400 mb-1">
                 Simulation Type
-                <Tooltip text="Chat: typed conversation. Voice: use your microphone in the browser. Phone: receive a real phone call via Telnyx." />
+                <Tooltip text="Chat: typed conversation. Voice: use your microphone in the browser. Phone: receive a real phone call." />
               </label>
               <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value as 'PHONE' | 'CHAT' | 'VOICE' })}
                 className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
@@ -465,7 +465,7 @@ function ScenariosTab() {
 
           {/* Simulated Customer behaviour */}
           <div className="border-t border-slate-700 pt-5 mb-5">
-            <h4 className="text-sm font-medium text-slate-200 mb-4">🤖 Simulated Customer Behaviour</h4>
+            <h4 className="text-sm font-medium text-slate-200 mb-4">Simulated Customer Behaviour</h4>
             <div className="grid grid-cols-1 gap-4">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">
@@ -1054,55 +1054,6 @@ export default function AdminPage() {
         {activeTab === 'scenarios' && <ScenariosTab />}
         {activeTab === 'job-criteria' && <JobCriteriaTab />}
         {activeTab === 'orgs' && <OrgsTab />}
-
-        {/* Debug Tools */}
-        <div className="mt-8 p-6 bg-slate-800/50 rounded-xl border border-slate-700">
-          <h3 className="text-lg font-semibold mb-4 text-yellow-400">🔧 Debug Tools</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <button
-              onClick={async () => {
-                try {
-                  const res = await fetch('/api/debug/groq');
-                  const data = await res.json();
-                  alert(data.success ? `✅ GROQ API Working: ${data.response}` : `❌ GROQ API Failed: ${data.error}`);
-                } catch (err) {
-                  alert(`❌ Test Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-                }
-              }}
-              className="bg-yellow-600 hover:bg-yellow-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            >
-              Test GROQ API
-            </button>
-            <button
-              onClick={() => {
-                const logs = [];
-                const originalLog = console.log;
-                const originalError = console.error;
-
-                console.log = (...args) => {
-                  logs.push(['LOG', ...args]);
-                  originalLog(...args);
-                };
-
-                console.error = (...args) => {
-                  logs.push(['ERROR', ...args]);
-                  originalError(...args);
-                };
-
-                setTimeout(() => {
-                  console.log = originalLog;
-                  console.error = originalError;
-                  alert(`Captured ${logs.length} console messages. Check browser console for details.`);
-                }, 10000);
-
-                alert('Console logging enabled for 10 seconds. Try using the chat now.');
-              }}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            >
-              Enable Debug Logging
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

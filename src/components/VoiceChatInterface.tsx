@@ -417,7 +417,7 @@ export default function VoiceChatInterface({
           {/* Streaming AI text (visible alongside TTS) */}
           {streamingText && (
             <div className="flex items-start gap-3">
-              <span className="text-2xl flex-shrink-0">🤖</span>
+              <span className="text-2xl flex-shrink-0" aria-hidden="true">👤</span>
               <div className="bg-slate-700/60 border border-slate-600 rounded-2xl rounded-tl-none px-4 py-3 max-w-[80%]">
                 <p className="text-white text-sm whitespace-pre-wrap">{streamingText}</p>
                 <span className="inline-block w-1 h-4 bg-purple-400 animate-pulse ml-0.5" />
