@@ -46,6 +46,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Recover a previously-failed migration (idempotent)
+        # A migration that failed mid-apply leaves a "failed" row (finished=false,
+        # rolledBack=false) in _prisma_migrations. That both blocks `migrate
+        # deploy` (P3018) AND trips the backup guard below (which ABORTS on any
+        # unfinished, un-rolled-back migration). Postgres DDL is transactional, so
+        # a failed migration rolled back cleanly — mark it rolled-back so (a) the
+        # guard sees a resolved state and proceeds, and (b) `migrate deploy`
+        # re-applies the corrected SQL. Runs BEFORE the guard for exactly this
+        # reason. `|| true` makes it a no-op once the migration is applied
+        # (resolve then errors "already applied") or when there is nothing to
+        # recover — safe to leave in place permanently.
+        run: |
+          DIRECT="$(printf '%s' "$DATABASE_URL" | sed 's/-pooler//g')"
+          echo "::add-mask::$DIRECT"
+          DATABASE_URL="$DIRECT" \
+            npx prisma migrate resolve --rolled-back 20260712120000_add_pack_provenance || true
+
       - name: Backup DB + build migration baseline plan (dry-run evidence)
         run: node scripts/db-backup-and-guard.mjs
 
@@ -79,18 +96,6 @@ jobs:
           else
             echo "No migrations to baseline."
           fi
-
-      - name: Recover a previously-failed migration (idempotent)
-        # A migration that failed mid-apply leaves a "failed" row in
-        # _prisma_migrations that blocks ALL future `migrate deploy` runs (P3018)
-        # until it is resolved. Postgres DDL is transactional, so a failed
-        # migration rolled back cleanly — mark it rolled-back so the corrected
-        # SQL re-applies on the deploy below. `|| true` makes this a no-op once
-        # the migration is applied (resolve then errors "already applied") or
-        # when there is nothing to recover — so it is safe to leave in place.
-        run: |
-          DATABASE_URL="$DIRECT_DATABASE_URL" \
-            npx prisma migrate resolve --rolled-back 20260712120000_add_pack_provenance || true
 
       - name: prisma migrate deploy
         run: DATABASE_URL="$DIRECT_DATABASE_URL" npx prisma migrate deploy
