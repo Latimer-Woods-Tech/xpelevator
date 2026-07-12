@@ -19,6 +19,15 @@ model Organization {
   parentOrgId String?  @map("parent_org_id") // set when this org is a CLIENT owned by an OPERATOR
   createdAt   DateTime @default(now()) @map("created_at")
 
+  // White-label operator branding (issue #16, Phase 4, R-044). All nullable —
+  // NULL means "fall back to the platform default". Colors are stored as
+  // normalized lowercase `#rrggbb`; logoUrl is https-only. Validated at the API
+  // layer (src/lib/branding.ts).
+  brandDisplayName  String? @map("brand_display_name")
+  brandLogoUrl      String? @map("brand_logo_url")
+  brandPrimaryColor String? @map("brand_primary_color")
+  brandAccentColor  String? @map("brand_accent_color")
+
   // Operator→client hierarchy (issue #16, Phase 4). A CLIENT org points at the
   // OPERATOR org that owns it; an OPERATOR org has many client children.
   parent   Organization?  @relation("OrgHierarchy", fields: [parentOrgId], references: [id])
