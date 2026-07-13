@@ -60,3 +60,42 @@ export function classifyTurnLatency(ttftMs: number, totalMs: number): TurnTiming
   const total = Math.max(ttft, normMs(totalMs));
   return { ttftMs: ttft, totalMs: total, tier: ttftTier(ttft) };
 }
+
+/**
+ * Latency of a single Telnyx phone turn, from the trainee's felt-speed view.
+ *
+ * The phone path differs from chat (R-057): the model call is **non-streaming**,
+ * so there is no token-level time-to-first-token to perceive. The gap the trainee
+ * actually feels after they stop speaking is the whole server-controllable leg —
+ * the final STT transcript arrives, the model generates a reply, and that reply is
+ * dispatched to Telnyx TTS. The customer cannot start speaking until that dispatch,
+ * so the felt-speed tier is derived from `speakDispatchMs`, not `replyReadyMs`.
+ *
+ * The provider-internal legs (Telnyx STT synthesis and TTS time-to-first-audio)
+ * are not observable server-side; this measures the leg we own and can tune.
+ */
+export interface PhoneTurnTiming {
+  /** Millis from the final STT transcript to the model's reply being ready. */
+  replyReadyMs: number;
+  /**
+   * Millis from the final STT transcript to the reply being dispatched to TTS —
+   * the full server-controllable gap before the simulated customer can speak.
+   */
+  speakDispatchMs: number;
+  /** Felt-speed bucket derived from `speakDispatchMs` (the perceived gap). */
+  tier: LatencyTier;
+}
+
+/**
+ * Classify a Telnyx phone turn from its measured millis. `speakDispatchMs` is
+ * clamped to be at least `replyReadyMs` (audio can't dispatch before the reply
+ * exists), and the tier reflects the full dispatch gap the trainee waits through.
+ */
+export function classifyPhoneTurn(replyReadyMs: number, speakDispatchMs: number): PhoneTurnTiming {
+  const base = classifyTurnLatency(replyReadyMs, speakDispatchMs);
+  return {
+    replyReadyMs: base.ttftMs,
+    speakDispatchMs: base.totalMs,
+    tier: ttftTier(base.totalMs),
+  };
+}
