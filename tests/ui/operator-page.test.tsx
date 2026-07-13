@@ -154,3 +154,93 @@ describe('Operator workspace — non-operator views', () => {
     await waitFor(() => expect(screen.getByText('Become an operator')).toBeInTheDocument());
   });
 });
+
+describe('Operator workspace — branding editor', () => {
+  const BRANDING = {
+    displayName: 'Northwind',
+    logoUrl: 'https://cdn.example.com/logo.svg',
+    primaryColor: '#2563eb',
+    accentColor: '#22d3ee',
+  };
+
+  function operatorFetch(overrides: (url: string, init?: RequestInit) => Response | undefined) {
+    return vi.fn((url: string, init?: RequestInit) => {
+      const custom = overrides(url, init);
+      if (custom) return Promise.resolve(custom);
+      if (url === '/api/me') return Promise.resolve(jsonResponse(OPERATOR_ME));
+      if (url.startsWith('/api/orgs/op-1/clients')) return Promise.resolve(jsonResponse([]));
+      if (url.startsWith('/api/orgs/op-1/branding')) return Promise.resolve(jsonResponse(BRANDING));
+      return Promise.resolve(jsonResponse([]));
+    });
+  }
+
+  it('loads the operator’s current brand from /api/orgs/[id]/branding', async () => {
+    globalThis.fetch = operatorFetch(() => undefined) as unknown as typeof fetch;
+
+    await renderPage();
+
+    await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue('Northwind'));
+    expect(screen.getByLabelText('Logo URL')).toHaveValue('https://cdn.example.com/logo.svg');
+    expect(screen.getByLabelText('Primary color')).toHaveValue('#2563eb');
+    expect(document.body.textContent).not.toMatch(/\bAI\b/);
+  });
+
+  it('PUTs an edited brand and confirms the save', async () => {
+    const fetchSpy = operatorFetch((url, init) => {
+      if (url.startsWith('/api/orgs/op-1/branding') && init?.method === 'PUT') {
+        return jsonResponse({ ...BRANDING, displayName: 'Renamed Co' });
+      }
+      return undefined;
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    await renderPage();
+    await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue('Northwind'));
+
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Renamed Co' } });
+    fireEvent.click(screen.getByRole('button', { name: /save brand/i }));
+
+    await waitFor(() => expect(screen.getByText('Your brand is saved.')).toBeInTheDocument());
+    const putCall = fetchSpy.mock.calls.find(
+      ([u, init]) => String(u).startsWith('/api/orgs/op-1/branding') && (init as RequestInit)?.method === 'PUT'
+    );
+    expect(putCall).toBeTruthy();
+    expect(JSON.parse((putCall![1] as RequestInit).body as string)).toMatchObject({
+      displayName: 'Renamed Co',
+    });
+  });
+
+  it('blocks an invalid color client-side without a PUT', async () => {
+    const fetchSpy = operatorFetch(() => undefined);
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    await renderPage();
+    await waitFor(() => expect(screen.getByLabelText('Primary color')).toHaveValue('#2563eb'));
+
+    fireEvent.change(screen.getByLabelText('Primary color'), { target: { value: 'not-a-color' } });
+    fireEvent.click(screen.getByRole('button', { name: /save brand/i }));
+
+    await waitFor(() => expect(screen.getByText(/Primary color must be a hex value/)).toBeInTheDocument());
+    const putCall = fetchSpy.mock.calls.find(([, init]) => (init as RequestInit)?.method === 'PUT');
+    expect(putCall).toBeUndefined();
+  });
+
+  it('surfaces the API error message on a failed save', async () => {
+    const fetchSpy = operatorFetch((url, init) => {
+      if (url.startsWith('/api/orgs/op-1/branding') && init?.method === 'PUT') {
+        return jsonResponse({ error: 'Invalid logoUrl (must be an https URL)' }, 400);
+      }
+      return undefined;
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    await renderPage();
+    await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue('Northwind'));
+
+    fireEvent.click(screen.getByRole('button', { name: /save brand/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText('Invalid logoUrl (must be an https URL)')).toBeInTheDocument()
+    );
+  });
+});
