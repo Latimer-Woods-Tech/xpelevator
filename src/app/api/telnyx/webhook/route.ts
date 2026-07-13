@@ -20,7 +20,12 @@
 import { NextResponse } from 'next/server';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { getGroqClient } from '@/lib/groq-fetch';
-import { buildSessionSystemPrompt, scoreSession } from '@/lib/ai';
+import {
+  buildSessionSystemPrompt,
+  scoreSession,
+  customerModelForDifficulty,
+  resolveScenarioDifficulty,
+} from '@/lib/ai';
 import { sql } from '@/lib/db';
 import {
   callSpeak,
@@ -168,10 +173,17 @@ async function handleEvent(
         const script = (scenario?.script ?? {}) as Record<string, unknown>;
 
         // Generate AI opening line via Groq
+        // Conversation-speed lever (R-059): mirror the chat path — pick the model
+        // tier by scenario difficulty instead of hard-coding the heavy 70B model
+        // on every phone turn. Hard scenarios keep the higher-realism 70B model;
+        // easy/medium use the ~3x faster 8B model so the simulated customer starts
+        // speaking closer to real-time (directly targeting the founder's
+        // "half-speed" voice signal — R-058 showed the phone path ran 70B always).
+        const customerModel = customerModelForDifficulty(resolveScenarioDifficulty(script));
         const systemPromptOpening = buildSessionSystemPrompt(state.scenarioName, script, state.sessionId);
         const client = getGroqClient();
         const opening = await client.chatCompletion({
-          model: 'llama-3.3-70b-versatile',
+          model: customerModel,
           messages: [
             { role: 'system', content: systemPromptOpening },
             { role: 'user', content: '[START_CONVERSATION]' },
@@ -197,7 +209,7 @@ async function handleEvent(
           console.log('[telnyx] latency', {
             sessionId: state.sessionId.slice(0, 8),
             leg: 'opening',
-            model: 'llama-3.3-70b-versatile',
+            model: customerModel,
             replyReadyMs: openTiming.replyReadyMs,
             speakDispatchMs: openTiming.speakDispatchMs,
             tier: openTiming.tier,
@@ -318,10 +330,13 @@ async function handleEvent(
         // Append the current agent turn so Groq has it in context
         groqMessages.push({ role: 'user' as const, content: transcript });
 
+        // Same conversation-speed lever as the opening leg (R-059): route the
+        // reply turn by difficulty rather than always paying the 70B latency.
+        const customerModel = customerModelForDifficulty(resolveScenarioDifficulty(script));
         const systemPromptGather = buildSessionSystemPrompt(state.scenarioName, script, state.sessionId);
         const client = getGroqClient();
         const aiReply = await client.chatCompletion({
-          model: 'llama-3.3-70b-versatile',
+          model: customerModel,
           messages: [
             { role: 'system', content: systemPromptGather },
             ...groqMessages,
@@ -402,7 +417,7 @@ async function handleEvent(
         console.log('[telnyx] latency', {
           sessionId: state.sessionId.slice(0, 8),
           leg: 'reply',
-          model: 'llama-3.3-70b-versatile',
+          model: customerModel,
           replyReadyMs: replyTiming.replyReadyMs,
           speakDispatchMs: replyTiming.speakDispatchMs,
           tier: replyTiming.tier,
