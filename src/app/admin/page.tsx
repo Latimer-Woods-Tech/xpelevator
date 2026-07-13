@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { Criteria, JobTitle, Scenario } from '@/types';
+import type { PackStatus } from '@/lib/scenario-packs';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 // (Criteria, JobTitle, Scenario imported from @/types)
@@ -997,9 +998,164 @@ function OrgsTab() {
   );
 }
 
+// ─── Scenario Packs Tab ──────────────────────────────────────────────────────
+//
+// The felt operator control on top of the starter scenario-library packs. It
+// reads GET /api/scenario-packs/status (ADMIN, org-scoped) to show, per pack,
+// whether this workspace has imported it and whether an opt-in upgrade is
+// available, then materialises the write routes shipped earlier:
+//   - Import  → POST /api/scenario-packs/import  (R-047)
+//   - Upgrade → POST /api/scenario-packs/upgrade (R-054)
+// so an operator can stand up sellable day-one inventory and re-sync a frozen
+// pack without touching the API by hand. Copy follows the org rule (no "AI").
+
+const PACK_STATE_BADGE: Record<PackStatus['state'], { label: string; cls: string }> = {
+  not_imported: { label: 'Not imported', cls: 'bg-slate-700/60 text-slate-300 border-slate-600' },
+  up_to_date: { label: 'Up to date', cls: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/50' },
+  upgrade_available: { label: 'Upgrade available', cls: 'bg-amber-900/40 text-amber-300 border-amber-700/50' },
+};
+
+function ScenarioPacksTab() {
+  const [packs, setPacks] = useState<PackStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetch('/api/scenario-packs/status')
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error((body as { error?: string }).error || `Failed to load packs (${r.status})`);
+        }
+        return r.json();
+      })
+      .then((d: { packs: PackStatus[] }) => { setPacks(d.packs || []); setLoading(false); })
+      .catch((e: Error) => { setError(e.message); setLoading(false); });
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const act = async (packId: string, action: 'import' | 'upgrade', confirmMsg: string) => {
+    if (!confirm(confirmMsg)) return;
+    setBusyId(packId);
+    setNotes((n) => ({ ...n, [packId]: '' }));
+    try {
+      const res = await fetch(`/api/scenario-packs/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setNotes((n) => ({ ...n, [packId]: `Failed: ${(body as { error?: string }).error || res.statusText}` }));
+        return;
+      }
+      if (action === 'import') {
+        const count = (body as { scenarios?: { created?: number } }).scenarios?.created;
+        setNotes((n) => ({ ...n, [packId]: count != null ? `Imported — ${count} scenario${count === 1 ? '' : 's'} added to your workspace.` : 'Imported into your workspace.' }));
+      } else {
+        const s = (body as { scenarios?: { updated?: number; inserted?: number; orphaned?: number } }).scenarios;
+        const updated = s?.updated ?? 0;
+        const inserted = s?.inserted ?? 0;
+        const orphaned = s?.orphaned ?? 0;
+        setNotes((n) => ({
+          ...n,
+          [packId]: updated + inserted === 0
+            ? 'Already up to date — nothing changed.'
+            : `Upgraded — ${updated} updated, ${inserted} added${orphaned > 0 ? `, ${orphaned} retired scenario${orphaned === 1 ? '' : 's'} left in place` : ''}.`,
+        }));
+      }
+      refresh();
+    } catch (e) {
+      setNotes((n) => ({ ...n, [packId]: `Failed: ${e instanceof Error ? e.message : 'Unknown error'}` }));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div>
+      <TabIntro
+        icon="📦"
+        title="Scenario library packs"
+        description="Curated per-vertical packs give your workspace ready-made training inventory on day one. Import a pack to add its role and scenarios to this organization; when a pack has newer content, upgrade to re-sync it. Importing never overwrites scenarios you have edited — a pack you have tuned for a client stays frozen until you choose to upgrade."
+      />
+
+      {loading && <p className="text-slate-400 text-sm">Loading packs…</p>}
+      {error && !loading && (
+        <div className="bg-red-950/40 border border-red-800/40 rounded-xl px-5 py-4 text-sm text-red-300">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && (
+        <div className="space-y-4">
+          {packs.map((p) => {
+            const badge = PACK_STATE_BADGE[p.state];
+            const busy = busyId === p.packId;
+            return (
+              <div key={p.packId} className="bg-slate-800/50 border border-slate-700 rounded-xl px-5 py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold">{p.packName}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
+                    </div>
+                    <div className="text-xs text-slate-400 mt-1">
+                      {p.vertical} · role: {p.role} · {p.catalogScenarioCount} scenario{p.catalogScenarioCount === 1 ? '' : 's'}
+                      {p.state !== 'not_imported' && ` · ${p.importedScenarioCount} in your workspace`}
+                    </div>
+                    {p.state === 'upgrade_available' && (
+                      <div className="text-xs text-amber-300/90 mt-1">
+                        {p.drift.update} to update, {p.drift.insert} to add
+                        {p.drift.orphaned > 0 ? `, ${p.drift.orphaned} retired (left in place)` : ''}
+                      </div>
+                    )}
+                  </div>
+                  <div className="shrink-0">
+                    {p.state === 'not_imported' && (
+                      <button
+                        onClick={() => act(p.packId, 'import', `Import "${p.packName}" into your workspace? This adds its role and ${p.catalogScenarioCount} scenarios.`)}
+                        disabled={busy}
+                        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        {busy ? 'Importing…' : 'Import pack'}
+                      </button>
+                    )}
+                    {p.state === 'upgrade_available' && (
+                      <button
+                        onClick={() => act(p.packId, 'upgrade', `Upgrade "${p.packName}"? This re-syncs ${p.drift.update} updated and ${p.drift.insert} new scenarios from the current library. Scenarios you authored are untouched.`)}
+                        disabled={busy}
+                        className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        {busy ? 'Upgrading…' : 'Upgrade'}
+                      </button>
+                    )}
+                    {p.state === 'up_to_date' && (
+                      <span className="text-xs text-emerald-400">✓ current</span>
+                    )}
+                  </div>
+                </div>
+                {notes[p.packId] && (
+                  <div className="text-xs text-slate-300 mt-3 border-t border-slate-700/60 pt-3">{notes[p.packId]}</div>
+                )}
+              </div>
+            );
+          })}
+          {packs.length === 0 && <p className="text-slate-400 text-sm">No scenario packs are available yet.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
-type Tab = 'criteria' | 'jobs' | 'scenarios' | 'job-criteria' | 'orgs';
+type Tab = 'criteria' | 'jobs' | 'scenarios' | 'job-criteria' | 'orgs' | 'packs';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'criteria', label: 'Scoring Criteria' },
@@ -1007,6 +1163,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'scenarios', label: 'Scenarios' },
   { id: 'job-criteria', label: 'Job ↔ Criteria' },
   { id: 'orgs', label: 'Organizations' },
+  { id: 'packs', label: 'Scenario Packs' },
 ];
 
 export default function AdminPage() {
@@ -1054,6 +1211,7 @@ export default function AdminPage() {
         {activeTab === 'scenarios' && <ScenariosTab />}
         {activeTab === 'job-criteria' && <JobCriteriaTab />}
         {activeTab === 'orgs' && <OrgsTab />}
+        {activeTab === 'packs' && <ScenarioPacksTab />}
 
         {/* Debug Tools */}
         <div className="mt-8 p-6 bg-slate-800/50 rounded-xl border border-slate-700">

@@ -437,6 +437,38 @@ jobs:
           fi
           echo "✅ POST /api/scenario-packs/upgrade rejects anonymous callers (401) on both hosts"
 
+      - name: Verify pack status is admin-gated (Phase 4)
+        # The admin "Scenario Packs" surface reads GET /api/scenario-packs/status
+        # to know which packs this org has imported and where an upgrade is
+        # available. It reports per-pack import bookkeeping for the caller's org —
+        # tenant data — so it is ADMIN-only + org-scoped and must NEVER be
+        # anonymous (the public catalog `/api/scenario-packs` is an EXACT public
+        # route, so this `/status` subpath stays gated; the handler double-checks
+        # ADMIN). Permanent regression gate: an anonymous GET must get 401 on both
+        # hosts (a 200 here would leak an org's pack-import state).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' \
+                "$BASE/api/scenario-packs/status" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/scenario-packs/status (anon) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/scenario-packs/status must require auth (got $code) — an org's pack-import state is exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Pack-status admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ GET /api/scenario-packs/status rejects anonymous callers (401) on both hosts"
+
       - name: Verify operator client-management is admin-gated (Phase 4)
         # The operator→client hierarchy API (/api/orgs/[id]/clients) lets an
         # OPERATOR admin LIST and CREATE the client orgs beneath them. Both verbs

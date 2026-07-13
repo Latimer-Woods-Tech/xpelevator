@@ -566,6 +566,89 @@ export function buildPackUpgradePlan(
   return { packId: pack.id, targetVersion: target, orgId, toUpdate, toInsert, unchangedKeys, orphanedKeys, items };
 }
 
+// ── Per-pack import status (admin "Scenario Packs" surface) ───────────────────
+//
+// The read the admin workspace needs to turn the pack machinery into a felt
+// operator control: for every catalog pack, is it imported into this org, and is
+// an opt-in upgrade (R-054) available? Import (R-047) and upgrade (R-054) are
+// write routes; without this the UI would have to probe each write path to know
+// which action to offer. Pure — no DB, no auth, no network — so the route stays a
+// thin org-scoped read over `computePackStatus`.
+
+/** An org's import state for a single pack — drives the admin packs surface. */
+export type PackImportState = 'not_imported' | 'up_to_date' | 'upgrade_available';
+
+/** One pack's import status for an org (the surface reads a list of these). */
+export interface PackStatus {
+  packId: string;
+  packName: string;
+  vertical: string;
+  /** The role the pack trains (materialises into a `job_titles` row on import). */
+  role: string;
+  /** The catalog version this status was computed against. */
+  catalogVersion: number;
+  state: PackImportState;
+  /** How many of the org's scenario rows are provenanced to this pack (0 = not imported). */
+  importedScenarioCount: number;
+  /** How many scenarios the catalog pack currently defines. */
+  catalogScenarioCount: number;
+  /**
+   * How the opt-in upgrade (R-054) would re-sync this pack, when imported. All
+   * zero (and state `up_to_date`) when nothing is stale or newly added.
+   */
+  drift: { update: number; insert: number; unchanged: number; orphaned: number };
+}
+
+/**
+ * Derive an org's import status for a single pack from its stored,
+ * pack-provenanced scenario rows (their key + `pack_version`). Pure — no DB, no
+ * auth, no network. Carries NO hidden mechanics (no `script`): only import
+ * bookkeeping.
+ *
+ * `not_imported` when the org holds no rows for the pack. Otherwise the drift is
+ * derived by {@link buildPackUpgradePlan}: `upgrade_available` when any scenario
+ * is stale (older `pack_version`) or newly added to the catalog, else
+ * `up_to_date`. Orphaned rows alone do NOT force an upgrade — they are reported
+ * for awareness but the upgrade never deletes them, so a pack that only has
+ * orphans (a scenario dropped from the catalog) is still `up_to_date`.
+ *
+ * @param pack   The current catalog pack.
+ * @param stored The org's stored provenanced rows for this pack (empty = not imported).
+ * @param orgId  The org the rows belong to (status is tenant-scoped).
+ */
+export function computePackStatus(
+  pack: ScenarioPack,
+  stored: readonly StoredPackScenario[],
+  orgId: string,
+): PackStatus {
+  const base = {
+    packId: pack.id,
+    packName: pack.name,
+    vertical: pack.vertical,
+    role: pack.jobTitle.name,
+    catalogVersion: PACK_CATALOG_VERSION,
+    catalogScenarioCount: pack.scenarios.length,
+  };
+  if (stored.length === 0) {
+    return {
+      ...base,
+      state: 'not_imported',
+      importedScenarioCount: 0,
+      drift: { update: 0, insert: 0, unchanged: 0, orphaned: 0 },
+    };
+  }
+  const plan = buildPackUpgradePlan(pack, stored, orgId);
+  const drift = {
+    update: plan.toUpdate.length,
+    insert: plan.toInsert.length,
+    unchanged: plan.unchangedKeys.length,
+    orphaned: plan.orphanedKeys.length,
+  };
+  const state: PackImportState =
+    drift.update > 0 || drift.insert > 0 ? 'upgrade_available' : 'up_to_date';
+  return { ...base, state, importedScenarioCount: stored.length, drift };
+}
+
 // ── Modality / cost profile ──────────────────────────────────────────────────
 //
 // A lightweight, pure read of what a pack costs to *run* (founder note on the

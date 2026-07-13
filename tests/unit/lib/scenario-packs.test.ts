@@ -7,6 +7,7 @@ import {
   buildPackImportPlan,
   buildPackUpgradePlan,
   packModalityProfile,
+  computePackStatus,
   type StoredPackScenario,
 } from '@/lib/scenario-packs';
 
@@ -325,5 +326,84 @@ describe('buildPackUpgradePlan — drift detection (pure)', () => {
     expect(plan.toUpdate[0].script).toHaveProperty('customerObjective');
     // but the audit items (what a preview surfaces) never carry the hidden mechanics
     expect(JSON.stringify(plan.items)).not.toMatch(/customerPersona|customerObjective|"hints"/);
+  });
+});
+
+describe('computePackStatus — per-pack import status (admin packs surface)', () => {
+  const PACK = SCENARIO_PACKS[0];
+  const ORG = 'org-77';
+  const allKeys = PACK.scenarios.map((s) => s.key);
+
+  it('no stored rows → not_imported, zero counts, catalog metadata carried', () => {
+    const status = computePackStatus(PACK, [], ORG);
+    expect(status.state).toBe('not_imported');
+    expect(status.importedScenarioCount).toBe(0);
+    expect(status.catalogScenarioCount).toBe(PACK.scenarios.length);
+    expect(status.catalogVersion).toBe(PACK_CATALOG_VERSION);
+    expect(status.packId).toBe(PACK.id);
+    expect(status.packName).toBe(PACK.name);
+    expect(status.vertical).toBe(PACK.vertical);
+    expect(status.role).toBe(PACK.jobTitle.name);
+    expect(status.drift).toEqual({ update: 0, insert: 0, unchanged: 0, orphaned: 0 });
+  });
+
+  it('every row already at the catalog version → up_to_date, no drift', () => {
+    const stored: StoredPackScenario[] = allKeys.map((k) => ({
+      sourceScenarioKey: k,
+      packVersion: PACK_CATALOG_VERSION,
+    }));
+    const status = computePackStatus(PACK, stored, ORG);
+    expect(status.state).toBe('up_to_date');
+    expect(status.importedScenarioCount).toBe(allKeys.length);
+    expect(status.drift.update).toBe(0);
+    expect(status.drift.insert).toBe(0);
+    expect(status.drift.unchanged).toBe(allKeys.length);
+  });
+
+  it('a stale (older-version) row → upgrade_available with a positive update count', () => {
+    const stored: StoredPackScenario[] = allKeys.map((k) => ({
+      sourceScenarioKey: k,
+      packVersion: PACK_CATALOG_VERSION - 1,
+    }));
+    const status = computePackStatus(PACK, stored, ORG);
+    expect(status.state).toBe('upgrade_available');
+    expect(status.drift.update).toBe(allKeys.length);
+  });
+
+  it('a pre-versioning (null) row → upgrade_available (treated as stale)', () => {
+    const stored: StoredPackScenario[] = [{ sourceScenarioKey: allKeys[0], packVersion: null }];
+    const status = computePackStatus(PACK, stored, ORG);
+    expect(status.state).toBe('upgrade_available');
+    expect(status.drift.update).toBeGreaterThan(0);
+  });
+
+  it('missing catalog scenarios → upgrade_available via inserts', () => {
+    // Only one of the pack's scenarios is stored, all at the current version → the
+    // rest are catalog additions this org lacks, so an upgrade would insert them.
+    const stored: StoredPackScenario[] = [
+      { sourceScenarioKey: allKeys[0], packVersion: PACK_CATALOG_VERSION },
+    ];
+    const status = computePackStatus(PACK, stored, ORG);
+    expect(status.state).toBe('upgrade_available');
+    expect(status.drift.insert).toBe(allKeys.length - 1);
+    expect(status.importedScenarioCount).toBe(1);
+  });
+
+  it('a fully-current pack whose only extra row is orphaned stays up_to_date (orphans never force an upgrade)', () => {
+    const stored: StoredPackScenario[] = [
+      ...allKeys.map((k) => ({ sourceScenarioKey: k, packVersion: PACK_CATALOG_VERSION })),
+      { sourceScenarioKey: 'retired-key', packVersion: PACK_CATALOG_VERSION },
+    ];
+    const status = computePackStatus(PACK, stored, ORG);
+    expect(status.state).toBe('up_to_date');
+    expect(status.drift.orphaned).toBe(1);
+    expect(status.drift.update).toBe(0);
+    expect(status.drift.insert).toBe(0);
+  });
+
+  it('never leaks hidden mechanics — the status carries no scenario script', () => {
+    const stored: StoredPackScenario[] = [{ sourceScenarioKey: allKeys[0], packVersion: null }];
+    const status = computePackStatus(PACK, stored, ORG);
+    expect(JSON.stringify(status)).not.toMatch(/customerPersona|customerObjective|"hints"|"script"/);
   });
 });
