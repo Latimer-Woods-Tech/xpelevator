@@ -2,11 +2,13 @@
  * UI tests for the client-facing white-label render surface on the sign-in
  * shell (src/app/auth/signin/page.tsx, R-050).
  *
- * When a trainee arrives via `/auth/signin?org=<slug>`, the shell fetches the
- * operator's brand-safe branding (GET /api/branding/[slug]) and presents the
- * operator's name / logo / colors. With no `org` slug it falls back to the
- * default XPElevator presentation. These tests lock:
- *   - default (no ?org): the XPElevator wordmark renders, no operator logo
+ * When a trainee arrives via `/auth/signin?org=<slug>` OR via an operator
+ * subdomain (resolved host-side by GET /api/branding/by-host, R-055), the shell
+ * fetches the operator's brand-safe branding and presents the operator's name /
+ * logo / colors. With no slug and no operator subdomain (the apex → by-host
+ * 404) it falls back to the default XPElevator presentation. These tests lock:
+ *   - default (no ?org, by-host 404s): the XPElevator wordmark renders, no
+ *     operator logo, and the shell probed the host-resolved read
  *   - branded (?org=acme, fetch returns branding): operator name + logo render,
  *     and the primary color is applied to the Continue button
  *   - the org copy rule holds: the word "AI" never appears
@@ -56,8 +58,12 @@ afterEach(() => {
 });
 
 describe('Sign-in shell — default (no operator brand)', () => {
-  it('renders the XPElevator wordmark and no operator logo', async () => {
-    const fetchSpy = vi.fn();
+  it('probes the host-resolved read and renders the wordmark when it 404s', async () => {
+    // No ?org slug → the shell probes `/api/branding/by-host`; on the apex that
+    // 404s, so the default XPElevator presentation stays.
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue({ ok: false, json: async () => ({ error: 'not found' }) });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     await renderSignIn();
@@ -66,9 +72,11 @@ describe('Sign-in shell — default (no operator brand)', () => {
     const heading = screen.getByRole('heading', { level: 1 });
     expect(heading.textContent).toContain('XP');
     expect(heading.textContent).toContain('Elevator');
-    // No operator logo image, and no brand fetch without an ?org slug.
+    // No operator logo image; the host-resolved read was probed (no slug path).
     expect(screen.queryByRole('img')).toBeNull();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith('/api/branding/by-host')
+    );
     // Org copy rule.
     expect(document.body.textContent).not.toMatch(/\bAI\b/);
   });
