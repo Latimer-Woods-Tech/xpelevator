@@ -5,7 +5,9 @@ import {
   getScenarioPack,
   getPublicPackCatalog,
   buildPackImportPlan,
+  buildPackUpgradePlan,
   packModalityProfile,
+  type StoredPackScenario,
 } from '@/lib/scenario-packs';
 
 // Deterministic: the pack catalog is pure data + pure helpers — no DB, no auth,
@@ -233,5 +235,95 @@ describe('getPublicPackCatalog — hidden-mechanic boundary', () => {
         expect(s).not.toHaveProperty('script');
       }
     }
+  });
+});
+
+describe('buildPackUpgradePlan — drift detection (pure)', () => {
+  const PACK = SCENARIO_PACKS[0];
+  const ORG = 'org-42';
+  const allKeys = PACK.scenarios.map((s) => s.key);
+
+  it('all rows already at the catalog version → clean no-op (everything unchanged)', () => {
+    const stored: StoredPackScenario[] = allKeys.map((k) => ({
+      sourceScenarioKey: k,
+      packVersion: PACK_CATALOG_VERSION,
+    }));
+    const plan = buildPackUpgradePlan(PACK, stored, ORG);
+    expect(plan.packId).toBe(PACK.id);
+    expect(plan.targetVersion).toBe(PACK_CATALOG_VERSION);
+    expect(plan.orgId).toBe(ORG);
+    expect(plan.toUpdate).toHaveLength(0);
+    expect(plan.toInsert).toHaveLength(0);
+    expect(plan.unchangedKeys).toHaveLength(allKeys.length);
+    expect(plan.orphanedKeys).toHaveLength(0);
+    expect(plan.items.every((i) => i.action === 'unchanged')).toBe(true);
+  });
+
+  it('rows stamped at an older version → all flagged stale for update, content refreshed', () => {
+    const stored: StoredPackScenario[] = allKeys.map((k) => ({
+      sourceScenarioKey: k,
+      packVersion: PACK_CATALOG_VERSION - 1,
+    }));
+    const plan = buildPackUpgradePlan(PACK, stored, ORG);
+    expect(plan.toUpdate).toHaveLength(allKeys.length);
+    expect(plan.toInsert).toHaveLength(0);
+    expect(plan.unchangedKeys).toHaveLength(0);
+    // each update row carries the current catalog content + bumped version + provenance
+    for (const row of plan.toUpdate) {
+      const src = PACK.scenarios.find((s) => s.key === row.sourceScenarioKey)!;
+      expect(row.name).toBe(src.name);
+      expect(row.description).toBe(src.summary);
+      expect(row.type).toBe(src.type);
+      expect(row.script).toEqual(src.script);
+      expect(row.packVersion).toBe(PACK_CATALOG_VERSION);
+      expect(row.sourcePackId).toBe(PACK.id);
+      expect(row.orgId).toBe(ORG);
+    }
+    expect(plan.items.every((i) => i.action === 'update' && i.toVersion === PACK_CATALOG_VERSION)).toBe(true);
+  });
+
+  it('a null (pre-versioning) stored version is treated as stale', () => {
+    const stored: StoredPackScenario[] = [{ sourceScenarioKey: allKeys[0], packVersion: null }];
+    const plan = buildPackUpgradePlan(PACK, stored, ORG);
+    const first = plan.items.find((i) => i.sourceScenarioKey === allKeys[0])!;
+    expect(first.action).toBe('update');
+    expect(first.fromVersion).toBeNull();
+    expect(plan.toUpdate.some((r) => r.sourceScenarioKey === allKeys[0])).toBe(true);
+  });
+
+  it('a catalog scenario with no stored row → insert; a stored key not in the catalog → orphaned (never in a write list)', () => {
+    // Import only the first scenario, plus a stale key that has left the catalog.
+    const stored: StoredPackScenario[] = [
+      { sourceScenarioKey: allKeys[0], packVersion: PACK_CATALOG_VERSION },
+      { sourceScenarioKey: 'retired-scenario-key', packVersion: PACK_CATALOG_VERSION - 1 },
+    ];
+    const plan = buildPackUpgradePlan(PACK, stored, ORG);
+    // every catalog scenario except the one already-current is an insert
+    expect(plan.toInsert.map((r) => r.sourceScenarioKey).sort()).toEqual(allKeys.slice(1).sort());
+    expect(plan.unchangedKeys).toEqual([allKeys[0]]);
+    expect(plan.orphanedKeys).toEqual(['retired-scenario-key']);
+    // orphaned is reported only — never appears in a write list
+    expect(plan.toUpdate.some((r) => r.sourceScenarioKey === 'retired-scenario-key')).toBe(false);
+    expect(plan.toInsert.some((r) => r.sourceScenarioKey === 'retired-scenario-key')).toBe(false);
+    const orphan = plan.items.find((i) => i.sourceScenarioKey === 'retired-scenario-key')!;
+    expect(orphan.action).toBe('orphaned');
+  });
+
+  it('a stored version ahead of the catalog is left unchanged (never downgraded)', () => {
+    const stored: StoredPackScenario[] = [
+      { sourceScenarioKey: allKeys[0], packVersion: PACK_CATALOG_VERSION + 5 },
+    ];
+    const plan = buildPackUpgradePlan(PACK, stored, ORG);
+    expect(plan.toUpdate.some((r) => r.sourceScenarioKey === allKeys[0])).toBe(false);
+    expect(plan.unchangedKeys).toContain(allKeys[0]);
+  });
+
+  it('the upgrade write rows never leak into the public-catalog shape but do carry the hidden script server-side', () => {
+    const stored: StoredPackScenario[] = [{ sourceScenarioKey: allKeys[0], packVersion: null }];
+    const plan = buildPackUpgradePlan(PACK, stored, ORG);
+    // the update row IS the server-side materialisation — it carries the script
+    expect(plan.toUpdate[0].script).toHaveProperty('customerObjective');
+    // but the audit items (what a preview surfaces) never carry the hidden mechanics
+    expect(JSON.stringify(plan.items)).not.toMatch(/customerPersona|customerObjective|"hints"/);
   });
 });
