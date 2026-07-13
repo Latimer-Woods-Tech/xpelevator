@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   classifyTurnLatency,
+  classifyPhoneTurn,
   ttftTier,
   TTFT_REALTIME_MS,
   TTFT_ACCEPTABLE_MS,
@@ -66,5 +67,45 @@ describe('classifyTurnLatency', () => {
     const t = classifyTurnLatency(3200, 5400);
     expect(t.tier).toBe('slow');
     expect(t.totalMs).toBe(5400);
+  });
+});
+
+describe('classifyPhoneTurn', () => {
+  it('exposes the phone legs and rounds millis to integers', () => {
+    expect(classifyPhoneTurn(1200.6, 1450.2)).toEqual({
+      replyReadyMs: 1201,
+      speakDispatchMs: 1450,
+      tier: 'acceptable',
+    });
+  });
+
+  it('tiers on the full dispatch gap, not on reply-ready (the phone difference)', () => {
+    // Reply generated fast (realtime) but the dispatched-audio gap crosses into
+    // acceptable — the trainee feels the dispatch gap, so that drives the tier.
+    const t = classifyPhoneTurn(700, 1500);
+    expect(ttftTier(t.replyReadyMs)).toBe('realtime');
+    expect(t.tier).toBe('acceptable');
+  });
+
+  it('flags the founder-felt "half-speed" phone turn as slow', () => {
+    // A 70B reply that takes ~2.4s to generate + dispatch reads as slow.
+    const t = classifyPhoneTurn(2100, 2400);
+    expect(t.tier).toBe('slow');
+    expect(t.speakDispatchMs).toBe(2400);
+  });
+
+  it('clamps speakDispatchMs up to replyReadyMs when a skewed clock reverses them', () => {
+    const t = classifyPhoneTurn(1500, 900);
+    expect(t.replyReadyMs).toBe(1500);
+    expect(t.speakDispatchMs).toBe(1500);
+    expect(t.tier).toBe('acceptable');
+  });
+
+  it('normalises NaN / negative inputs to a 0ms realtime turn', () => {
+    expect(classifyPhoneTurn(Number.NaN, -5)).toEqual({
+      replyReadyMs: 0,
+      speakDispatchMs: 0,
+      tier: 'realtime',
+    });
   });
 });

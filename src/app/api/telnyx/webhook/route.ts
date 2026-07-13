@@ -31,6 +31,7 @@ import {
   encodeClientState,
 } from '@/lib/telnyx';
 import { verifyTelnyxWebhook } from '@/lib/auth-api';
+import { classifyPhoneTurn } from '@/lib/latency';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -154,6 +155,11 @@ async function handleEvent(
           break;
         }
 
+        // Phone-turn latency (R-058) — the opening leg: call answered → the
+        // simulated customer's first words. `turnStart` here is the moment the
+        // call connects; the gap the trainee waits through before hearing anyone.
+        const openTurnStart = Date.now();
+
         // Load scenario script for the opening line
         const scenarioRows = await sql`
           SELECT id, script FROM scenarios WHERE id = ${state.scenarioId}
@@ -172,6 +178,7 @@ async function handleEvent(
           ],
           max_tokens: 100,
         });
+        const openReplyReadyMs = Date.now() - openTurnStart;
 
         const openingText = opening.choices[0]?.message?.content?.trim() ?? 'Hello?';
         const cleanOpening = openingText.replace('[RESOLVED]', '').trim();
@@ -185,6 +192,15 @@ async function handleEvent(
           await callSpeak(call_control_id, {
             payload: cleanOpening,
             clientState: encodeClientState(newState as unknown as Record<string, unknown>),
+          });
+          const openTiming = classifyPhoneTurn(openReplyReadyMs, Date.now() - openTurnStart);
+          console.log('[telnyx] latency', {
+            sessionId: state.sessionId.slice(0, 8),
+            leg: 'opening',
+            model: 'llama-3.3-70b-versatile',
+            replyReadyMs: openTiming.replyReadyMs,
+            speakDispatchMs: openTiming.speakDispatchMs,
+            tier: openTiming.tier,
           });
           console.log('[telnyx] call.answered: callSpeak succeeded, session:', state.sessionId);
         } catch (speakErr) {
@@ -270,6 +286,14 @@ async function handleEvent(
           break;
         }
 
+        // Phone-turn latency instrumentation (R-058): the founder's "half-speed"
+        // signal was about the spoken experience. R-057 proved the chat text turn
+        // is real-time, so the lag lives elsewhere on the voice path. `turnStart`
+        // marks the trainee stopping speaking (the final transcript in hand); we
+        // then measure the server-controllable gap before the simulated customer
+        // can speak again: model reply generated, then dispatched to Telnyx TTS.
+        const turnStart = Date.now();
+
         // Stop transcription and kick off Groq in parallel for lower latency.
         // We save the message and load history while Telnyx processes the stop.
         const [, scenarioRows, messages] = await Promise.all([
@@ -305,6 +329,9 @@ async function handleEvent(
           max_tokens: 150,
           temperature: 0.8,
         });
+
+        // Model reply is ready — the compute leg the trainee waits through.
+        const replyReadyMs = Date.now() - turnStart;
 
         const aiText = aiReply.choices[0]?.message?.content?.trim() ?? '';
         const isResolved = aiText.includes('[RESOLVED]');
@@ -364,9 +391,21 @@ async function handleEvent(
 
         // Speak AI reply — call.speak.ended will restart startTranscription automatically
         // (or hang up if isResolved — checked in call.speak.ended handler)
+        const speakStart = Date.now();
         await callSpeak(call_control_id, {
           payload: cleanText,
           clientState: encodeClientState(newState as unknown as Record<string, unknown>),
+        });
+        // Dispatch gap excludes the resolved-turn scoring block above so the metric
+        // is comparable turn-to-turn: reply-ready time + the TTS dispatch itself.
+        const replyTiming = classifyPhoneTurn(replyReadyMs, replyReadyMs + (Date.now() - speakStart));
+        console.log('[telnyx] latency', {
+          sessionId: state.sessionId.slice(0, 8),
+          leg: 'reply',
+          model: 'llama-3.3-70b-versatile',
+          replyReadyMs: replyTiming.replyReadyMs,
+          speakDispatchMs: replyTiming.speakDispatchMs,
+          tier: replyTiming.tier,
         });
         break;
       }
