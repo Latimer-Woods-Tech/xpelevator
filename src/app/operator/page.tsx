@@ -21,6 +21,8 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { SelfContext } from '@/lib/self-context';
 import { operatorWorkspaceView, type WorkspaceState } from '@/lib/operator-workspace';
+import type { Branding } from '@/lib/branding';
+import { brandingToForm, validateBrandingForm, type BrandingForm } from '@/lib/branding-form';
 
 interface ClientOrg {
   id: string;
@@ -155,7 +157,10 @@ export default function OperatorWorkspacePage() {
 
   return (
     <Shell>
-      <OperatorClients orgId={view.orgId} isNew={view.isNew} />
+      <div className="space-y-12">
+        <OperatorClients orgId={view.orgId} isNew={view.isNew} />
+        <BrandingEditor orgId={view.orgId} />
+      </div>
     </Shell>
   );
 }
@@ -272,5 +277,191 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
         </ul>
       )}
     </div>
+  );
+}
+
+// ─── Branding editor ─────────────────────────────────────────────────────────
+
+const HEX6 = /^#[0-9a-fA-F]{6}$/;
+
+/** A color field: a native swatch picker kept in sync with a free-text hex
+ * input, so an operator can either pick or paste a `#rrggbb` value (or clear
+ * it). The swatch falls back to a neutral value when the text is not yet a
+ * valid hex, so it never throws on a partial entry. */
+function ColorField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const swatch = HEX6.test(value) ? value : '#1e293b';
+  return (
+    <div className="block">
+      <span className="text-slate-300 text-sm">{label}</span>
+      <div className="mt-1 flex items-center gap-3">
+        <input
+          type="color"
+          aria-label={`${label} swatch`}
+          value={swatch}
+          onChange={e => onChange(e.target.value)}
+          className="h-11 w-12 shrink-0 rounded-lg bg-slate-800 border border-slate-600 cursor-pointer p-1"
+        />
+        <input
+          type="text"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder="#2563eb"
+          aria-label={label}
+          className="flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm transition-colors"
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The in-workspace brand editor (R-049). Loads the operator org's current
+ * white-label brand from `GET /api/orgs/[id]/branding`, lets an admin edit
+ * name / logo / colors, validates client-side with the SAME normalizers the
+ * server enforces (`validateBrandingForm`), and saves via `PUT`. A blank field
+ * clears that field (falls back to the platform default). The API re-validates
+ * and is the sole authority — this shell never widens access.
+ */
+function BrandingEditor({ orgId }: { orgId: string }) {
+  const [form, setForm] = useState<BrandingForm | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/orgs/${encodeURIComponent(orgId)}/branding`, {
+      headers: { Accept: 'application/json' },
+    })
+      .then(res => {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.json() as Promise<Branding>;
+      })
+      .then(b => {
+        if (!cancelled) setForm(brandingToForm(b));
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
+
+  const update = (key: keyof BrandingForm, value: string) => {
+    setForm(prev => (prev ? { ...prev, [key]: value } : prev));
+    setSaved(false);
+    setSaveError(null);
+  };
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form || saving) return;
+    const result = validateBrandingForm(form);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
+    try {
+      const res = await fetch(`/api/orgs/${encodeURIComponent(orgId)}/branding`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result.body),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setSaveError(data?.error ?? `Could not save your brand (HTTP ${res.status}).`);
+        return;
+      }
+      const updated = (await res.json()) as Branding;
+      setForm(brandingToForm(updated));
+      setSaved(true);
+    } catch {
+      setSaveError('Network error — your brand was not saved.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={save} className="space-y-6">
+      <div className="bg-blue-950/40 border border-blue-800/30 rounded-xl px-5 py-4">
+        <div className="font-semibold text-blue-200 text-sm">Your brand</div>
+        <p className="text-slate-400 text-xs mt-1 leading-relaxed">
+          Set the name, logo, and colors your clients see on the sign-in and workspace screens.
+          Leave a field blank to use the platform default.
+        </p>
+      </div>
+
+      {loadError ? (
+        <p className="text-slate-400 text-sm">Could not load your brand. Refresh to try again.</p>
+      ) : form === null ? (
+        <p className="text-slate-400 text-sm">Loading your brand…</p>
+      ) : (
+        <>
+          <div className="space-y-5">
+            <label className="block">
+              <span className="text-slate-300 text-sm">Brand name</span>
+              <input
+                type="text"
+                value={form.displayName}
+                onChange={e => update('displayName', e.target.value)}
+                placeholder="e.g. Northwind Enablement"
+                aria-label="Brand name"
+                className="mt-1 w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm transition-colors"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-slate-300 text-sm">Logo URL</span>
+              <input
+                type="url"
+                value={form.logoUrl}
+                onChange={e => update('logoUrl', e.target.value)}
+                placeholder="https://…/logo.svg"
+                aria-label="Logo URL"
+                className="mt-1 w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm transition-colors"
+              />
+            </label>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <ColorField
+                label="Primary color"
+                value={form.primaryColor}
+                onChange={v => update('primaryColor', v)}
+              />
+              <ColorField
+                label="Accent color"
+                value={form.accentColor}
+                onChange={v => update('accentColor', v)}
+              />
+            </div>
+          </div>
+
+          {saveError ? <p className="text-red-400 text-sm">{saveError}</p> : null}
+          {saved ? <p className="text-emerald-400 text-sm">Your brand is saved.</p> : null}
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="px-5 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed rounded-xl text-sm font-semibold transition-colors"
+          >
+            {saving ? 'Saving…' : 'Save brand'}
+          </button>
+        </>
+      )}
+    </form>
   );
 }
