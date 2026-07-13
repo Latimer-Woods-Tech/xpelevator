@@ -559,6 +559,49 @@ jobs:
           fi
           echo "✅ /api/me rejects anonymous GET (401) on both hosts"
 
+      - name: Verify operator workspace page is auth-gated (Phase 4)
+        # /operator is the operator self-serve workspace (R-052): an admin lists +
+        # creates the client orgs beneath them. It renders only a shell (all data
+        # comes from the already-gated /api/me + /api/orgs/[id]/clients), but the
+        # page itself is in the middleware matcher so an anonymous visitor is
+        # redirected to /auth/signin rather than shown the workspace chrome.
+        # Permanent regression gate: an anonymous GET (no redirect follow) must be
+        # a 3xx to /auth/signin on both hosts — never a 200 (which would mean the
+        # matcher regressed and the operator chrome is served pre-sign-in).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000; loc=""
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/operator" || echo 000)
+              loc=$(curl -s -o /dev/null -w '%{redirect_url}' "$BASE/operator" || echo "")
+              case "$code" in 301|302|303|307|308) break;; esac
+              sleep 6
+            done
+            echo "GET $BASE/operator (anon) -> HTTP $code (Location: $loc)"
+            case "$code" in
+              301|302|303|307|308) ;;
+              *)
+                echo "::error::$BASE/operator must redirect anon to sign-in (got $code) — operator chrome exposed pre-sign-in"
+                fail=1
+                continue
+                ;;
+            esac
+            case "$loc" in
+              */auth/signin*) ;;
+              *)
+                echo "::error::$BASE/operator redirect target is not /auth/signin (got '$loc')"
+                fail=1
+                ;;
+            esac
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Operator workspace auth-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /operator redirects anonymous visitors to sign-in on both hosts"
+
       - name: Verify manager reporting export is auth-gated (Phase 4)
         # The manager CSV export (GET /api/reports/sessions) returns a tenant's
         # completed-session scores — it is ADMIN-only and org-scoped, and must

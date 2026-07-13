@@ -121,6 +121,19 @@ export default async function Home() {
               Track score trends over time, per-criteria performance, and phone vs chat breakdowns.
             </p>
           </Link>
+
+          <Link
+            href="/operator"
+            className="group block p-8 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-blue-500 transition-all hover:shadow-lg hover:shadow-blue-500/10"
+          >
+            <div className="text-3xl mb-4">🏢</div>
+            <h2 className="text-xl font-semibold mb-2 group-hover:text-blue-400 transition-colors">
+              Operator Workspace
+            </h2>
+            <p className="text-slate-400 text-sm">
+              Create and manage the client organisations beneath you — buy seats wholesale, set your own retail.
+            </p>
+          </Link>
         </div>
       </div>
     </div>
