@@ -403,6 +403,40 @@ jobs:
           fi
           echo "✅ POST /api/scenario-packs/import rejects anonymous callers (401) on both hosts"
 
+      - name: Verify pack upgrade is admin-gated (Phase 4)
+        # The admin "upgrade pack → current catalog version" action
+        # (POST /api/scenario-packs/upgrade) OVERWRITES an org's already-imported,
+        # pack-provenanced scenarios with newer catalog content — the opt-in
+        # counterpart to the non-clobbering import. Like the import write subpath
+        # it is ADMIN-only + strictly tenant-scoped and must NEVER be anonymous
+        # (a public route no longer exposes its subpaths; the handler double-checks
+        # ADMIN). Permanent regression gate: an anonymous POST must get 401 on both
+        # hosts (a 200/500 here would mean the write path or the DB is exposed).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                -H 'Content-Type: application/json' \
+                -d '{"packId":"saas-support-essentials"}' \
+                "$BASE/api/scenario-packs/upgrade" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "POST $BASE/api/scenario-packs/upgrade (anon) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/scenario-packs/upgrade must require auth (got $code) — pack-upgrade write path exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Pack-upgrade admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ POST /api/scenario-packs/upgrade rejects anonymous callers (401) on both hosts"
+
       - name: Verify operator client-management is admin-gated (Phase 4)
         # The operator→client hierarchy API (/api/orgs/[id]/clients) lets an
         # OPERATOR admin LIST and CREATE the client orgs beneath them. Both verbs

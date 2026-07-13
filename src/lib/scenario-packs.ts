@@ -447,6 +447,125 @@ export function buildPackImportPlan(pack: ScenarioPack, orgId: string): PackImpo
   };
 }
 
+// ── Upgrade plan (admin "upgrade a frozen pack → current catalog version") ────
+//
+// The deliberate, opt-in counterpart to the non-clobbering import. Import is
+// frozen-by-default: re-importing never overwrites an operator's rows, so a pack
+// materialised at version N stays at N even after the public catalog improves
+// (the "freeze a pack for a client" property the founder called for). Upgrade is
+// the escape hatch — an admin explicitly re-syncs an already-imported pack to
+// the current catalog. This is the pure, DB-free half: given the current catalog
+// pack + the org's stored provenanced scenario rows (their key + `pack_version`),
+// it derives exactly which scenarios to UPDATE (stale — stored version older
+// than the catalog), INSERT (added to the catalog since the import), leave
+// UNCHANGED (already at the catalog version), or report as ORPHANED (removed
+// from the catalog — reported, NEVER deleted, since the operator may still be
+// running it). The route executes the plan; the shaping is unit-tested here.
+
+/** One of the org's currently-stored, pack-provenanced scenario rows. */
+export interface StoredPackScenario {
+  sourceScenarioKey: string;
+  /** The catalog version this row was last written at (`null` = pre-versioning). */
+  packVersion: number | null;
+}
+
+/** What an upgrade will do to a single scenario. */
+export type ScenarioUpgradeAction = 'update' | 'insert' | 'unchanged' | 'orphaned';
+
+/** Per-scenario audit line for the upgrade preview. */
+export interface ScenarioUpgradeItem {
+  sourceScenarioKey: string;
+  /** Trainee-facing name (from the catalog; the key itself for an orphaned row). */
+  name: string;
+  action: ScenarioUpgradeAction;
+  /** The stored version (`null` for a fresh insert). */
+  fromVersion: number | null;
+  /** The version the row will be at after upgrade (unchanged for `unchanged`/`orphaned`). */
+  toVersion: number | null;
+}
+
+/** The full set of writes + audit an upgrade performs for one org. */
+export interface PackUpgradePlan {
+  packId: string;
+  /** The catalog version everything is being synced up to. */
+  targetVersion: number;
+  orgId: string;
+  /** Stale rows to overwrite with the current content + bumped version. */
+  toUpdate: ScenarioImportRow[];
+  /** Catalog scenarios the org lacks — inserted (idempotent, same shape as import). */
+  toInsert: ScenarioImportRow[];
+  /** Keys already at the target version — no write. */
+  unchangedKeys: string[];
+  /** Stored keys no longer in the catalog — reported, never deleted. */
+  orphanedKeys: string[];
+  /** Full per-scenario audit, in catalog order then orphaned. */
+  items: ScenarioUpgradeItem[];
+}
+
+/**
+ * Derive the exact writes an "upgrade this imported pack to the current catalog
+ * version" action must perform, plus a per-scenario audit for the preview. Pure
+ * — no DB, no auth, no network.
+ *
+ * A stored scenario is **stale** (→ `update`) when its `packVersion` is `null`
+ * (pre-versioning) or strictly less than {@link PACK_CATALOG_VERSION}; a stored
+ * row already at or beyond the catalog version is left **unchanged** (never
+ * downgraded). A catalog scenario with no stored row is an **insert**; a stored
+ * row whose key has left the catalog is **orphaned** and only reported.
+ *
+ * @param pack   The current catalog pack to sync up to.
+ * @param stored The org's currently-stored provenanced rows for this pack.
+ * @param orgId  The org the rows belong to (imports/upgrades are tenant-scoped).
+ */
+export function buildPackUpgradePlan(
+  pack: ScenarioPack,
+  stored: readonly StoredPackScenario[],
+  orgId: string,
+): PackUpgradePlan {
+  const target = PACK_CATALOG_VERSION;
+  const storedByKey = new Map(stored.map((s) => [s.sourceScenarioKey, s]));
+  const catalogKeys = new Set(pack.scenarios.map((s) => s.key));
+
+  const toUpdate: ScenarioImportRow[] = [];
+  const toInsert: ScenarioImportRow[] = [];
+  const unchangedKeys: string[] = [];
+  const items: ScenarioUpgradeItem[] = [];
+
+  for (const s of pack.scenarios) {
+    const row: ScenarioImportRow = {
+      orgId,
+      name: s.name,
+      description: s.summary,
+      type: s.type,
+      script: s.script,
+      sourcePackId: pack.id,
+      sourceScenarioKey: s.key,
+      packVersion: target,
+    };
+    const existing = storedByKey.get(s.key);
+    if (!existing) {
+      toInsert.push(row);
+      items.push({ sourceScenarioKey: s.key, name: s.name, action: 'insert', fromVersion: null, toVersion: target });
+    } else if (existing.packVersion == null || existing.packVersion < target) {
+      toUpdate.push(row);
+      items.push({ sourceScenarioKey: s.key, name: s.name, action: 'update', fromVersion: existing.packVersion, toVersion: target });
+    } else {
+      unchangedKeys.push(s.key);
+      items.push({ sourceScenarioKey: s.key, name: s.name, action: 'unchanged', fromVersion: existing.packVersion, toVersion: existing.packVersion });
+    }
+  }
+
+  const orphanedKeys: string[] = [];
+  for (const s of stored) {
+    if (!catalogKeys.has(s.sourceScenarioKey)) {
+      orphanedKeys.push(s.sourceScenarioKey);
+      items.push({ sourceScenarioKey: s.sourceScenarioKey, name: s.sourceScenarioKey, action: 'orphaned', fromVersion: s.packVersion, toVersion: s.packVersion });
+    }
+  }
+
+  return { packId: pack.id, targetVersion: target, orgId, toUpdate, toInsert, unchangedKeys, orphanedKeys, items };
+}
+
 // ── Modality / cost profile ──────────────────────────────────────────────────
 //
 // A lightweight, pure read of what a pack costs to *run* (founder note on the
