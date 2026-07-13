@@ -94,6 +94,7 @@ export const config = {
   // Protect admin routes and all API routes except the public list
   matcher: [
     '/admin/:path*',
+    '/operator/:path*',
     '/api/:path*',
     '/simulate/:path*',
     '/sessions/:path*',
