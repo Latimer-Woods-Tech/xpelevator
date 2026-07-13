@@ -130,6 +130,24 @@ async function main() {
   if (startRes.status !== 200) fail(`chat [START] -> ${startRes.status}`, startTxt);
   console.log(`✓ [START] streamed (${startTxt.length} bytes of SSE)`);
 
+  // Conversation-latency instrumentation (R-057): the opener's terminal SSE
+  // event must carry a numeric `timing` object so speed is a monitored metric,
+  // not a vibe — the founder-flagged "half-speed" feel becomes trackable.
+  const timingMatch = startTxt.match(/"timing":\s*(\{[^}]*\})/);
+  if (!timingMatch) {
+    fail('chat [START] SSE carried no timing object — latency instrumentation missing', startTxt.slice(-400));
+  }
+  let timing;
+  try {
+    timing = JSON.parse(timingMatch[1]);
+  } catch {
+    fail('chat [START] timing object is not valid JSON', timingMatch[1]);
+  }
+  if (typeof timing.ttftMs !== 'number' || typeof timing.totalMs !== 'number' || typeof timing.tier !== 'string') {
+    fail('timing present but ttftMs/totalMs/tier not the expected shape', JSON.stringify(timing));
+  }
+  console.log(`✓ turn latency instrumented: ttft=${timing.ttftMs}ms total=${timing.totalMs}ms tier=${timing.tier}`);
+
   const turnRes = await req('POST', '/api/chat', cookie, { sessionId, content: AGENT_LINE });
   const turnTxt = await drain(turnRes);
   if (turnRes.status !== 200) fail(`chat agent-turn -> ${turnRes.status}`, turnTxt);
