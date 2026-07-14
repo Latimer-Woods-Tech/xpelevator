@@ -28,6 +28,13 @@
  * admin: must name `?operatorOrgId=<id>`, else 400; a cross-operator param →
  * 403). `scope=clients` takes precedence over `clientOrgId`.
  *
+ * `?since=YYYY-MM-DD` / `?until=YYYY-MM-DD` bound the report to a date window on
+ * a session's completion date (`ended_at`) — the operator's "monthly cut". Both
+ * are inclusive calendar dates (UTC); a malformed date or a `since` after `until`
+ * is a 400 (`parseReportWindow`). The window composes with every scope above,
+ * narrowing — never widening — the authorized session set, so tenant isolation
+ * is unaffected.
+ *
  * The row/weighting logic lives in the pure `@/lib/report` + `@/lib/csv`
  * modules (unit-tested without a DB); this handler is a thin auth + query shell.
  */
@@ -42,6 +49,7 @@ import {
   type ReportSession,
 } from '@/lib/report';
 import { canAccessOrgReport, resolveOperatorRollup } from '@/lib/org-hierarchy';
+import { parseReportWindow } from '@/lib/report-window';
 
 export async function GET(request: Request) {
   try {
@@ -51,6 +59,14 @@ export async function GET(request: Request) {
     // `?format=pdf` returns the same tenant-scoped report as a downloadable PDF
     // (the client-facing artifact); anything else keeps the default CSV.
     const wantsPdf = params.get('format') === 'pdf';
+
+    // `?since` / `?until` date window (the operator's "monthly cut"). Validated
+    // before any scope resolution so a malformed date is a clean 400 regardless
+    // of who is asking; absent bounds leave the report all-time (unchanged).
+    const window = parseReportWindow(params);
+    if (!window.ok) {
+      return NextResponse.json({ error: window.error }, { status: 400 });
+    }
 
     // `?scope=clients` = the operator portfolio roll-up (all client orgs at once,
     // labelled by org). It takes precedence over the single-org `clientOrgId`.
@@ -104,6 +120,17 @@ export async function GET(request: Request) {
       // Strict tenant scoping: an admin sees only their own org's sessions.
       // (`org_id IS NULL` for an admin without an org = their personal workspace.)
       where = orgId ? sql`ss.org_id = ${orgId}` : sql`ss.org_id IS NULL`;
+    }
+
+    // Narrow the (already tenant-scoped) `where` by the date window. Composing
+    // onto the scope fragment keeps a single `${where}` in the main query and
+    // can only ever shrink the authorized set — isolation is untouched. `since`
+    // is inclusive; `untilExclusive` is the day after `until` (whole-day cover).
+    if (window.since) {
+      where = sql`${where} AND ss.ended_at >= ${window.since}`;
+    }
+    if (window.untilExclusive) {
+      where = sql`${where} AND ss.ended_at < ${window.untilExclusive}`;
     }
 
     const rows = await sql`
