@@ -65,14 +65,14 @@ const nextConfig: NextConfig = {
   // monorepo root (WSL workspace). Points Next.js at the correct project root.
   outputFileTracingRoot: path.join(__dirname),
   // Force-include packages that Next.js standalone trace misses.
-  // @prisma/adapter-neon and @neondatabase/serverless are not auto-traced
+  // @prisma/adapter-neon and postgres are not auto-traced
   // because they're dynamic adapter dependencies; without this, the
   // OpenNext esbuild pass cannot find them and they're absent from the
   // CF Workers bundle, causing every DB call to fail at runtime.
   outputFileTracingIncludes: {
     '/**': [
       './node_modules/@prisma/adapter-neon/**',
-      './node_modules/@neondatabase/serverless/**',
+      './node_modules/postgres/**',
       './node_modules/@prisma/driver-adapter-utils/**',
       './node_modules/postgres-array/**',
     ],
