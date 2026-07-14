@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   canManageOrgClients,
   canAccessOrgReport,
+  resolveOperatorRollup,
   slugify,
   suffixSlug,
 } from '@/lib/org-hierarchy';
@@ -59,6 +60,58 @@ describe('canAccessOrgReport', () => {
 
   it('an operator admin may NOT report on an unrelated standalone org', () => {
     expect(canAccessOrgReport(STANDALONE, { role: 'ADMIN', orgId: OP })).toBe(false);
+  });
+});
+
+describe('resolveOperatorRollup', () => {
+  const OP = 'operator-1';
+
+  it('operator admin rolls up their OWN clients (no param needed)', () => {
+    expect(resolveOperatorRollup({ role: 'ADMIN', orgId: OP })).toEqual({
+      ok: true,
+      operatorOrgId: OP,
+    });
+  });
+
+  it('operator admin: a matching explicit operatorOrgId is accepted', () => {
+    expect(resolveOperatorRollup({ role: 'ADMIN', orgId: OP }, OP)).toEqual({
+      ok: true,
+      operatorOrgId: OP,
+    });
+  });
+
+  it('operator admin: a DIFFERENT operatorOrgId is a cross-operator attempt → 403', () => {
+    expect(resolveOperatorRollup({ role: 'ADMIN', orgId: OP }, 'operator-2')).toEqual({
+      ok: false,
+      status: 403,
+    });
+  });
+
+  it('platform admin (no org) MUST name an operator → 400 when absent', () => {
+    expect(resolveOperatorRollup({ role: 'ADMIN', orgId: null })).toEqual({
+      ok: false,
+      status: 400,
+    });
+    expect(resolveOperatorRollup({ role: 'ADMIN' })).toEqual({ ok: false, status: 400 });
+    expect(resolveOperatorRollup({ role: 'ADMIN', orgId: null }, '')).toEqual({
+      ok: false,
+      status: 400,
+    });
+  });
+
+  it('platform admin may roll up any named operator', () => {
+    expect(resolveOperatorRollup({ role: 'ADMIN', orgId: null }, OP)).toEqual({
+      ok: true,
+      operatorOrgId: OP,
+    });
+  });
+
+  it('a MEMBER never reaches a roll-up → 403', () => {
+    expect(resolveOperatorRollup({ role: 'MEMBER', orgId: OP })).toEqual({
+      ok: false,
+      status: 403,
+    });
+    expect(resolveOperatorRollup({})).toEqual({ ok: false, status: 403 });
   });
 });
 

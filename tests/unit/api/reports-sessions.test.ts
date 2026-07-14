@@ -151,3 +151,87 @@ describe('GET /api/reports/sessions — ?clientOrgId operator→client scope', (
     expect(scopedTo).toBe(CLIENT);
   });
 });
+
+describe('GET /api/reports/sessions — ?scope=clients portfolio roll-up', () => {
+  /** The operator id the roll-up query scoped to (from `o.parent_org_id =`). */
+  let operatorScope: unknown;
+
+  /**
+   * Route sql for the roll-up path: the `o.parent_org_id =` filter fragment
+   * (value captured) and the main session query (returns `sessions`). No
+   * `organizations WHERE id =` lookup happens on the roll-up path.
+   */
+  function routeRollupSql(sessions: unknown[] = []) {
+    operatorScope = null;
+    sqlMock.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
+      const text = Array.isArray(strings) ? strings.join(' ') : String(strings);
+      if (/o\.parent_org_id =/.test(text)) {
+        operatorScope = values[0];
+        return Promise.resolve([]);
+      }
+      if (/FROM simulation_sessions/.test(text)) {
+        return Promise.resolve(sessions);
+      }
+      throw new Error(`unmatched sql in test: ${text}`);
+    });
+  }
+
+  it('operator admin → 200 CSV scoped to their own operator id, with Organization column', async () => {
+    asAdmin(OPERATOR);
+    routeRollupSql([
+      {
+        id: 's1',
+        type: 'CHAT',
+        scoringStatus: 'SCORED',
+        endedAt: '2026-07-10T00:00:00.000Z',
+        createdAt: '2026-07-10T00:00:00.000Z',
+        traineeEmail: 't@acme.test',
+        jobTitle: 'Rep',
+        scenario: 'Angry customer',
+        organization: 'Acme Retail',
+        scores: [{ score: 8, criteria: { name: 'Empathy', weight: 1 } }],
+      },
+    ]);
+    const res = await GET(req('?scope=clients'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/csv');
+    expect(res.headers.get('Content-Disposition')).toContain('portfolio');
+    expect(operatorScope).toBe(OPERATOR);
+    const body = await res.text();
+    expect(body.split('\r\n')[0].startsWith('Organization,')).toBe(true);
+    expect(body).toContain('Acme Retail,s1,');
+  });
+
+  it('operator admin: a DIFFERENT operatorOrgId is a cross-operator attempt → 403 (no query)', async () => {
+    asAdmin(OPERATOR);
+    routeRollupSql();
+    const res = await GET(req('?scope=clients&operatorOrgId=operator-2'));
+    expect(res.status).toBe(403);
+    expect(operatorScope).toBe(null);
+  });
+
+  it('platform admin (no org) without operatorOrgId → 400 (never touches the DB)', async () => {
+    asAdmin(null);
+    routeRollupSql();
+    const res = await GET(req('?scope=clients'));
+    expect(res.status).toBe(400);
+    expect(operatorScope).toBe(null);
+  });
+
+  it('platform admin may roll up a named operator → 200 scoped to it', async () => {
+    asAdmin(null);
+    routeRollupSql();
+    const res = await GET(req('?scope=clients&operatorOrgId=operator-2'));
+    expect(res.status).toBe(200);
+    expect(operatorScope).toBe('operator-2');
+  });
+
+  it('?format=pdf roll-up returns a PDF scoped to the operator', async () => {
+    asAdmin(OPERATOR);
+    routeRollupSql();
+    const res = await GET(req('?scope=clients&format=pdf'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('application/pdf');
+    expect(operatorScope).toBe(OPERATOR);
+  });
+});

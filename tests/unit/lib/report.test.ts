@@ -6,6 +6,9 @@ import {
   sessionsToReportRows,
   sessionsToCsv,
   sessionsToPdf,
+  ROLLUP_COLUMNS,
+  rollupSessionsToCsv,
+  rollupSessionsToPdf,
   type ReportSession,
 } from '@/lib/report';
 
@@ -157,6 +160,57 @@ describe('sessionsToPdf', () => {
 
   it('renders a report with no sessions (header-only page)', () => {
     const bytes = sessionsToPdf([]);
+    const text = new TextDecoder('latin1').decode(bytes);
+    expect(text).toContain('/Count 1');
+    expect(text).toContain('0 completed sessions');
+  });
+});
+
+describe('operator portfolio roll-up', () => {
+  const acme: ReportSession = { ...base, id: 'sess-a', organization: 'Acme Retail' };
+  const north: ReportSession = {
+    ...base,
+    id: 'sess-b',
+    organization: 'Northwind',
+    scores: [{ score: 10, criteria: { name: 'Empathy', weight: 1 } }],
+  };
+
+  it('ROLLUP_COLUMNS leads with Organization then the single-org columns', () => {
+    expect(ROLLUP_COLUMNS[0]).toBe('Organization');
+    expect(ROLLUP_COLUMNS).toEqual(['Organization', ...REPORT_COLUMNS]);
+  });
+
+  it('CSV prepends the owning org name to each row', () => {
+    const csv = rollupSessionsToCsv([acme, north]);
+    const lines = csv.trim().split('\r\n');
+    expect(lines[0]).toBe(ROLLUP_COLUMNS.join(','));
+    // Order preserved; org is the first cell, then the session id.
+    expect(lines[1].startsWith('Acme Retail,sess-a,')).toBe(true);
+    expect(lines[2].startsWith('Northwind,sess-b,')).toBe(true);
+  });
+
+  it('CSV labels a session with no org as (unassigned)', () => {
+    const orphan: ReportSession = { ...base, id: 'sess-o', organization: null };
+    const csv = rollupSessionsToCsv([orphan]);
+    expect(csv.split('\r\n')[1].startsWith('(unassigned),sess-o,')).toBe(true);
+  });
+
+  it('CSV escapes an org name containing a comma', () => {
+    const s: ReportSession = { ...base, id: 'sess-c', organization: 'Acme, Inc.' };
+    const csv = rollupSessionsToCsv([s]);
+    expect(csv).toContain('"Acme, Inc.",sess-c,');
+  });
+
+  it('PDF produces a valid Portfolio Report byte stream', () => {
+    const bytes = rollupSessionsToPdf([acme, north]);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(new TextDecoder('latin1').decode(bytes.slice(0, 8))).toBe('%PDF-1.4');
+    const text = new TextDecoder('latin1').decode(bytes);
+    expect(text).toContain('2 completed sessions across your client organisations');
+  });
+
+  it('PDF renders an empty portfolio (header-only page)', () => {
+    const bytes = rollupSessionsToPdf([]);
     const text = new TextDecoder('latin1').decode(bytes);
     expect(text).toContain('/Count 1');
     expect(text).toContain('0 completed sessions');
