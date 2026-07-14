@@ -38,6 +38,45 @@ export function canManageOrgClients(
   return viewerOrg === operatorOrgId; // operator admin, own operator only
 }
 
+/** Minimal shape of the org a report is being requested for. */
+export interface OrgReportTarget {
+  /** The org whose sessions the report would cover. */
+  id: string;
+  /** The operator that owns this org when it is a CLIENT, else `null`. */
+  parentOrgId: string | null;
+}
+
+/**
+ * Whether `viewer` may pull the manager report (session export) for org
+ * `target`.
+ *
+ * The manager report is "the artifact an operator shows their client" — but an
+ * operator's OWN org carries no trainee sessions; the sessions live in the
+ * CLIENT orgs beneath it. So an operator must be able to report on a specific
+ * client, while never reaching another operator's client.
+ *
+ * Rules (tenant isolation — mirrors {@link canManageOrgClients}):
+ *   - Must be an ADMIN. A MEMBER never exports another org's sessions.
+ *   - A PLATFORM admin (ADMIN with no org) may report on any org.
+ *   - An org admin may report on their OWN org (`viewerOrg === target.id`) — the
+ *     same data the no-parameter report already returns.
+ *   - An OPERATOR admin may report on a CLIENT they own
+ *     (`viewerOrg === target.parentOrgId`) — never another operator's client.
+ *
+ * `null`/`undefined` orgIds are normalized so a real DB `null` and an absent
+ * field compare equal.
+ */
+export function canAccessOrgReport(
+  target: OrgReportTarget,
+  viewer: OrgManager
+): boolean {
+  if (viewer.role !== 'ADMIN') return false;
+  const viewerOrg = viewer.orgId ?? null;
+  if (viewerOrg === null) return true; // platform admin — any org
+  if (viewerOrg === target.id) return true; // own org
+  return viewerOrg === (target.parentOrgId ?? null); // operator owns this client
+}
+
 /**
  * Turn a human org name into a URL-safe slug: lowercased, non-alphanumerics
  * collapsed to single hyphens, no leading/trailing hyphen.
