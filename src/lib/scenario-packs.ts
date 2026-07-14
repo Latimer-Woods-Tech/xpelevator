@@ -566,6 +566,59 @@ export function buildPackUpgradePlan(
   return { packId: pack.id, targetVersion: target, orgId, toUpdate, toInsert, unchangedKeys, orphanedKeys, items };
 }
 
+// ── Upgrade-preview presentation (admin dry-run surface) ──────────────────────
+//
+// Pure formatting for the "preview before you commit" step (R-062): the upgrade
+// route already returns a per-scenario audit (`items`) + `counts` on a
+// `{ dryRun: true }` call, but the operator had no way to SEE it — the admin tab
+// fired a blind `confirm()`. These helpers turn the audit into felt copy so the
+// preview panel stays free of business logic (and is unit-tested, not JSX-buried).
+// No DB, no network, Worker-safe.
+
+/** The per-scenario drift counts returned by the dry-run upgrade. */
+export interface UpgradePreviewCounts {
+  update: number;
+  insert: number;
+  unchanged: number;
+  orphaned: number;
+}
+
+/** A trainee-neutral verb + swatch class for one audit action (drives the badge). */
+export function upgradeActionLabel(action: ScenarioUpgradeAction): { label: string; cls: string } {
+  switch (action) {
+    case 'update':
+      return { label: 'Update', cls: 'bg-amber-900/40 text-amber-300 border-amber-700/50' };
+    case 'insert':
+      return { label: 'Add', cls: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/50' };
+    case 'orphaned':
+      return { label: 'Retired (kept)', cls: 'bg-slate-700/60 text-slate-300 border-slate-600' };
+    case 'unchanged':
+    default:
+      return { label: 'Unchanged', cls: 'bg-slate-800/60 text-slate-400 border-slate-700' };
+  }
+}
+
+/**
+ * One operator-facing sentence summarising an upgrade preview — what the commit
+ * will actually do. Copy follows the org rule (no "AI"). Returns the no-op line
+ * when nothing would change so the operator can safely dismiss the preview.
+ */
+export function summarizeUpgradeCounts(counts: UpgradePreviewCounts): string {
+  const parts: string[] = [];
+  if (counts.update > 0) parts.push(`${counts.update} to update`);
+  if (counts.insert > 0) parts.push(`${counts.insert} to add`);
+  if (parts.length === 0) {
+    return counts.orphaned > 0
+      ? `Nothing to sync — ${counts.orphaned} retired scenario${counts.orphaned === 1 ? '' : 's'} will be kept in place.`
+      : 'Already up to date — nothing would change.';
+  }
+  const orphanNote =
+    counts.orphaned > 0
+      ? `; ${counts.orphaned} retired scenario${counts.orphaned === 1 ? '' : 's'} left in place`
+      : '';
+  return `${parts.join(', ')}${orphanNote}. Scenarios you authored are never touched.`;
+}
+
 // ── Per-pack import status (admin "Scenario Packs" surface) ───────────────────
 //
 // The read the admin workspace needs to turn the pack machinery into a felt

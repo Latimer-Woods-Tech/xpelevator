@@ -112,9 +112,9 @@ describe('Admin Scenario Packs — status rendering', () => {
     expect(screen.getByText('SaaS Support Essentials')).toBeInTheDocument();
     expect(screen.getByText('Field Sales Objections')).toBeInTheDocument();
 
-    // not_imported → Import; upgrade_available → Upgrade; up_to_date → current marker
+    // not_imported → Import; upgrade_available → Preview changes; up_to_date → current marker
     expect(screen.getByRole('button', { name: /import pack/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^upgrade$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /preview changes/i })).toBeInTheDocument();
     expect(screen.getByText(/current/i)).toBeInTheDocument();
     // the upgrade drift summary is surfaced
     expect(screen.getByText(/2 to update, 1 to add/i)).toBeInTheDocument();
@@ -161,18 +161,87 @@ describe('Admin Scenario Packs — actions', () => {
     expect(posted).toBeFalsy();
   });
 
-  it('upgrades an upgrade_available pack and reports what changed', async () => {
-    window.confirm = vi.fn(() => true);
-    stubFetch({
+  it('previews the dry-run audit, then commits the upgrade on confirm', async () => {
+    // The upgrade route is called twice: first { dryRun: true } for the preview,
+    // then the real commit. Distinguish by the request body.
+    const upgradeCalls: unknown[] = [];
+    // @ts-expect-error – install a body-aware stub on the test global
+    globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
+      const method = (init?.method || 'GET').toUpperCase();
+      if (url === '/api/scenario-packs/upgrade' && method === 'POST') {
+        const body = JSON.parse((init?.body as string) || '{}');
+        upgradeCalls.push(body);
+        if (body.dryRun === true) {
+          return Promise.resolve(
+            jsonResponse({
+              dryRun: true,
+              packId: 'pack-stale',
+              packName: 'SaaS Support Essentials',
+              targetVersion: 1,
+              counts: { update: 2, insert: 1, unchanged: 0, orphaned: 0 },
+              items: [
+                { sourceScenarioKey: 'k1', name: 'Angry billing dispute', action: 'update', fromVersion: null, toVersion: 1 },
+                { sourceScenarioKey: 'k2', name: 'Feature request triage', action: 'insert', fromVersion: null, toVersion: 1 },
+              ],
+            }),
+          );
+        }
+        return Promise.resolve(jsonResponse({ scenarios: { updated: 2, inserted: 1, unchanged: 0, orphaned: 0 } }));
+      }
+      if (url === '/api/criteria') return Promise.resolve(jsonResponse([]));
+      if (url === '/api/scenario-packs/status') return Promise.resolve(jsonResponse(STATUS_PAYLOAD));
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    await openPacksTab();
+
+    // Step 1: open the preview (no blind confirm, no write yet).
+    await waitFor(() => expect(screen.getByRole('button', { name: /preview changes/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /preview changes/i }));
+
+    // The per-scenario audit renders with its badges and summary.
+    await waitFor(() => expect(screen.getByText('Angry billing dispute')).toBeInTheDocument());
+    expect(screen.getByText('Feature request triage')).toBeInTheDocument();
+    // The preview's own summary sentence (distinct from the card's drift line).
+    expect(screen.getByText(/never touched/i)).toBeInTheDocument();
+    // Only the dry-run has been sent so far.
+    expect(upgradeCalls).toEqual([{ packId: 'pack-stale', dryRun: true }]);
+
+    // Step 2: confirm → the real (non-dry-run) upgrade commits and reports.
+    fireEvent.click(screen.getByRole('button', { name: /confirm upgrade/i }));
+    await waitFor(() => expect(screen.getByText(/Upgraded — 2 updated, 1 added/i)).toBeInTheDocument());
+    expect(upgradeCalls).toEqual([{ packId: 'pack-stale', dryRun: true }, { packId: 'pack-stale' }]);
+  });
+
+  it('cancels a preview without writing', async () => {
+    const fetchSpy = stubFetch({
       'POST /api/scenario-packs/upgrade': () =>
-        Promise.resolve(jsonResponse({ scenarios: { updated: 2, inserted: 1, unchanged: 0, orphaned: 0 } })),
+        Promise.resolve(
+          jsonResponse({
+            dryRun: true,
+            targetVersion: 1,
+            counts: { update: 2, insert: 1, unchanged: 0, orphaned: 0 },
+            items: [{ sourceScenarioKey: 'k1', name: 'Angry billing dispute', action: 'update', fromVersion: null, toVersion: 1 }],
+          }),
+        ),
     });
     await openPacksTab();
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /^upgrade$/i })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: /^upgrade$/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /preview changes/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /preview changes/i }));
+    await waitFor(() => expect(screen.getByText('Angry billing dispute')).toBeInTheDocument());
 
-    await waitFor(() => expect(screen.getByText(/Upgraded — 2 updated, 1 added/i)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    await waitFor(() => expect(screen.queryByText('Angry billing dispute')).not.toBeInTheDocument());
+
+    // No commit (non-dry-run) upgrade was ever sent.
+    const committed = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        url === '/api/scenario-packs/upgrade' &&
+        (init as RequestInit)?.method === 'POST' &&
+        !JSON.parse(((init as RequestInit)?.body as string) || '{}').dryRun,
+    );
+    expect(committed).toBeFalsy();
   });
 
   it('surfaces a server error instead of a silent failure', async () => {

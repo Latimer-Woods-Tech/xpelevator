@@ -8,6 +8,8 @@ import {
   buildPackUpgradePlan,
   packModalityProfile,
   computePackStatus,
+  upgradeActionLabel,
+  summarizeUpgradeCounts,
   type StoredPackScenario,
 } from '@/lib/scenario-packs';
 
@@ -405,5 +407,56 @@ describe('computePackStatus — per-pack import status (admin packs surface)', (
     const stored: StoredPackScenario[] = [{ sourceScenarioKey: allKeys[0], packVersion: null }];
     const status = computePackStatus(PACK, stored, ORG);
     expect(JSON.stringify(status)).not.toMatch(/customerPersona|customerObjective|"hints"|"script"/);
+  });
+});
+
+describe('upgradeActionLabel — dry-run preview badge (R-062)', () => {
+  it('maps every action to a distinct, non-empty label', () => {
+    const actions = ['update', 'insert', 'unchanged', 'orphaned'] as const;
+    const labels = actions.map((a) => upgradeActionLabel(a).label);
+    for (const l of labels) expect(l.length).toBeGreaterThan(0);
+    // Distinct labels so the operator can tell the four states apart.
+    expect(new Set(labels).size).toBe(4);
+  });
+
+  it('an orphaned row reads as kept, never deleted (never-delete contract)', () => {
+    expect(upgradeActionLabel('orphaned').label.toLowerCase()).toContain('kept');
+  });
+
+  it('carries a swatch class for each action', () => {
+    for (const a of ['update', 'insert', 'unchanged', 'orphaned'] as const) {
+      expect(upgradeActionLabel(a).cls).toMatch(/border/);
+    }
+  });
+});
+
+describe('summarizeUpgradeCounts — operator preview sentence (R-062)', () => {
+  it('summarises a mixed upgrade and reassures authored rows are safe', () => {
+    const s = summarizeUpgradeCounts({ update: 2, insert: 1, unchanged: 3, orphaned: 0 });
+    expect(s).toContain('2 to update');
+    expect(s).toContain('1 to add');
+    expect(s).toContain('never touched');
+  });
+
+  it('reports the no-op case when nothing would change', () => {
+    expect(summarizeUpgradeCounts({ update: 0, insert: 0, unchanged: 5, orphaned: 0 })).toMatch(/up to date/i);
+  });
+
+  it('notes orphaned rows are kept when there is nothing else to sync', () => {
+    const s = summarizeUpgradeCounts({ update: 0, insert: 0, unchanged: 2, orphaned: 3 });
+    expect(s).toContain('3 retired');
+    expect(s.toLowerCase()).toContain('kept');
+  });
+
+  it('appends the orphan note to a real sync and pluralises correctly', () => {
+    const one = summarizeUpgradeCounts({ update: 1, insert: 0, unchanged: 0, orphaned: 1 });
+    expect(one).toContain('1 retired scenario left in place');
+    const many = summarizeUpgradeCounts({ update: 1, insert: 0, unchanged: 0, orphaned: 2 });
+    expect(many).toContain('2 retired scenarios left in place');
+  });
+
+  it('never emits the banned "AI" token', () => {
+    const s = summarizeUpgradeCounts({ update: 1, insert: 1, unchanged: 1, orphaned: 1 });
+    expect(s).not.toMatch(/\bAI\b/);
   });
 });
