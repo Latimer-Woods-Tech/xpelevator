@@ -7,10 +7,19 @@
  * "Manager reporting + CSV/PDF export". Default format is CSV; `?format=pdf`
  * returns the same tenant-scoped data as a PDF.
  *
- * Access: ADMIN only (managers), and strictly scoped to the admin's own org —
- * `requireAuth(request, 'ADMIN')` yields 401 for anon (also caught earlier by
- * middleware), 403 for a non-admin member, and the query filters on the admin's
- * `orgId`, so it can never surface another tenant's sessions.
+ * Access: ADMIN only (managers). By default the report is strictly scoped to the
+ * admin's own org — `requireAuth(request, 'ADMIN')` yields 401 for anon (also
+ * caught earlier by middleware), 403 for a non-admin member, and the query
+ * filters on the admin's `orgId`, so it can never surface another tenant's
+ * sessions.
+ *
+ * `?clientOrgId=<id>` lets an OPERATOR pull the report for a specific CLIENT org
+ * beneath them — the channel model's actual artifact, since an operator's own
+ * org carries no trainee sessions. Access to that client is authorized by the
+ * pure `canAccessOrgReport` (platform admin: any org; an operator admin: only a
+ * client they own; the org's own admin: itself — never another operator's
+ * client, which is 403). An unknown id is 404. Without the parameter, behaviour
+ * is unchanged (own-org report).
  *
  * The row/weighting logic lives in the pure `@/lib/report` + `@/lib/csv`
  * modules (unit-tested without a DB); this handler is a thin auth + query shell.
@@ -19,15 +28,45 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { sessionsToCsv, sessionsToPdf, type ReportSession } from '@/lib/report';
+import { canAccessOrgReport } from '@/lib/org-hierarchy';
 
 export async function GET(request: Request) {
   try {
     const { session } = await requireAuth(request, 'ADMIN');
-    const orgId = session.user.orgId ?? null;
 
+    const params = new URL(request.url).searchParams;
     // `?format=pdf` returns the same tenant-scoped report as a downloadable PDF
     // (the client-facing artifact); anything else keeps the default CSV.
-    const wantsPdf = new URL(request.url).searchParams.get('format') === 'pdf';
+    const wantsPdf = params.get('format') === 'pdf';
+
+    // Default: the admin's own org. `?clientOrgId=` re-targets a client the
+    // operator owns, gated by `canAccessOrgReport` (cross-operator → 403).
+    let orgId = session.user.orgId ?? null;
+    const clientOrgId = params.get('clientOrgId');
+    if (clientOrgId) {
+      const targetRows = await sql`
+        SELECT id, parent_org_id as "parentOrgId"
+        FROM organizations
+        WHERE id = ${clientOrgId}
+      `;
+      if (targetRows.length === 0) {
+        return NextResponse.json(
+          { error: 'Organization not found' },
+          { status: 404 }
+        );
+      }
+      const target = {
+        id: targetRows[0].id as string,
+        parentOrgId: (targetRows[0].parentOrgId as string | null) ?? null,
+      };
+      if (!canAccessOrgReport(target, session.user)) {
+        return NextResponse.json(
+          { error: 'You may only report on your own client organizations' },
+          { status: 403 }
+        );
+      }
+      orgId = target.id;
+    }
 
     // Strict tenant scoping: an admin sees only their own org's sessions.
     // (`org_id IS NULL` for an admin without an org = their personal workspace.)

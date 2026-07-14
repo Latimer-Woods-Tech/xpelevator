@@ -261,16 +261,36 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
       ) : (
         <ul className="divide-y divide-slate-800 rounded-2xl bg-slate-800/40 border border-slate-700 overflow-hidden">
           {clients.map(c => (
-            <li key={c.id} className="flex items-center justify-between px-5 py-4">
+            <li key={c.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
               <div>
                 <div className="font-medium text-sm">{c.name}</div>
                 <div className="text-slate-500 text-xs mt-0.5">
                   {c.slug} · {c.plan} plan
                 </div>
               </div>
-              <div className="text-right text-xs text-slate-400">
-                <div>{c._count?.users ?? 0} trainees</div>
-                <div>{c._count?.sessions ?? 0} sessions</div>
+              <div className="flex items-center gap-4">
+                <div className="text-right text-xs text-slate-400">
+                  <div>{c._count?.users ?? 0} trainees</div>
+                  <div>{c._count?.sessions ?? 0} sessions</div>
+                </div>
+                {/* The per-client report — the artifact the operator shows this
+                    client. Scoped server-side by `canAccessOrgReport`. */}
+                <div className="flex items-center gap-2">
+                  <a
+                    href={`/api/reports/sessions?clientOrgId=${encodeURIComponent(c.id)}`}
+                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+                    title={`Download ${c.name} sessions as CSV`}
+                  >
+                    CSV
+                  </a>
+                  <a
+                    href={`/api/reports/sessions?clientOrgId=${encodeURIComponent(c.id)}&format=pdf`}
+                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+                    title={`Download ${c.name} sessions as PDF`}
+                  >
+                    PDF
+                  </a>
+                </div>
               </div>
             </li>
           ))}
