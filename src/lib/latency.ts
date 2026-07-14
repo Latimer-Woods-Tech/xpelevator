@@ -99,3 +99,39 @@ export function classifyPhoneTurn(replyReadyMs: number, speakDispatchMs: number)
     tier: ttftTier(base.totalMs),
   };
 }
+
+/**
+ * A turn's felt-speed rendered for a human: a short label + a compact timing
+ * detail. Pure and runtime-agnostic so the chat UI can surface the same speed
+ * the `[chat] latency` log measures (R-057) — the number the founder's
+ * "half-speed" note is about, now felt by the trainee instead of hidden in logs.
+ */
+export interface LatencyBadge {
+  /** Felt-speed bucket, drives the badge colour in the UI. */
+  tier: LatencyTier;
+  /** Short felt-speed label, e.g. "Real-time". */
+  label: string;
+  /** Compact timing detail, e.g. "0.1s to first reply". */
+  detail: string;
+}
+
+/** Trainee-facing label for a felt-speed tier (no vendor/craft-vocabulary terms). */
+export function describeLatencyTier(tier: LatencyTier): string {
+  switch (tier) {
+    case 'realtime':
+      return 'Real-time';
+    case 'acceptable':
+      return 'Responsive';
+    case 'slow':
+      return 'Slow';
+  }
+}
+
+/** Build a human-facing {@link LatencyBadge} from a measured {@link TurnTiming}. */
+export function latencyBadge(timing: TurnTiming): LatencyBadge {
+  return {
+    tier: timing.tier,
+    label: describeLatencyTier(timing.tier),
+    detail: `${(timing.ttftMs / 1000).toFixed(1)}s to first reply`,
+  };
+}

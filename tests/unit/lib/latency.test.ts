@@ -12,6 +12,8 @@ import { describe, it, expect } from 'vitest';
 import {
   classifyTurnLatency,
   classifyPhoneTurn,
+  describeLatencyTier,
+  latencyBadge,
   ttftTier,
   TTFT_REALTIME_MS,
   TTFT_ACCEPTABLE_MS,
@@ -109,3 +111,35 @@ describe('classifyPhoneTurn', () => {
     });
   });
 });
+
+describe('describeLatencyTier', () => {
+  it('maps each felt-speed tier to a trainee-facing label', () => {
+    expect(describeLatencyTier('realtime')).toBe('Real-time');
+    expect(describeLatencyTier('acceptable')).toBe('Responsive');
+    expect(describeLatencyTier('slow')).toBe('Slow');
+  });
+
+  it('never surfaces the banned "AI" token in any label', () => {
+    for (const tier of ['realtime', 'acceptable', 'slow'] as const) {
+      expect(describeLatencyTier(tier)).not.toMatch(/\bAI\b/);
+    }
+  });
+});
+
+describe('latencyBadge', () => {
+  it('builds a labelled badge with one-decimal seconds from a real-time turn', () => {
+    const badge = latencyBadge(classifyTurnLatency(91, 640));
+    expect(badge).toEqual({
+      tier: 'realtime',
+      label: 'Real-time',
+      detail: '0.1s to first reply',
+    });
+  });
+
+  it('carries the tier and rounded detail for a slow (half-speed) turn', () => {
+    const badge = latencyBadge(classifyTurnLatency(2400, 3000));
+    expect(badge.tier).toBe('slow');
+    expect(badge.label).toBe('Slow');
+    expect(badge.detail).toBe('2.4s to first reply');
+  });
+})

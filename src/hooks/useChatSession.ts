@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Message, SimulationSession as Session } from '@/types';
 import { splitSpeechChunks } from '@/lib/speech';
+import type { TurnTiming } from '@/lib/latency';
 
 export interface ChatSessionState {
   session: Session | null;
@@ -20,6 +21,13 @@ export interface ChatSessionState {
   ended: boolean;
   /** Full text of the most recent AI message — consumed by voice mode for TTS */
   lastAiMessage: string | null;
+  /**
+   * Felt-speed timing of the most recent completed reply turn (R-057), as
+   * emitted by `/api/chat` on the `done` / `session_ending` events. `null`
+   * until the first reply lands. Surfaced in the chat UI so the speed the
+   * `[chat] latency` log measures is felt by the trainee, not hidden in logs.
+   */
+  lastTiming: TurnTiming | null;
   /**
    * Complete, speak-ready sentence chunks, appended in order as the reply
    * streams in. Voice mode speaks each entry the moment it lands so the first
@@ -41,6 +49,7 @@ export function useChatSession(sessionId: string): ChatSessionState {
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
   const [lastAiMessage, setLastAiMessage] = useState<string | null>(null);
+  const [lastTiming, setLastTiming] = useState<TurnTiming | null>(null);
   const [speechChunks, setSpeechChunks] = useState<string[]>([]);
   // Chars of the current reply already emitted as speech chunks (survives
   // re-renders; threaded through splitSpeechChunks across SSE frames).
@@ -158,6 +167,7 @@ export function useChatSession(sessionId: string): ChatSessionState {
                   };
                   setMessages(prev => [...prev, aiMsg]);
                   setLastAiMessage(data.content);
+                  if (data.timing) setLastTiming(data.timing as TurnTiming);
                 } else if (data.type === 'session_ending' && !responseProcessed) {
                   responseProcessed = true;
                   // Clear streaming text first
@@ -172,6 +182,7 @@ export function useChatSession(sessionId: string): ChatSessionState {
                   };
                   setMessages(prev => [...prev, aiMsg]);
                   setLastAiMessage(data.content);
+                  if (data.timing) setLastTiming(data.timing as TurnTiming);
                 } else if (data.type === 'session_ended') {
                   const updated: Session = await fetch(
                     `/api/chat?sessionId=${sessionId}`
@@ -220,6 +231,7 @@ export function useChatSession(sessionId: string): ChatSessionState {
     error,
     ended,
     lastAiMessage,
+    lastTiming,
     speechChunks,
     sendMessage,
     endConversation,
