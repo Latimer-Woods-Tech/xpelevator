@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { Criteria, JobTitle, Scenario } from '@/types';
-import type { PackStatus } from '@/lib/scenario-packs';
+import type { PackStatus, ScenarioUpgradeItem, UpgradePreviewCounts } from '@/lib/scenario-packs';
+import { upgradeActionLabel, summarizeUpgradeCounts } from '@/lib/scenario-packs';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 // (Criteria, JobTitle, Scenario imported from @/types)
@@ -1015,12 +1016,21 @@ const PACK_STATE_BADGE: Record<PackStatus['state'], { label: string; cls: string
   upgrade_available: { label: 'Upgrade available', cls: 'bg-amber-900/40 text-amber-300 border-amber-700/50' },
 };
 
+type PackUpgradePreview = {
+  targetVersion: number | null;
+  counts: UpgradePreviewCounts;
+  items: ScenarioUpgradeItem[];
+};
+
 function ScenarioPacksTab() {
   const [packs, setPacks] = useState<PackStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  // Per-pack dry-run preview (R-062): fetched on demand, cleared on commit/cancel.
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PackUpgradePreview | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -1039,8 +1049,48 @@ function ScenarioPacksTab() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const act = async (packId: string, action: 'import' | 'upgrade', confirmMsg: string) => {
-    if (!confirm(confirmMsg)) return;
+  // Fetch the dry-run audit (no writes) so the operator sees the exact per-scenario
+  // drift before committing — replaces the old blind confirm() on upgrade (R-062).
+  const previewUpgrade = async (packId: string) => {
+    setBusyId(packId);
+    setPreviewId(packId);
+    setPreview(null);
+    setNotes((n) => ({ ...n, [packId]: '' }));
+    try {
+      const res = await fetch('/api/scenario-packs/upgrade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packId, dryRun: true }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPreviewId(null);
+        setNotes((n) => ({ ...n, [packId]: `Failed: ${(body as { error?: string }).error || res.statusText}` }));
+        return;
+      }
+      const b = body as { targetVersion?: number | null; counts?: UpgradePreviewCounts; items?: ScenarioUpgradeItem[] };
+      setPreview({
+        targetVersion: b.targetVersion ?? null,
+        counts: b.counts ?? { update: 0, insert: 0, unchanged: 0, orphaned: 0 },
+        items: b.items ?? [],
+      });
+    } catch (e) {
+      setPreviewId(null);
+      setNotes((n) => ({ ...n, [packId]: `Failed: ${e instanceof Error ? e.message : 'Unknown error'}` }));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const cancelPreview = () => {
+    setPreviewId(null);
+    setPreview(null);
+  };
+
+  // confirmMsg === null skips the blocking confirm() — used when the operator has
+  // already reviewed the dry-run preview and clicks Confirm inside it.
+  const act = async (packId: string, action: 'import' | 'upgrade', confirmMsg: string | null) => {
+    if (confirmMsg !== null && !confirm(confirmMsg)) return;
     setBusyId(packId);
     setNotes((n) => ({ ...n, [packId]: '' }));
     try {
@@ -1053,6 +1103,11 @@ function ScenarioPacksTab() {
       if (!res.ok) {
         setNotes((n) => ({ ...n, [packId]: `Failed: ${(body as { error?: string }).error || res.statusText}` }));
         return;
+      }
+      if (action === 'upgrade') {
+        // Committed — dismiss any open preview for this pack.
+        setPreviewId((cur) => (cur === packId ? null : cur));
+        setPreview((cur) => (previewId === packId ? null : cur));
       }
       if (action === 'import') {
         const count = (body as { scenarios?: { created?: number } }).scenarios?.created;
@@ -1128,11 +1183,11 @@ function ScenarioPacksTab() {
                     )}
                     {p.state === 'upgrade_available' && (
                       <button
-                        onClick={() => act(p.packId, 'upgrade', `Upgrade "${p.packName}"? This re-syncs ${p.drift.update} updated and ${p.drift.insert} new scenarios from the current library. Scenarios you authored are untouched.`)}
+                        onClick={() => previewUpgrade(p.packId)}
                         disabled={busy}
                         className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                       >
-                        {busy ? 'Upgrading…' : 'Upgrade'}
+                        {busy && previewId === p.packId ? 'Loading…' : 'Preview changes'}
                       </button>
                     )}
                     {p.state === 'up_to_date' && (
@@ -1140,6 +1195,44 @@ function ScenarioPacksTab() {
                     )}
                   </div>
                 </div>
+                {previewId === p.packId && preview && (
+                  <div className="mt-3 border-t border-slate-700/60 pt-3">
+                    <div className="text-xs font-medium text-slate-200 mb-2">
+                      Preview — upgrade to version {preview.targetVersion ?? '?'}
+                    </div>
+                    <p className="text-xs text-slate-400 mb-3">{summarizeUpgradeCounts(preview.counts)}</p>
+                    <ul className="space-y-1 mb-3 max-h-64 overflow-y-auto">
+                      {preview.items.map((it) => {
+                        const a = upgradeActionLabel(it.action);
+                        return (
+                          <li key={`${it.action}:${it.sourceScenarioKey}`} className="flex items-center gap-2 text-xs">
+                            <span className={`px-2 py-0.5 rounded-full border shrink-0 ${a.cls}`}>{a.label}</span>
+                            <span className="text-slate-300 truncate">{it.name}</span>
+                            {it.action === 'update' && (
+                              <span className="text-slate-500 shrink-0">v{it.fromVersion ?? '—'} → v{it.toVersion ?? '—'}</span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => act(p.packId, 'upgrade', null)}
+                        disabled={busy || preview.counts.update + preview.counts.insert === 0}
+                        className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                      >
+                        {busy && previewId === p.packId ? 'Upgrading…' : 'Confirm upgrade'}
+                      </button>
+                      <button
+                        onClick={cancelPreview}
+                        disabled={busy}
+                        className="border border-slate-600 hover:border-slate-500 disabled:opacity-50 text-slate-300 px-4 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {notes[p.packId] && (
                   <div className="text-xs text-slate-300 mt-3 border-t border-slate-700/60 pt-3">{notes[p.packId]}</div>
                 )}
