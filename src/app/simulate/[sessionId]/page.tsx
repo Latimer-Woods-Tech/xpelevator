@@ -23,6 +23,7 @@ export default function SimulationPage() {
     error,
     ended,
     speechChunks,
+    lastTiming,
     loading,
     sendMessage,
     endConversation,
@@ -158,6 +159,7 @@ export default function SimulationPage() {
     streamingText,
     sending,
     error,
+    lastTiming,
     sendMessage,
     endConversation,
   };
