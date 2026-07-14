@@ -1,31 +1,19 @@
-// ── Postgres client for Cloudflare Workers ───────────────────────────────────
+// ── Neon HTTP database client for Cloudflare Workers ────────────────────────
 //
-// postgres.js over TCP (cloudflare:sockets via nodejs_compat). Speaks the same
-// tagged-template interface the previous Neon HTTP driver exposed, so call
-// sites are unchanged. Works against any Postgres origin — the self-hosted
-// OCI pair or Neon — selected purely by DATABASE_URL.
+// Uses Neon's native HTTP client which is fully edge-compatible and has no
+// Node.js filesystem dependencies. This completely bypasses Prisma to avoid
+// the fs.readdir issues in Cloudflare Workers.
 //
-// Workers must not share a socket client across requests ("Cannot perform I/O
-// on behalf of a different request"), so each query opens a short-lived
-// single-connection client and closes it after the result resolves.
-import postgres from 'postgres';
+// Reference: https://neon.tech/docs/serverless/serverless-driver
+import { neon } from '@neondatabase/serverless';
 
 const url = process.env.DATABASE_URL?.replace(/\r/g, '');
 if (!url) throw new Error('DATABASE_URL is not set');
 
+// Create HTTP-based query function
+export const sql = neon(url);
+
 // Type-safe query helpers
 export type QueryResult<T = any> = T[];
-
-export const sql = async <T = any>(
-  strings: TemplateStringsArray,
-  ...values: unknown[]
-): Promise<T[]> => {
-  const client = postgres(url, { max: 1, prepare: false });
-  try {
-    return (await client(strings as TemplateStringsArray, ...(values as never[]))) as unknown as T[];
-  } finally {
-    client.end({ timeout: 2 }).catch(() => {});
-  }
-};
 
 export default sql;
