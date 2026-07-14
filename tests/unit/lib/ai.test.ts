@@ -389,6 +389,26 @@ describe('lib/ai — scoreSession', () => {
     expect(result[0].criteriaName).toBe('Empathy');
   });
 
+  it('scores with the strong (70B) model — trust-critical, off the latency path (R-061)', async () => {
+    // Scoring is async + post-session (not a live turn), and the /10 scores must
+    // be defensible to managers. The judge therefore uses the realism (70B) model,
+    // NOT the fast 8B tier the customer turns use. This is the fast-turn/strong-
+    // score split the founder-delegate recommended (#16, 2026-07-13).
+    fetchMock.mockResolvedValueOnce(
+      completionResponse(JSON.stringify([
+        { criteriaIndex: 1, score: 7, justification: 'Clear and specific.' },
+      ]))
+    );
+
+    await scoreSession([{ role: 'AGENT', content: 'Hello!' }], [SAMPLE_CRITERIA[0]]);
+
+    const [, init] = fetchMock.mock.calls[0];
+    const sent = JSON.parse((init as RequestInit).body as string);
+    expect(sent.model).toBe('llama-3.3-70b-versatile');
+    expect(sent.model).not.toBe('llama-3.1-8b-instant');
+    expect(sent.stream).not.toBe(true); // scoring is a single non-streaming judgment
+  });
+
   it('handles JSON wrapped in markdown code fences', async () => {
     const raw = '```json\n[{"criteriaIndex":1,"score":7,"justification":"Good."}]\n```';
     fetchMock.mockResolvedValueOnce(completionResponse(raw));
