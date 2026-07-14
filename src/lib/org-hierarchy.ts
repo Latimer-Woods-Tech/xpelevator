@@ -77,6 +77,47 @@ export function canAccessOrgReport(
   return viewerOrg === (target.parentOrgId ?? null); // operator owns this client
 }
 
+/** Outcome of resolving which operator a portfolio roll-up should cover. */
+export type OperatorRollupResolution =
+  | { ok: true; operatorOrgId: string }
+  | { ok: false; status: 400 | 403 };
+
+/**
+ * Resolve the operator whose CLIENT orgs a portfolio roll-up report
+ * (`?scope=clients`) should span, and authorize the caller for it.
+ *
+ * The roll-up is the operator's book-of-clients view — every client org beneath
+ * one operator, in a single export. Who that operator is depends on the caller:
+ *   - An OPERATOR admin rolls up their OWN clients. `operatorOrgIdParam` is
+ *     optional; if given it MUST equal their own org, else 403 (no peeking at
+ *     another operator's portfolio).
+ *   - A PLATFORM admin (ADMIN with no org) has no operator of their own, so they
+ *     MUST name one via `operatorOrgIdParam`; absent → 400.
+ *   - A non-admin never reaches a roll-up → 403 (the route also gates ADMIN
+ *     upstream; this keeps the rule self-contained and testable).
+ *
+ * Returns the resolved `operatorOrgId` to scope the client query, or a status to
+ * return. `null`/`undefined` orgIds normalise so a DB `null` and an absent field
+ * compare equal.
+ */
+export function resolveOperatorRollup(
+  viewer: OrgManager,
+  operatorOrgIdParam?: string | null
+): OperatorRollupResolution {
+  if (viewer.role !== 'ADMIN') return { ok: false, status: 403 };
+  const viewerOrg = viewer.orgId ?? null;
+  const param = operatorOrgIdParam || null;
+
+  if (viewerOrg === null) {
+    // Platform admin: must name the operator to roll up.
+    return param ? { ok: true, operatorOrgId: param } : { ok: false, status: 400 };
+  }
+  // Operator admin: their own clients only. A mismatched explicit param is a
+  // cross-operator attempt → 403.
+  if (param && param !== viewerOrg) return { ok: false, status: 403 };
+  return { ok: true, operatorOrgId: viewerOrg };
+}
+
 /**
  * Turn a human org name into a URL-safe slug: lowercased, non-alphanumerics
  * collapsed to single hyphens, no leading/trailing hyphen.

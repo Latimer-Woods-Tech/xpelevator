@@ -220,14 +220,40 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
   return (
     <div className="space-y-8">
       <div className="bg-blue-950/40 border border-blue-800/30 rounded-xl px-5 py-4">
-        <div className="font-semibold text-blue-200 text-sm">
-          {isNew ? 'Become an operator' : 'Your client workspaces'}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="font-semibold text-blue-200 text-sm">
+              {isNew ? 'Become an operator' : 'Your client workspaces'}
+            </div>
+            <p className="text-slate-400 text-xs mt-1 leading-relaxed">
+              {isNew
+                ? 'Create your first client workspace to start operating. Each client is an isolated org you own — you buy seats wholesale and set your own retail.'
+                : 'The client organisations you own. Each is an isolated workspace with its own trainees, scenarios, and scores.'}
+            </p>
+          </div>
+          {/* Portfolio roll-up — every client's sessions in one export, labelled
+              by org. Server-scoped by `resolveOperatorRollup` to this operator's
+              own clients. Only meaningful once at least one client exists. */}
+          {!isNew && clients !== null && clients.length > 0 ? (
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-slate-500 text-xs mr-1">All clients</span>
+              <a
+                href="/api/reports/sessions?scope=clients"
+                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+                title="Download every client's sessions as one CSV"
+              >
+                CSV
+              </a>
+              <a
+                href="/api/reports/sessions?scope=clients&format=pdf"
+                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+                title="Download every client's sessions as one PDF"
+              >
+                PDF
+              </a>
+            </div>
+          ) : null}
         </div>
-        <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-          {isNew
-            ? 'Create your first client workspace to start operating. Each client is an isolated org you own — you buy seats wholesale and set your own retail.'
-            : 'The client organisations you own. Each is an isolated workspace with its own trainees, scenarios, and scores.'}
-        </p>
       </div>
 
       {/* Create */}

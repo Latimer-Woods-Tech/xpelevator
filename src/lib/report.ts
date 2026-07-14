@@ -32,6 +32,12 @@ export interface ReportSession {
   scenario: string | null;
   scores: ReportScore[];
   /**
+   * Owning client-org name — populated only by the operator portfolio roll-up
+   * (`?scope=clients`), where sessions span many client orgs and must be
+   * attributed. Absent/`null` on the single-org report, which never renders it.
+   */
+  organization?: string | null;
+  /**
    * Raw end-of-session scoring outcome (`SCORED` | `FAILED` | `NOT_SCORABLE`),
    * or `null`/`undefined` for sessions completed before the column existed.
    */
@@ -205,6 +211,93 @@ export function sessionsToPdf(sessions: readonly ReportSession[]): Uint8Array {
     title: 'XPElevator — Session Report',
     subtitle: `Generated ${generated} · ${count} completed session${count === 1 ? '' : 's'} · score shown is the weighted average /10`,
     columns: PDF_COLUMNS,
+    rows,
+  });
+}
+
+// ─── Operator portfolio roll-up ──────────────────────────────────────────────
+//
+// The single-client artifacts above answer "how is THIS client doing?". The
+// roll-up answers "how is my whole book of clients doing?" — one export spanning
+// every client org beneath an operator. It reuses the same per-session weighting
+// and scoring logic; the only shape difference is a leading `Organization`
+// column that attributes each session to its client org (the whole point of a
+// portfolio view). The single-org columns above are left byte-stable — this is a
+// distinct, additive column set, never a mutation of `REPORT_COLUMNS`.
+
+/** Roll-up column order — the single-org columns, prefixed with `Organization`. */
+export const ROLLUP_COLUMNS: readonly string[] = ['Organization', ...REPORT_COLUMNS];
+
+/** A session's owning client-org name for the roll-up (`(unassigned)` if null). */
+function reportOrg(session: ReportSession): string {
+  return session.organization ?? '(unassigned)';
+}
+
+/** Serialise sessions to the operator portfolio roll-up CSV string. */
+export function rollupSessionsToCsv(sessions: readonly ReportSession[]): string {
+  const rows: CsvCell[][] = sessions.map((session) => {
+    const r = sessionToReportRow(session);
+    return [
+      reportOrg(session),
+      r.sessionId,
+      r.date,
+      r.trainee,
+      r.jobTitle,
+      r.scenario,
+      r.modality,
+      r.criteriaScored,
+      r.averageScore,
+      r.weightedAverage,
+      r.scoring,
+    ];
+  });
+  return toCsv(ROLLUP_COLUMNS, rows);
+}
+
+/**
+ * Column layout for the roll-up PDF. Widths are PDF points and sum to 532 — the
+ * full printable width of a US-Letter page at a 40pt margin — after trimming the
+ * single-org widths to make room for the leading `Organization` column.
+ */
+const ROLLUP_PDF_COLUMNS: readonly PdfColumn[] = [
+  { header: 'Organization', width: 70 },
+  { header: 'Session', width: 48 },
+  { header: 'Date', width: 52 },
+  { header: 'Trainee', width: 78 },
+  { header: 'Job Title', width: 70 },
+  { header: 'Scenario', width: 70 },
+  { header: 'Mode', width: 30 },
+  { header: '#', width: 16 },
+  { header: 'Avg', width: 28 },
+  { header: 'Wtd', width: 30 },
+  { header: 'Scoring', width: 40 },
+];
+
+/** Serialise sessions to the operator portfolio roll-up PDF (raw bytes). */
+export function rollupSessionsToPdf(sessions: readonly ReportSession[]): Uint8Array {
+  const rows = sessions.map((session) => {
+    const r = sessionToReportRow(session);
+    return [
+      reportOrg(session),
+      r.sessionId.slice(0, 8),
+      r.date,
+      r.trainee,
+      r.jobTitle,
+      r.scenario,
+      r.modality,
+      r.criteriaScored,
+      pdfScore(r.averageScore),
+      pdfScore(r.weightedAverage),
+      r.scoring,
+    ];
+  });
+
+  const generated = new Date().toISOString().slice(0, 10);
+  const count = rows.length;
+  return renderTablePdf({
+    title: 'XPElevator — Portfolio Report',
+    subtitle: `Generated ${generated} · ${count} completed session${count === 1 ? '' : 's'} across your client organisations · score shown is the weighted average /10`,
+    columns: ROLLUP_PDF_COLUMNS,
     rows,
   });
 }
