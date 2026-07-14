@@ -173,6 +173,24 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // Optional report date window (the operator's "monthly cut", R-065). Empty =
+  // all-time. Threaded onto every export link below via `withWindow`; the server
+  // validates the dates and narrows the report to sessions completed in-range.
+  const [since, setSince] = useState('');
+  const [until, setUntil] = useState('');
+
+  // Append the current `?since`/`?until` window to a report URL (all report URLs
+  // already carry a query string, so `&` is always correct here).
+  const withWindow = useCallback(
+    (url: string): string => {
+      const parts = [
+        since ? `since=${encodeURIComponent(since)}` : '',
+        until ? `until=${encodeURIComponent(until)}` : '',
+      ].filter(Boolean);
+      return parts.length ? `${url}&${parts.join('&')}` : url;
+    },
+    [since, until]
+  );
 
   const loadClients = useCallback(() => {
     setListError(false);
@@ -238,14 +256,14 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-slate-500 text-xs mr-1">All clients</span>
               <a
-                href="/api/reports/sessions?scope=clients"
+                href={withWindow('/api/reports/sessions?scope=clients')}
                 className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
                 title="Download every client's sessions as one CSV"
               >
                 CSV
               </a>
               <a
-                href="/api/reports/sessions?scope=clients&format=pdf"
+                href={withWindow('/api/reports/sessions?scope=clients&format=pdf')}
                 className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
                 title="Download every client's sessions as one PDF"
               >
@@ -277,6 +295,51 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
       </form>
       {createError ? <p className="text-red-400 text-sm -mt-4">{createError}</p> : null}
 
+      {/* Report date window — the "monthly cut" (R-065). Applies to every export
+          link (portfolio + per-client) via `withWindow`. Empty = all-time. */}
+      {!isNew && clients !== null && clients.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+          <span className="text-slate-500">Report window</span>
+          <label className="flex items-center gap-1.5">
+            <span className="sr-only">From date</span>
+            <input
+              type="date"
+              value={since}
+              max={until || undefined}
+              onChange={e => setSince(e.target.value)}
+              aria-label="Report from date"
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200 transition-colors"
+            />
+          </label>
+          <span className="text-slate-500">to</span>
+          <label className="flex items-center gap-1.5">
+            <span className="sr-only">To date</span>
+            <input
+              type="date"
+              value={until}
+              min={since || undefined}
+              onChange={e => setUntil(e.target.value)}
+              aria-label="Report to date"
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200 transition-colors"
+            />
+          </label>
+          {since || until ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSince('');
+                setUntil('');
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              Clear
+            </button>
+          ) : (
+            <span className="text-slate-600">all-time</span>
+          )}
+        </div>
+      ) : null}
+
       {/* List */}
       {listError ? (
         <p className="text-slate-400 text-sm">Could not load your clients. Refresh to try again.</p>
@@ -303,14 +366,14 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
                     client. Scoped server-side by `canAccessOrgReport`. */}
                 <div className="flex items-center gap-2">
                   <a
-                    href={`/api/reports/sessions?clientOrgId=${encodeURIComponent(c.id)}`}
+                    href={withWindow(`/api/reports/sessions?clientOrgId=${encodeURIComponent(c.id)}`)}
                     className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
                     title={`Download ${c.name} sessions as CSV`}
                   >
                     CSV
                   </a>
                   <a
-                    href={`/api/reports/sessions?clientOrgId=${encodeURIComponent(c.id)}&format=pdf`}
+                    href={withWindow(`/api/reports/sessions?clientOrgId=${encodeURIComponent(c.id)}&format=pdf`)}
                     className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
                     title={`Download ${c.name} sessions as PDF`}
                   >

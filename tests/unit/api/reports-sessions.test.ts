@@ -235,3 +235,86 @@ describe('GET /api/reports/sessions — ?scope=clients portfolio roll-up', () =>
     expect(operatorScope).toBe(OPERATOR);
   });
 });
+
+describe('GET /api/reports/sessions — ?since/?until date window (R-065)', () => {
+  /** The date bounds the query composed onto the scope fragment. */
+  let sinceBound: unknown;
+  let untilBound: unknown;
+
+  /**
+   * Route sql for the own-org path WITH a date window: the inner `ss.org_id =`
+   * scope fragment, then the wrapped `ss.ended_at >=` / `ss.ended_at <` bound
+   * fragments (their trailing value — the date — captured), then the main query.
+   */
+  function routeWindowSql() {
+    scopedTo = null;
+    sinceBound = null;
+    untilBound = null;
+    sqlMock.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
+      const text = Array.isArray(strings) ? strings.join(' ') : String(strings);
+      if (/ss\.ended_at >=/.test(text)) {
+        sinceBound = values[values.length - 1]; // the date; values[0] = nested where
+        return Promise.resolve([]);
+      }
+      if (/ss\.ended_at </.test(text)) {
+        untilBound = values[values.length - 1];
+        return Promise.resolve([]);
+      }
+      if (/ss\.org_id =/.test(text)) {
+        scopedTo = values[0];
+        return Promise.resolve([]);
+      }
+      if (/FROM simulation_sessions/.test(text)) {
+        return Promise.resolve([]);
+      }
+      throw new Error(`unmatched sql in test: ${text}`);
+    });
+  }
+
+  it('a malformed date → 400 before any DB read', async () => {
+    asAdmin(OPERATOR);
+    routeWindowSql();
+    const res = await GET(req('?since=not-a-date'));
+    expect(res.status).toBe(400);
+    expect(sqlMock).not.toHaveBeenCalled();
+  });
+
+  it('since after until → 400 before any DB read', async () => {
+    asAdmin(OPERATOR);
+    routeWindowSql();
+    const res = await GET(req('?since=2026-08-01&until=2026-07-01'));
+    expect(res.status).toBe(400);
+    expect(sqlMock).not.toHaveBeenCalled();
+  });
+
+  it('a full window → 200, still own-org scoped, with both date bounds composed', async () => {
+    asAdmin(OPERATOR);
+    routeWindowSql();
+    const res = await GET(req('?since=2026-07-01&until=2026-07-31'));
+    expect(res.status).toBe(200);
+    // Tenant scope is preserved — the window only narrows it.
+    expect(scopedTo).toBe(OPERATOR);
+    expect(sinceBound).toBe('2026-07-01');
+    // `until` is applied as the EXCLUSIVE next-day bound (whole-day cover).
+    expect(untilBound).toBe('2026-08-01');
+  });
+
+  it('since only → lower bound composed, no upper bound', async () => {
+    asAdmin(OPERATOR);
+    routeWindowSql();
+    const res = await GET(req('?since=2026-07-01'));
+    expect(res.status).toBe(200);
+    expect(sinceBound).toBe('2026-07-01');
+    expect(untilBound).toBe(null);
+  });
+
+  it('no window → all-time (neither bound fragment runs)', async () => {
+    asAdmin(OPERATOR);
+    routeWindowSql();
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(scopedTo).toBe(OPERATOR);
+    expect(sinceBound).toBe(null);
+    expect(untilBound).toBe(null);
+  });
+});
