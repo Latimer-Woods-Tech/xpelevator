@@ -5,9 +5,13 @@
 name = "xpelevator-sim"
 compatibility_date = "2025-01-01"
 
-# nodejs_compat is required for Neon serverless driver
+# nodejs_compat is required for the postgres.js driver
 # global_fetch_strictly_public is required by OpenNext CF 1.x
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "5b62381d252c4c0abb0a24b2d7a27d87"
 
 # Cloudflare Pages build output directory (advanced mode). We deploy the generated
 # assets folder so static files are at the root (/_next/...), and include _worker.js
@@ -35,3 +39,7 @@ compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 [env.preview.vars]
 PRISMA_CLIENT_ENGINE_TYPE = "wasm"
+
+[[env.preview.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "5b62381d252c4c0abb0a24b2d7a27d87"
