@@ -13,6 +13,7 @@ function turn(overrides: Partial<LatencyTurn> = {}): LatencyTurn {
     tier: 'realtime',
     model: 'llama-fast',
     routeReason: 'difficulty=easy→fast',
+    modality: 'CHAT',
     ...overrides,
   };
 }
@@ -55,6 +56,7 @@ describe('summarizeLatency — empty', () => {
     expect(s.tierBreakdown).toEqual({ realtime: 0, acceptable: 0, slow: 0 });
     expect(s.byModel).toEqual([]);
     expect(s.byRouteReason).toEqual([]);
+    expect(s.byModality).toEqual([]);
   });
 });
 
@@ -112,12 +114,25 @@ describe('summarizeLatency — grouping', () => {
 
   it('folds null keys into (unknown) instead of dropping them', () => {
     const s = summarizeLatency([
-      turn({ model: null, routeReason: null }),
+      turn({ model: null, routeReason: null, modality: null }),
       turn({ model: 'fast' }),
     ]);
     expect(s.measuredTurns).toBe(2);
     expect(s.byModel.find((g) => g.key === '(unknown)')?.turns).toBe(1);
     expect(s.byRouteReason.find((g) => g.key === '(unknown)')?.turns).toBe(1);
+    expect(s.byModality.find((g) => g.key === '(unknown)')?.turns).toBe(1);
+  });
+
+  it('splits by modality (CHAT/VOICE/PHONE), most-measured first', () => {
+    const turns: LatencyTurn[] = [
+      turn({ modality: 'CHAT', ttftMs: 100, tier: 'realtime' }),
+      turn({ modality: 'CHAT', ttftMs: 200, tier: 'realtime' }),
+      turn({ modality: 'PHONE', ttftMs: 1500, tier: 'slow' }),
+    ];
+    const s = summarizeLatency(turns);
+    expect(s.byModality.map((g) => g.key)).toEqual(['CHAT', 'PHONE']);
+    expect(s.byModality[0]).toMatchObject({ turns: 2, avgTtftMs: 150, slowPct: 0 });
+    expect(s.byModality[1]).toMatchObject({ turns: 1, avgTtftMs: 1500, slowPct: 100 });
   });
 });
 
