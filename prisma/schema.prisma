@@ -173,6 +173,17 @@ model ChatMessage {
   content   String
   timestamp DateTime @default(now())
 
+  // Per-turn conversation-latency telemetry (R-066). Populated on the CUSTOMER
+  // reply turn from the same measurement R-057 logs + R-060 shows in-UI; NULL on
+  // AGENT rows and on pre-instrumentation history. Turns the ephemeral live badge
+  // into a durable, queryable record so felt speed can be tuned over time and any
+  // future model/voice change has a benchmark to beat.
+  ttftMs      Int?    @map("ttft_ms")       // time-to-first-token (perceived gap)
+  totalMs     Int?    @map("total_ms")      // full reply generation time
+  latencyTier String? @map("latency_tier")  // realtime | acceptable | slow
+  model       String? @map("model")         // model that generated the reply
+  routeReason String? @map("route_reason")  // why that model (difficulty->model, R-059)
+
   session   SimulationSession @relation(fields: [sessionId], references: [id])
 
   @@index([sessionId])

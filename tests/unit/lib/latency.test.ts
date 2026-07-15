@@ -14,6 +14,7 @@ import {
   classifyPhoneTurn,
   describeLatencyTier,
   latencyBadge,
+  routeReasonForDifficulty,
   ttftTier,
   TTFT_REALTIME_MS,
   TTFT_ACCEPTABLE_MS,
@@ -143,3 +144,22 @@ describe('latencyBadge', () => {
     expect(badge.detail).toBe('2.4s to first reply');
   });
 })
+;
+
+describe('routeReasonForDifficulty (R-066 telemetry token)', () => {
+  it('maps hard -> the realism model (the only non-fast route)', () => {
+    expect(routeReasonForDifficulty('hard')).toBe('difficulty=hard→realism');
+  });
+
+  it('maps easy and medium -> the fast model', () => {
+    expect(routeReasonForDifficulty('easy')).toBe('difficulty=easy→fast');
+    expect(routeReasonForDifficulty('medium')).toBe('difficulty=medium→fast');
+  });
+
+  it('mirrors the model routing: anything but "hard" is the fast tier', () => {
+    // customerModelForDifficulty returns the fast model for any non-"hard" input,
+    // so the reason token must stay on the fast route for an unexpected value too
+    // (it can never disagree with the model actually used).
+    expect(routeReasonForDifficulty('unknown')).toBe('difficulty=unknown→fast');
+  });
+});

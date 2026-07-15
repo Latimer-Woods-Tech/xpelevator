@@ -7,7 +7,7 @@ import {
   customerModelForDifficulty,
   resolveScenarioDifficulty,
 } from '@/lib/ai';
-import { classifyTurnLatency } from '@/lib/latency';
+import { classifyTurnLatency, routeReasonForDifficulty } from '@/lib/latency';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
@@ -143,9 +143,11 @@ export async function POST(request: Request) {
     // Conversation-speed lever: pick the model tier by scenario difficulty. Hard
     // scenarios keep the higher-realism 70B model; easy/medium use the ~3x faster
     // 8B model so the customer's reply streams back closer to real-time.
-    const customerModel = customerModelForDifficulty(
-      resolveScenarioDifficulty(session.scenario.script)
-    );
+    const difficulty = resolveScenarioDifficulty(session.scenario.script);
+    const customerModel = customerModelForDifficulty(difficulty);
+    // Stable telemetry token recording WHY this model was chosen (R-066), stored
+    // alongside the turn's latency on the reply row so a slow turn explains itself.
+    const routeReason = routeReasonForDifficulty(difficulty);
     console.log('[Chat API] Customer model:', customerModel);
     console.log('[Chat API] System prompt length:', systemPrompt.length);
     console.log('[Chat API] System prompt preview:', systemPrompt.substring(0, 150) + '...');
@@ -207,10 +209,16 @@ export async function POST(request: Request) {
           const isResolved = /\[RESOLVED\]/i.test(fullResponse);
           const cleanedResponse = fullResponse.replace(/\[RESOLVED\]\s*$/i, '').trim();
 
-          // Save the full AI message to DB
+          // Save the full AI message to DB, stamping this turn's latency telemetry
+          // (R-066) so the felt-speed metric becomes a durable, queryable record —
+          // not just a live badge (R-060) + an ephemeral log line (R-057).
           await sql`
-            INSERT INTO chat_messages (id, session_id, role, content, timestamp)
-            VALUES (gen_random_uuid(), ${sessionId}, 'CUSTOMER', ${cleanedResponse}, NOW())
+            INSERT INTO chat_messages
+              (id, session_id, role, content, timestamp,
+               ttft_ms, total_ms, latency_tier, model, route_reason)
+            VALUES
+              (gen_random_uuid(), ${sessionId}, 'CUSTOMER', ${cleanedResponse}, NOW(),
+               ${timing.ttftMs}, ${timing.totalMs}, ${timing.tier}, ${customerModel}, ${routeReason})
           `;
 
           if (isResolved) {
