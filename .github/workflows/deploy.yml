@@ -141,25 +141,53 @@ jobs:
             --production-branch=main \
             || echo "Project already exists — continuing."
 
-      - name: Set Pages project secrets (production + preview)
+      - name: Set Pages project secrets (production)
         # printf '%s' (NOT echo) avoids the trailing-newline trap on secret values.
-        #
-        # Cloudflare Pages keeps SEPARATE secret stores for the `production` and
-        # `preview` environments. The production deployment (branded domain)
-        # reads `production`; the pre-promotion smoke runs a `verify-preview`
-        # deployment, which is a PREVIEW-environment deploy and reads `preview`.
-        # If the preview secrets are unset the preview build boots without
-        # DATABASE_URL/GROQ/AUTH_SECRET — env validation throws and every route
-        # 503s — which fails the smoke on a perfectly good build (observed:
-        # run 29393604443). Set BOTH environments to the same values; the
-        # preview build only ever runs a read-only DB canary against the shared
-        # DB, so it holds no privilege the production deploy doesn't already.
+        # wrangler v3 `pages secret put` ALWAYS targets the production
+        # environment (it has no --environment flag — proven by run 29394010180:
+        # "Unknown argument: environment"). Production is exactly what the
+        # promoted `--branch=main` deploy reads, so this is correct as-is.
         run: |
-          for ENVN in production preview; do
-            printf '%s' "$GROQ_API_KEY" | npx wrangler pages secret put GROQ_API_KEY --project-name="$CF_PROJECT" --environment="$ENVN"
-            printf '%s' "$DATABASE_URL" | npx wrangler pages secret put DATABASE_URL --project-name="$CF_PROJECT" --environment="$ENVN"
-            printf '%s' "$AUTH_SECRET"  | npx wrangler pages secret put AUTH_SECRET  --project-name="$CF_PROJECT" --environment="$ENVN"
-          done
+          printf '%s' "$GROQ_API_KEY"  | npx wrangler pages secret put GROQ_API_KEY  --project-name="$CF_PROJECT"
+          printf '%s' "$DATABASE_URL"  | npx wrangler pages secret put DATABASE_URL  --project-name="$CF_PROJECT"
+          printf '%s' "$AUTH_SECRET"   | npx wrangler pages secret put AUTH_SECRET   --project-name="$CF_PROJECT"
+
+      - name: Set Pages PREVIEW-environment secrets (Pages REST API)
+        # The pre-promotion smoke runs a `verify-preview` (preview-environment)
+        # deployment. Cloudflare Pages keeps preview secrets SEPARATE from
+        # production, and wrangler v3 `pages secret put` can't target preview
+        # (no --environment flag). So set them on the project's preview
+        # deployment_config via the Pages REST API — a partial PATCH that touches
+        # ONLY `deployment_configs.preview.env_vars`, never production. Without
+        # this the preview build boots with no DATABASE_URL/GROQ/AUTH_SECRET,
+        # env validation throws, and /api/health 503s — failing the smoke on a
+        # healthy build (run 29393604443). Values come from GitHub-masked env and
+        # are written to a 0600 temp file via jq (never echoed), so no secret
+        # reaches the log. The preview build only ever runs a read-only DB canary
+        # against the shared DB — no privilege production doesn't already have.
+        run: |
+          set -e
+          umask 077
+          jq -n \
+            --arg db "$DATABASE_URL" --arg groq "$GROQ_API_KEY" --arg auth "$AUTH_SECRET" \
+            '{deployment_configs:{preview:{env_vars:{
+               DATABASE_URL:{type:"secret_text",value:$db},
+               GROQ_API_KEY:{type:"secret_text",value:$groq},
+               AUTH_SECRET:{type:"secret_text",value:$auth}
+             }}}}' > /tmp/preview-cfg.json
+          code=$(curl -s -o /tmp/cf-resp.json -w '%{http_code}' -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CF_PROJECT}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data @/tmp/preview-cfg.json || echo 000)
+          rm -f /tmp/preview-cfg.json
+          echo "Pages REST PATCH (preview env_vars) -> HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::failed to set preview-environment secrets (HTTP $code)"
+            jq -r '.errors // .' /tmp/cf-resp.json 2>/dev/null | head -c 400 || true
+            exit 1
+          fi
+          echo "✅ preview-environment secrets set via Pages REST API"
 
       # ── Preview-then-promote (fail-closed) ─────────────────────────────────
       # Root problem this fixes: `wrangler pages deploy --branch=main` promotes
