@@ -37,6 +37,8 @@ const TAG = `phase2-iso-${Date.now()}`;
 const OWNER_EMAIL = `${TAG}-owner@xpelevator.internal`;
 const INTRUDER_EMAIL = `${TAG}-intruder@xpelevator.internal`;
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 let failed = 0;
 const check = (name, ok, detail) => {
   if (ok) {
@@ -62,16 +64,16 @@ async function mintCookieHeader(userId, email) {
   return parts.join('; ');
 }
 
-async function get(path, cookie, { drain = true } = {}) {
+async function fetchStatus(path, cookie, drain, timeoutMs) {
   // fetch() resolves as soon as response headers arrive, so res.status is
   // available before any body. For SSE endpoints (?stream=true) we must NOT read
   // the body — an unprotected phone-transcript stream stays open for minutes and
-  // res.text() would block. Cancel the body instead and rely on the status. A
-  // 10s abort backstops any slow header.
+  // res.text() would block. Cancel the body instead and rely on the status. The
+  // abort timer backstops any slow header.
   const headers = {};
   if (cookie) headers.cookie = cookie;
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(`${BASE}${path}`, { method: 'GET', headers, signal: ctrl.signal });
     const status = res.status;
@@ -86,6 +88,22 @@ async function get(path, cookie, { drain = true } = {}) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function get(path, cookie, { drain = true, retries = 2, timeoutMs = 15_000 } = {}) {
+  // A transient edge cold-start can stall the FIRST byte past the abort backstop,
+  // surfacing as ERR(AbortError) on an otherwise-healthy response — a false red-X
+  // on a clean deploy, seen on the SSE ?stream=true assertion (runs #80/#164/#167).
+  // A real HTTP status returns immediately (fetch resolves on headers); only a
+  // transient ERR(...) is retried, with a short linear backoff. This never masks a
+  // genuine wrong-status failure — those are numbers and return on the first try.
+  let last;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    last = await fetchStatus(path, cookie, drain, timeoutMs);
+    if (typeof last === 'number') return last;
+    if (attempt < retries) await sleep(500 * (attempt + 1));
+  }
+  return last;
 }
 
 async function main() {
