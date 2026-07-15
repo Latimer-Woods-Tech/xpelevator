@@ -9,6 +9,10 @@ import {
   ROLLUP_COLUMNS,
   rollupSessionsToCsv,
   rollupSessionsToPdf,
+  SUMMARY_COLUMNS,
+  summarizeSessionsByOrg,
+  rollupSummaryToCsv,
+  rollupSummaryToPdf,
   type ReportSession,
 } from '@/lib/report';
 
@@ -214,5 +218,120 @@ describe('operator portfolio roll-up', () => {
     const text = new TextDecoder('latin1').decode(bytes);
     expect(text).toContain('/Count 1');
     expect(text).toContain('0 completed sessions');
+  });
+});
+
+describe('operator portfolio scorecard (per-client totals)', () => {
+  // Acme: two sessions, two distinct trainees, both scored (weighted 7.0 each).
+  const acme1: ReportSession = { ...base, id: 'a1', organization: 'Acme Retail' };
+  const acme2: ReportSession = {
+    ...base,
+    id: 'a2',
+    organization: 'Acme Retail',
+    traineeEmail: 'second@acme.test',
+  };
+  // Northwind: one scored session (weighted 10.0) + one unscored (no scores).
+  const north1: ReportSession = {
+    ...base,
+    id: 'n1',
+    organization: 'Northwind',
+    scores: [{ score: 10, criteria: { name: 'Empathy', weight: 1 } }],
+  };
+  const north2: ReportSession = {
+    ...base,
+    id: 'n2',
+    organization: 'Northwind',
+    traineeEmail: 'trainee@acme.test',
+    scores: [],
+  };
+
+  it('SUMMARY_COLUMNS is the fixed five-column totals header', () => {
+    expect(SUMMARY_COLUMNS).toEqual([
+      'Organization',
+      'Trainees',
+      'Sessions',
+      'Scored Sessions',
+      'Average Weighted Score',
+    ]);
+  });
+
+  it('aggregates per org: trainees, sessions, scored count, weighted mean', () => {
+    const rows = summarizeSessionsByOrg([acme1, north1, acme2, north2]);
+    // Ordered by org name regardless of input order.
+    expect(rows.map(r => r.organization)).toEqual(['Acme Retail', 'Northwind']);
+
+    const acme = rows[0];
+    expect(acme).toEqual({
+      organization: 'Acme Retail',
+      trainees: 2, // trainee@acme.test + second@acme.test
+      sessions: 2,
+      scoredSessions: 2,
+      averageWeighted: 7, // (7.0 + 7.0) / 2
+    });
+
+    const north = rows[1];
+    // Two sessions, one distinct trainee, only n1 scored → mean over scored only.
+    expect(north).toEqual({
+      organization: 'Northwind',
+      trainees: 1,
+      sessions: 2,
+      scoredSessions: 1,
+      averageWeighted: 10, // 10.0 over the single scored session
+    });
+  });
+
+  it('averages only the scored sessions; null when none scored', () => {
+    const orphan: ReportSession = {
+      ...base,
+      id: 'o1',
+      organization: 'Noscore Inc',
+      scores: [],
+    };
+    const [row] = summarizeSessionsByOrg([orphan]);
+    expect(row.scoredSessions).toBe(0);
+    expect(row.averageWeighted).toBeNull();
+  });
+
+  it('labels a null org as (unassigned) and ignores null trainee emails', () => {
+    const s: ReportSession = {
+      ...base,
+      id: 'u1',
+      organization: null,
+      traineeEmail: null,
+    };
+    const [row] = summarizeSessionsByOrg([s]);
+    expect(row.organization).toBe('(unassigned)');
+    expect(row.trainees).toBe(0);
+    expect(row.sessions).toBe(1);
+  });
+
+  it('CSV emits the header then one totals row per org (null avg is empty)', () => {
+    const csv = rollupSummaryToCsv([acme1, north1, north2]);
+    const lines = csv.trim().split('\r\n');
+    expect(lines[0]).toBe(SUMMARY_COLUMNS.join(','));
+    expect(lines[1]).toBe('Acme Retail,1,1,1,7');
+    expect(lines[2]).toBe('Northwind,1,2,1,10');
+  });
+
+  it('CSV leaves the average field empty for an all-unscored org', () => {
+    const s: ReportSession = { ...base, id: 'x', organization: 'Empty', scores: [] };
+    const csv = rollupSummaryToCsv([s]);
+    // organization,trainees,sessions,scored,average → trailing comma = empty avg
+    expect(csv.split('\r\n')[1]).toBe('Empty,1,1,0,');
+  });
+
+  it('PDF produces a valid Portfolio Scorecard byte stream', () => {
+    const bytes = rollupSummaryToPdf([acme1, acme2, north1]);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(new TextDecoder('latin1').decode(bytes.slice(0, 8))).toBe('%PDF-1.4');
+    const text = new TextDecoder('latin1').decode(bytes);
+    expect(text).toContain('2 client organisations');
+  });
+
+  it('PDF renders an empty scorecard (0 client organisations)', () => {
+    const bytes = rollupSummaryToPdf([]);
+    const text = new TextDecoder('latin1').decode(bytes);
+    expect(text).toContain('/Count 1');
+    expect(text).toContain('0 client organisations');
   });
 });

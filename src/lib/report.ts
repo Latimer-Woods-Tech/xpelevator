@@ -301,3 +301,131 @@ export function rollupSessionsToPdf(sessions: readonly ReportSession[]): Uint8Ar
     rows,
   });
 }
+
+// ─── Operator portfolio scorecard (per-client totals) ────────────────────────
+//
+// The roll-up above is the per-session detail — every trainee session across
+// the whole book, one row each. The scorecard is the complement an operator
+// scans first: ONE row per client org with the totals that matter to a channel
+// seller — how many trainees are active, how many sessions they've run, how many
+// scored, and the book-level average. Same authorized session set as the
+// roll-up (the route just serialises it differently — no extra query, no wider
+// access); the aggregation is pure and unit-tested here.
+
+/** Per-client roll-up totals — one row per client org in the operator's book. */
+export interface OrgSummary {
+  /** Owning client-org name (`(unassigned)` for sessions with no org). */
+  organization: string;
+  /** Distinct trainee emails seen across the org's completed sessions. */
+  trainees: number;
+  /** Completed sessions for the org. */
+  sessions: number;
+  /** Of those, how many produced a weighted score (the rest are unscored). */
+  scoredSessions: number;
+  /**
+   * Mean of the org's per-session weighted averages, over the scored sessions
+   * only, rounded to one decimal — or `null` when the org has no scored session.
+   * Matches the `/10` weighting used everywhere else in the report.
+   */
+  averageWeighted: number | null;
+}
+
+/**
+ * Aggregate sessions into one totals row per client org — the operator's
+ * portfolio scorecard. Groups by the same `(unassigned)`-labelled org name the
+ * roll-up detail uses, and orders rows by org name so the output is stable
+ * regardless of the input session order.
+ */
+export function summarizeSessionsByOrg(
+  sessions: readonly ReportSession[],
+): OrgSummary[] {
+  interface Acc {
+    trainees: Set<string>;
+    sessions: number;
+    scoredSessions: number;
+    weightedTotal: number;
+  }
+  const byOrg = new Map<string, Acc>();
+
+  for (const session of sessions) {
+    const org = reportOrg(session);
+    let acc = byOrg.get(org);
+    if (!acc) {
+      acc = { trainees: new Set(), sessions: 0, scoredSessions: 0, weightedTotal: 0 };
+      byOrg.set(org, acc);
+    }
+    acc.sessions += 1;
+    if (session.traineeEmail) acc.trainees.add(session.traineeEmail);
+    const { weightedAverage } = sessionToReportRow(session);
+    if (weightedAverage != null) {
+      acc.scoredSessions += 1;
+      acc.weightedTotal += weightedAverage;
+    }
+  }
+
+  return [...byOrg.entries()]
+    .map(([organization, acc]) => ({
+      organization,
+      trainees: acc.trainees.size,
+      sessions: acc.sessions,
+      scoredSessions: acc.scoredSessions,
+      averageWeighted:
+        acc.scoredSessions > 0 ? round1(acc.weightedTotal / acc.scoredSessions) : null,
+    }))
+    .sort((a, b) => a.organization.localeCompare(b.organization));
+}
+
+/** Scorecard column order — a distinct, additive column set (never mutated). */
+export const SUMMARY_COLUMNS: readonly string[] = [
+  'Organization',
+  'Trainees',
+  'Sessions',
+  'Scored Sessions',
+  'Average Weighted Score',
+];
+
+/** Serialise the per-client scorecard to a CSV string. */
+export function rollupSummaryToCsv(sessions: readonly ReportSession[]): string {
+  const rows: CsvCell[][] = summarizeSessionsByOrg(sessions).map((o) => [
+    o.organization,
+    o.trainees,
+    o.sessions,
+    o.scoredSessions,
+    o.averageWeighted,
+  ]);
+  return toCsv(SUMMARY_COLUMNS, rows);
+}
+
+/**
+ * Column layout for the scorecard PDF. Widths are PDF points and sum to 452 —
+ * well inside the 532pt printable width — because a five-column totals table
+ * needs no more; the wide `Organization` column carries the client name.
+ */
+const SUMMARY_PDF_COLUMNS: readonly PdfColumn[] = [
+  { header: 'Organization', width: 180 },
+  { header: 'Trainees', width: 60 },
+  { header: 'Sessions', width: 60 },
+  { header: 'Scored', width: 60 },
+  { header: 'Avg /10', width: 60 },
+];
+
+/** Serialise the per-client scorecard to a PDF (raw bytes). */
+export function rollupSummaryToPdf(sessions: readonly ReportSession[]): Uint8Array {
+  const summaries = summarizeSessionsByOrg(sessions);
+  const rows = summaries.map((o) => [
+    o.organization,
+    o.trainees,
+    o.sessions,
+    o.scoredSessions,
+    pdfScore(o.averageWeighted),
+  ]);
+
+  const generated = new Date().toISOString().slice(0, 10);
+  const count = summaries.length;
+  return renderTablePdf({
+    title: 'XPElevator — Portfolio Scorecard',
+    subtitle: `Generated ${generated} · ${count} client organisation${count === 1 ? '' : 's'} · score shown is the weighted average /10 over scored sessions`,
+    columns: SUMMARY_PDF_COLUMNS,
+    rows,
+  });
+}

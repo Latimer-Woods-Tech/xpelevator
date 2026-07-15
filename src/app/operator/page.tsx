@@ -253,22 +253,44 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
               by org. Server-scoped by `resolveOperatorRollup` to this operator's
               own clients. Only meaningful once at least one client exists. */}
           {!isNew && clients !== null && clients.length > 0 ? (
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="text-slate-500 text-xs mr-1">All clients</span>
-              <a
-                href={withWindow('/api/reports/sessions?scope=clients')}
-                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
-                title="Download every client's sessions as one CSV"
-              >
-                CSV
-              </a>
-              <a
-                href={withWindow('/api/reports/sessions?scope=clients&format=pdf')}
-                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
-                title="Download every client's sessions as one PDF"
-              >
-                PDF
-              </a>
+            <div className="flex flex-col items-end gap-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 text-xs mr-1">All clients</span>
+                <a
+                  href={withWindow('/api/reports/sessions?scope=clients')}
+                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+                  title="Download every client's sessions as one CSV"
+                >
+                  CSV
+                </a>
+                <a
+                  href={withWindow('/api/reports/sessions?scope=clients&format=pdf')}
+                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+                  title="Download every client's sessions as one PDF"
+                >
+                  PDF
+                </a>
+              </div>
+              {/* Per-client scorecard — one totals row per client (trainees,
+                  sessions, scored, average /10). Same server scope as the
+                  roll-up above; `view=summary` just aggregates it. */}
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 text-xs mr-1">Scorecard</span>
+                <a
+                  href={withWindow('/api/reports/sessions?scope=clients&view=summary')}
+                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+                  title="Download a per-client totals scorecard as CSV"
+                >
+                  CSV
+                </a>
+                <a
+                  href={withWindow('/api/reports/sessions?scope=clients&view=summary&format=pdf')}
+                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+                  title="Download a per-client totals scorecard as PDF"
+                >
+                  PDF
+                </a>
+              </div>
             </div>
           ) : null}
         </div>

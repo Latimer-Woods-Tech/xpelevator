@@ -234,6 +234,59 @@ describe('GET /api/reports/sessions — ?scope=clients portfolio roll-up', () =>
     expect(res.headers.get('Content-Type')).toContain('application/pdf');
     expect(operatorScope).toBe(OPERATOR);
   });
+
+  it('?view=summary → per-client scorecard CSV, same operator scope', async () => {
+    asAdmin(OPERATOR);
+    routeRollupSql([
+      {
+        id: 's1',
+        type: 'CHAT',
+        scoringStatus: 'SCORED',
+        endedAt: '2026-07-10T00:00:00.000Z',
+        createdAt: '2026-07-10T00:00:00.000Z',
+        traineeEmail: 't@acme.test',
+        jobTitle: 'Rep',
+        scenario: 'Angry customer',
+        organization: 'Acme Retail',
+        scores: [{ score: 8, criteria: { name: 'Empathy', weight: 1 } }],
+      },
+    ]);
+    const res = await GET(req('?scope=clients&view=summary'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/csv');
+    // Distinct filename slug so the download is self-describing.
+    expect(res.headers.get('Content-Disposition')).toContain('portfolio-scorecard');
+    // Still scoped to the operator's own clients — summary never widens access.
+    expect(operatorScope).toBe(OPERATOR);
+    const body = await res.text();
+    // Scorecard header, not the per-session detail header.
+    expect(body.split('\r\n')[0]).toBe(
+      'Organization,Trainees,Sessions,Scored Sessions,Average Weighted Score'
+    );
+    // One totals row for the single client org: 1 trainee, 1 session, 1 scored, avg 8.
+    expect(body).toContain('Acme Retail,1,1,1,8');
+  });
+
+  it('?view=summary&format=pdf → scorecard PDF, operator-scoped', async () => {
+    asAdmin(OPERATOR);
+    routeRollupSql();
+    const res = await GET(req('?scope=clients&view=summary&format=pdf'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('application/pdf');
+    expect(res.headers.get('Content-Disposition')).toContain('portfolio-scorecard');
+    expect(operatorScope).toBe(OPERATOR);
+  });
+
+  it('?view=summary is ignored without scope=clients (own-org detail CSV)', async () => {
+    asAdmin(OPERATOR);
+    routeSql(() => []);
+    const res = await GET(req('?view=summary'));
+    expect(res.status).toBe(200);
+    // Falls through to the default own-org session report, not the scorecard.
+    expect(res.headers.get('Content-Disposition')).toContain('sessions');
+    expect(res.headers.get('Content-Disposition')).not.toContain('scorecard');
+    expect(scopedTo).toBe(OPERATOR);
+  });
 });
 
 describe('GET /api/reports/sessions — ?since/?until date window (R-065)', () => {

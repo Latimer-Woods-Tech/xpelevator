@@ -28,6 +28,11 @@
  * admin: must name `?operatorOrgId=<id>`, else 400; a cross-operator param →
  * 403). `scope=clients` takes precedence over `clientOrgId`.
  *
+ * `?scope=clients&view=summary` collapses that same authorized session set into
+ * a per-client SCORECARD — one totals row per client org (trainees, sessions,
+ * scored sessions, average weighted score). Same query + same authorization as
+ * the roll-up; only the serialisation differs, so it can never widen access.
+ *
  * `?since=YYYY-MM-DD` / `?until=YYYY-MM-DD` bound the report to a date window on
  * a session's completion date (`ended_at`) — the operator's "monthly cut". Both
  * are inclusive calendar dates (UTC); a malformed date or a `since` after `until`
@@ -46,6 +51,8 @@ import {
   sessionsToPdf,
   rollupSessionsToCsv,
   rollupSessionsToPdf,
+  rollupSummaryToCsv,
+  rollupSummaryToPdf,
   type ReportSession,
 } from '@/lib/report';
 import { canAccessOrgReport, resolveOperatorRollup } from '@/lib/org-hierarchy';
@@ -71,6 +78,10 @@ export async function GET(request: Request) {
     // `?scope=clients` = the operator portfolio roll-up (all client orgs at once,
     // labelled by org). It takes precedence over the single-org `clientOrgId`.
     const rollup = params.get('scope') === 'clients';
+    // `?view=summary` (roll-up only) collapses the per-session detail into a
+    // per-client scorecard — one totals row per client org. Same authorized
+    // session set, serialised differently; ignored outside the roll-up.
+    const summary = rollup && params.get('view') === 'summary';
 
     // The session filter fragment: a portfolio roll-up spans every client org
     // beneath one operator; otherwise it is one strictly-scoped org id.
@@ -167,11 +178,15 @@ export async function GET(request: Request) {
     `;
 
     const day = new Date().toISOString().slice(0, 10);
-    const slug = rollup ? 'portfolio' : 'sessions';
+    const slug = summary ? 'portfolio-scorecard' : rollup ? 'portfolio' : 'sessions';
     const sessions = rows as unknown as ReportSession[];
 
     if (wantsPdf) {
-      const pdf = rollup ? rollupSessionsToPdf(sessions) : sessionsToPdf(sessions);
+      const pdf = summary
+        ? rollupSummaryToPdf(sessions)
+        : rollup
+          ? rollupSessionsToPdf(sessions)
+          : sessionsToPdf(sessions);
       // Hand the response a plain ArrayBuffer view of the PDF bytes — `BodyInit`
       // in the Next types doesn't list `Uint8Array`, and this stays Worker-safe
       // (no `Buffer`).
@@ -190,7 +205,11 @@ export async function GET(request: Request) {
       });
     }
 
-    const csv = rollup ? rollupSessionsToCsv(sessions) : sessionsToCsv(sessions);
+    const csv = summary
+      ? rollupSummaryToCsv(sessions)
+      : rollup
+        ? rollupSessionsToCsv(sessions)
+        : sessionsToCsv(sessions);
 
     return new NextResponse(csv, {
       status: 200,
