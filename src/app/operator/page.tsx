@@ -251,7 +251,9 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
           </div>
           {/* Portfolio roll-up — every client's sessions in one export, labelled
               by org. Server-scoped by `resolveOperatorRollup` to this operator's
-              own clients. Only meaningful once at least one client exists. */}
+              own clients. Only meaningful once at least one client exists. The
+              Summary pair collapses it to one totals row per client (+ portfolio
+              grand total). */}
           {!isNew && clients !== null && clients.length > 0 ? (
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-slate-500 text-xs mr-1">All clients</span>
@@ -266,6 +268,21 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
                 href={withWindow('/api/reports/sessions?scope=clients&format=pdf')}
                 className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
                 title="Download every client's sessions as one PDF"
+              >
+                PDF
+              </a>
+              <span className="text-slate-500 text-xs mx-1">Summary</span>
+              <a
+                href={withWindow('/api/reports/sessions?scope=clients&view=summary')}
+                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+                title="Download per-client totals (one row per client) as CSV"
+              >
+                CSV
+              </a>
+              <a
+                href={withWindow('/api/reports/sessions?scope=clients&view=summary&format=pdf')}
+                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+                title="Download per-client totals (one row per client) as PDF"
               >
                 PDF
               </a>

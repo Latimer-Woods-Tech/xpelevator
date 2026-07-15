@@ -785,8 +785,14 @@ jobs:
         run: |
           set -e
           fail=0
-          # Both the CSV (default) and PDF (?format=pdf) variants must reject anon.
-          for PATH_Q in "/api/reports/sessions" "/api/reports/sessions?format=pdf"; do
+          # Every variant must reject anon: the CSV (default) + PDF detail export,
+          # AND the operator portfolio roll-up (?scope=clients) plus its per-client
+          # totals summary (?view=summary) — all read tenant-scoped session scores.
+          for PATH_Q in \
+            "/api/reports/sessions" \
+            "/api/reports/sessions?format=pdf" \
+            "/api/reports/sessions?scope=clients&view=summary" \
+            "/api/reports/sessions?scope=clients&view=summary&format=pdf"; do
             for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
               code=000
               for i in 1 2 3 4 5; do
@@ -807,7 +813,7 @@ jobs:
             echo "::error::Manager reporting export auth-gate verification failed"
             exit 1
           fi
-          echo "✅ /api/reports/sessions (CSV + PDF) rejects anonymous callers (401) on both hosts"
+          echo "✅ /api/reports/sessions (detail + portfolio summary, CSV + PDF) rejects anonymous callers (401) on both hosts"
 
       - name: Verify home page is copy-clean (org copy rule, Phase 4)
         # The public home page (`/`) previously described "AI-generated
