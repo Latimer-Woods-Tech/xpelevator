@@ -852,6 +852,16 @@ jobs:
           BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
         run: node scripts/phase2-isolation-check.mjs
 
+      - name: Verify per-turn latency telemetry persists (R-066)
+        # Race-free proof (same job, post-promotion): drives ONE real authenticated
+        # chat turn on the freshly-promoted build and asserts the CUSTOMER reply row
+        # persisted non-null ttft_ms/total_ms/latency_tier/model/route_reason — the
+        # founder-speed metric is now a durable record, not just a live badge + log.
+        # Seeds a throwaway self-owned user/session and cleans up in a finally block.
+        env:
+          BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
+        run: node scripts/verify-turn-telemetry.mjs
+
       - name: Verify security headers (Phase 2 3/3)
         # Assert the security-header set is present on the freshly-deployed build.
         # Targets a DYNAMIC document route (/) and an API route (/api/health) —

@@ -135,3 +135,21 @@ export function latencyBadge(timing: TurnTiming): LatencyBadge {
     detail: `${(timing.ttftMs / 1000).toFixed(1)}s to first reply`,
   };
 }
+
+/**
+ * The routing decision that selected a turn's customer model, as a stable,
+ * low-cardinality token for telemetry (R-066). The customer model is picked by
+ * scenario difficulty (R-059): a `hard` scenario keeps the higher-realism model
+ * (de-escalation realism is the differentiator there); everything else uses the
+ * ~3× faster model so the reply streams closer to real-time. Persisting *why* a
+ * turn ran on a given model lets a slow row explain itself — "a hard scenario
+ * paying the realism cost" vs. an unexpected regression — instead of leaving the
+ * model choice unexplained next to the number. Pure and Worker-safe; the mapping
+ * mirrors {@link classifyTurnLatency}'s caller so the token can never disagree
+ * with the model actually used (anything but `hard` routes to the fast model).
+ */
+export function routeReasonForDifficulty(difficulty: string): string {
+  return difficulty === 'hard'
+    ? 'difficulty=hard→realism'
+    : `difficulty=${difficulty}→fast`;
+}
