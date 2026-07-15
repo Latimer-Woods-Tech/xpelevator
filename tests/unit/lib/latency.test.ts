@@ -14,6 +14,7 @@ import {
   classifyPhoneTurn,
   describeLatencyTier,
   latencyBadge,
+  phoneTurnTelemetry,
   routeReasonForDifficulty,
   ttftTier,
   TTFT_REALTIME_MS,
@@ -161,5 +162,35 @@ describe('routeReasonForDifficulty (R-066 telemetry token)', () => {
     // so the reason token must stay on the fast route for an unexpected value too
     // (it can never disagree with the model actually used).
     expect(routeReasonForDifficulty('unknown')).toBe('difficulty=unknown→fast');
+  });
+});
+
+describe('phoneTurnTelemetry (R-070 phone → persisted-telemetry columns)', () => {
+  it('maps a classified phone turn onto the R-066 columns (replyReady→ttft, dispatch→total)', () => {
+    const timing = classifyPhoneTurn(600, 900); // dispatch 900ms → acceptable tier
+    expect(phoneTurnTelemetry(timing, 'llama-3.3-70b-versatile', 'difficulty=hard→realism')).toEqual({
+      ttftMs: timing.replyReadyMs,
+      totalMs: timing.speakDispatchMs,
+      latencyTier: timing.tier,
+      model: 'llama-3.3-70b-versatile',
+      routeReason: 'difficulty=hard→realism',
+    });
+  });
+
+  it('carries the felt-speed tier straight through (dispatch-gap based, per R-058)', () => {
+    // 2100ms dispatch → slow tier; the persisted tier must match the log's tier.
+    const slow = phoneTurnTelemetry(classifyPhoneTurn(1900, 2100), 'llama-3.1-8b-instant', 'difficulty=easy→fast');
+    expect(slow.latencyTier).toBe('slow');
+    expect(slow.ttftMs).toBe(1900);
+    expect(slow.totalMs).toBe(2100);
+    expect(slow.model).toBe('llama-3.1-8b-instant');
+    expect(slow.routeReason).toBe('difficulty=easy→fast');
+  });
+
+  it('passes the model + route-reason tokens through untouched', () => {
+    const t = phoneTurnTelemetry(classifyPhoneTurn(100, 200), 'some-model', 'difficulty=medium→fast');
+    expect(t.model).toBe('some-model');
+    expect(t.routeReason).toBe('difficulty=medium→fast');
+    expect(t.latencyTier).toBe('realtime');
   });
 });

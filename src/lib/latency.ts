@@ -101,6 +101,47 @@ export function classifyPhoneTurn(replyReadyMs: number, speakDispatchMs: number)
 }
 
 /**
+ * The persisted per-turn latency telemetry columns (R-066), as a flat record
+ * ready to write to `chat_messages`. One shape for both conversation paths so
+ * the chat and phone writers agree on exactly what a "measured turn" stores.
+ */
+export interface PersistedTurnTelemetry {
+  /** → `ttft_ms`: the model-generation leg the trainee waits through. */
+  ttftMs: number;
+  /** → `total_ms`: the full server-controllable gap before the customer speaks. */
+  totalMs: number;
+  /** → `latency_tier`: felt-speed bucket the read surface (R-067/R-068) groups on. */
+  latencyTier: LatencyTier;
+  /** → `model`: the customer model that generated the turn. */
+  model: string;
+  /** → `route_reason`: stable token explaining the model choice (R-059). */
+  routeReason: string;
+}
+
+/**
+ * Map a classified phone turn (R-058) onto the R-066 persisted-telemetry columns
+ * so the Telnyx path stores the SAME felt-speed number its `[telnyx] latency` log
+ * reports — which is what makes the R-068 `byModality` split actually populate
+ * PHONE turns (until now only CHAT rows carried telemetry, so "is voice the slow
+ * leg?" was unanswerable from stored data). `replyReadyMs → ttft_ms` (the model
+ * leg), `speakDispatchMs → total_ms` (the full dispatch gap), `tier →
+ * latency_tier`. Pure and Worker-safe; no I/O, no `Date.now()`.
+ */
+export function phoneTurnTelemetry(
+  timing: PhoneTurnTiming,
+  model: string,
+  routeReason: string,
+): PersistedTurnTelemetry {
+  return {
+    ttftMs: timing.replyReadyMs,
+    totalMs: timing.speakDispatchMs,
+    latencyTier: timing.tier,
+    model,
+    routeReason,
+  };
+}
+
+/**
  * A turn's felt-speed rendered for a human: a short label + a compact timing
  * detail. Pure and runtime-agnostic so the chat UI can surface the same speed
  * the `[chat] latency` log measures (R-057) — the number the founder's
