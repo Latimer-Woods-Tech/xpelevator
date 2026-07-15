@@ -234,6 +234,60 @@ describe('GET /api/reports/sessions — ?scope=clients portfolio roll-up', () =>
     expect(res.headers.get('Content-Type')).toContain('application/pdf');
     expect(operatorScope).toBe(OPERATOR);
   });
+
+  it('?view=summary → 200 per-client totals CSV (Organization,Sessions,…), same operator scope', async () => {
+    asAdmin(OPERATOR);
+    routeRollupSql([
+      {
+        id: 's1',
+        type: 'CHAT',
+        scoringStatus: 'SCORED',
+        endedAt: '2026-07-10T00:00:00.000Z',
+        createdAt: '2026-07-10T00:00:00.000Z',
+        traineeEmail: 't@acme.test',
+        jobTitle: 'Rep',
+        scenario: 'Angry customer',
+        organization: 'Acme Retail',
+        scores: [{ score: 8, criteria: { name: 'Empathy', weight: 1 } }],
+      },
+    ]);
+    const res = await GET(req('?scope=clients&view=summary'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/csv');
+    // Summary filename slug, not the detail 'portfolio' export.
+    expect(res.headers.get('Content-Disposition')).toContain('portfolio-summary');
+    // Same operator-owned tenant scope as the detail roll-up (no widening).
+    expect(operatorScope).toBe(OPERATOR);
+    const body = await res.text();
+    expect(body.split('\r\n')[0]).toBe('Organization,Sessions,Scored,Weighted Average');
+    // One totals row for the client, then the portfolio grand total.
+    expect(body).toContain('Acme Retail,1,1,8');
+    expect(body).toContain('TOTAL (all clients),1,1,8');
+  });
+
+  it('?view=summary&format=pdf → 200 summary PDF, operator-scoped', async () => {
+    asAdmin(OPERATOR);
+    routeRollupSql();
+    const res = await GET(req('?scope=clients&view=summary&format=pdf'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('application/pdf');
+    expect(res.headers.get('Content-Disposition')).toContain('portfolio-summary');
+    expect(operatorScope).toBe(OPERATOR);
+  });
+
+  it('?view=summary WITHOUT scope=clients is ignored (stays own-org detail CSV)', async () => {
+    asAdmin(OPERATOR);
+    // Non-rollup path: an `organizations` lookup does not run, the main query
+    // returns the own-org detail. `view=summary` must not trigger the roll-up.
+    routeSql(() => []);
+    const res = await GET(req('?view=summary'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Disposition')).toContain('sessions');
+    expect(res.headers.get('Content-Disposition')).not.toContain('portfolio');
+    const body = await res.text();
+    // Detail (single-org) header, not the summary header.
+    expect(body.split('\r\n')[0]).toContain('Session ID');
+  });
 });
 
 describe('GET /api/reports/sessions — ?since/?until date window (R-065)', () => {
