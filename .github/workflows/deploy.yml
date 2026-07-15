@@ -862,6 +862,17 @@ jobs:
           BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
         run: node scripts/verify-turn-telemetry.mjs
 
+      - name: Verify response-speed read surface (R-067)
+        # Race-free proof (same job, post-promotion): anon GET /api/analytics/latency
+        # → 401 (Phase-2 read-auth holds on the new route), then drives ONE real
+        # authenticated chat turn and asserts the authenticated summary reads the
+        # persisted telemetry back — measuredTurns>=1 with numeric avg/p95 ttft and
+        # a non-empty byModel split. Makes the R-066 data a visible artifact; seeds a
+        # throwaway self-owned user/session and cleans up in a finally block.
+        env:
+          BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
+        run: node scripts/verify-latency-summary.mjs
+
       - name: Verify security headers (Phase 2 3/3)
         # Assert the security-header set is present on the freshly-deployed build.
         # Targets a DYNAMIC document route (/) and an API route (/api/health) —
