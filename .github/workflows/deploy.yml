@@ -141,12 +141,25 @@ jobs:
             --production-branch=main \
             || echo "Project already exists — continuing."
 
-      - name: Set Pages project secrets
+      - name: Set Pages project secrets (production + preview)
         # printf '%s' (NOT echo) avoids the trailing-newline trap on secret values.
+        #
+        # Cloudflare Pages keeps SEPARATE secret stores for the `production` and
+        # `preview` environments. The production deployment (branded domain)
+        # reads `production`; the pre-promotion smoke runs a `verify-preview`
+        # deployment, which is a PREVIEW-environment deploy and reads `preview`.
+        # If the preview secrets are unset the preview build boots without
+        # DATABASE_URL/GROQ/AUTH_SECRET — env validation throws and every route
+        # 503s — which fails the smoke on a perfectly good build (observed:
+        # run 29393604443). Set BOTH environments to the same values; the
+        # preview build only ever runs a read-only DB canary against the shared
+        # DB, so it holds no privilege the production deploy doesn't already.
         run: |
-          printf '%s' "$GROQ_API_KEY"  | npx wrangler pages secret put GROQ_API_KEY  --project-name="$CF_PROJECT"
-          printf '%s' "$DATABASE_URL"  | npx wrangler pages secret put DATABASE_URL  --project-name="$CF_PROJECT"
-          printf '%s' "$AUTH_SECRET"   | npx wrangler pages secret put AUTH_SECRET   --project-name="$CF_PROJECT"
+          for ENVN in production preview; do
+            printf '%s' "$GROQ_API_KEY" | npx wrangler pages secret put GROQ_API_KEY --project-name="$CF_PROJECT" --environment="$ENVN"
+            printf '%s' "$DATABASE_URL" | npx wrangler pages secret put DATABASE_URL --project-name="$CF_PROJECT" --environment="$ENVN"
+            printf '%s' "$AUTH_SECRET"  | npx wrangler pages secret put AUTH_SECRET  --project-name="$CF_PROJECT" --environment="$ENVN"
+          done
 
       # ── Preview-then-promote (fail-closed) ─────────────────────────────────
       # Root problem this fixes: `wrangler pages deploy --branch=main` promotes
