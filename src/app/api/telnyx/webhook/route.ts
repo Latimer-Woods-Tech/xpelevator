@@ -36,7 +36,12 @@ import {
   encodeClientState,
 } from '@/lib/telnyx';
 import { verifyTelnyxWebhook } from '@/lib/auth-api';
-import { classifyPhoneTurn } from '@/lib/latency';
+import {
+  classifyPhoneTurn,
+  phoneTurnTelemetry,
+  routeReasonForDifficulty,
+  type PersistedTurnTelemetry,
+} from '@/lib/latency';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -195,8 +200,10 @@ async function handleEvent(
         const openingText = opening.choices[0]?.message?.content?.trim() ?? 'Hello?';
         const cleanOpening = openingText.replace('[RESOLVED]', '').trim();
 
-        // Save AI opening (CUSTOMER role)
-        await saveMessage(state.sessionId, 'CUSTOMER', cleanOpening);
+        // Save AI opening (CUSTOMER role) — keep its id so this turn's latency
+        // telemetry (R-070) can be stamped once callSpeak gives the dispatch total.
+        const openingMsgId = await saveMessage(state.sessionId, 'CUSTOMER', cleanOpening);
+        const openRouteReason = routeReasonForDifficulty(resolveScenarioDifficulty(script));
 
         // Speak the opening — call.speak.ended will trigger startTranscription
         const newState = { ...state, turnCount: 1 };
@@ -206,6 +213,12 @@ async function handleEvent(
             clientState: encodeClientState(newState as unknown as Record<string, unknown>),
           });
           const openTiming = classifyPhoneTurn(openReplyReadyMs, Date.now() - openTurnStart);
+          // Persist the same felt-speed number the log reports so the R-068
+          // byModality split populates the PHONE bucket (R-070).
+          await stampTurnTelemetry(
+            openingMsgId,
+            phoneTurnTelemetry(openTiming, customerModel, openRouteReason),
+          );
           console.log('[telnyx] latency', {
             sessionId: state.sessionId.slice(0, 8),
             leg: 'opening',
@@ -352,8 +365,10 @@ async function handleEvent(
         const isResolved = aiText.includes('[RESOLVED]');
         const cleanText = aiText.replace('[RESOLVED]', '').trim();
 
-        // Save AI reply to DB (AI = CUSTOMER role)
-        await saveMessage(state.sessionId, 'CUSTOMER', cleanText);
+        // Save AI reply to DB (AI = CUSTOMER role) — keep its id so this turn's
+        // latency telemetry (R-070) can be stamped once the dispatch total is known.
+        const replyMsgId = await saveMessage(state.sessionId, 'CUSTOMER', cleanText);
+        const replyRouteReason = routeReasonForDifficulty(resolveScenarioDifficulty(script));
 
         if (isResolved) {
           // Mark session completed
@@ -414,6 +429,12 @@ async function handleEvent(
         // Dispatch gap excludes the resolved-turn scoring block above so the metric
         // is comparable turn-to-turn: reply-ready time + the TTS dispatch itself.
         const replyTiming = classifyPhoneTurn(replyReadyMs, replyReadyMs + (Date.now() - speakStart));
+        // Persist the same felt-speed number the log reports so the R-068
+        // byModality split populates the PHONE bucket (R-070).
+        await stampTurnTelemetry(
+          replyMsgId,
+          phoneTurnTelemetry(replyTiming, customerModel, replyRouteReason),
+        );
         console.log('[telnyx] latency', {
           sessionId: state.sessionId.slice(0, 8),
           leg: 'reply',
@@ -444,9 +465,35 @@ async function handleEvent(
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-async function saveMessage(sessionId: string, role: 'CUSTOMER' | 'AGENT', content: string) {
-  await sql`
+async function saveMessage(
+  sessionId: string,
+  role: 'CUSTOMER' | 'AGENT',
+  content: string,
+): Promise<string> {
+  const rows = await sql`
     INSERT INTO chat_messages (id, session_id, role, content, timestamp)
     VALUES (gen_random_uuid(), ${sessionId}, ${role}, ${content}, NOW())
+    RETURNING id
+  `;
+  return (rows as Array<{ id: string }>)[0].id;
+}
+
+/**
+ * Stamp a saved CUSTOMER phone-turn row with its latency telemetry (R-070).
+ * The phone path saves the reply BEFORE the TTS-dispatch total is known (the row
+ * must exist for the resolved-turn scoring read), so telemetry is written as a
+ * follow-up UPDATE once `classifyPhoneTurn` has the full timing — mirroring the
+ * columns R-066 persists at the chat path's CUSTOMER INSERT. AGENT rows and any
+ * turn where dispatch never completes stay NULL, exactly like the chat path.
+ */
+async function stampTurnTelemetry(messageId: string, t: PersistedTurnTelemetry) {
+  await sql`
+    UPDATE chat_messages
+    SET ttft_ms = ${t.ttftMs},
+        total_ms = ${t.totalMs},
+        latency_tier = ${t.latencyTier},
+        model = ${t.model},
+        route_reason = ${t.routeReason}
+    WHERE id = ${messageId}
   `;
 }
