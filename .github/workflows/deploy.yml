@@ -148,7 +148,72 @@ jobs:
           printf '%s' "$DATABASE_URL"  | npx wrangler pages secret put DATABASE_URL  --project-name="$CF_PROJECT"
           printf '%s' "$AUTH_SECRET"   | npx wrangler pages secret put AUTH_SECRET   --project-name="$CF_PROJECT"
 
-      - name: Deploy to Cloudflare Pages (production branch)
+      # ── Preview-then-promote (fail-closed) ─────────────────────────────────
+      # Root problem this fixes: `wrangler pages deploy --branch=main` promotes
+      # to production (the branded domain) BEFORE any verify step runs, so a bad
+      # build — e.g. the #78 Neon-driver swap that 500'd every DB read — reaches
+      # live trainees before a gate can catch it. Cloudflare Pages treats any
+      # branch != the production branch (`main`) as a PREVIEW deploy that gets
+      # its own URL and NEVER touches the production alias or custom domain. So
+      # we deploy the exact build to a preview branch first, smoke it, and only
+      # promote to `--branch=main` if the smoke passes. If the build is broken
+      # the promote step never runs and prod stays on the last-good build.
+      - name: Deploy build to a PREVIEW deployment (no promotion) + capture URL
+        id: preview
+        run: |
+          set -e
+          npx wrangler pages deploy .open-next/assets \
+            --project-name="$CF_PROJECT" \
+            --branch=verify-preview 2>&1 | tee /tmp/preview-deploy.log
+          # wrangler prints the deployment-specific URL (https://<hash>.<proj>.pages.dev).
+          # The <hash> is lowercase alphanumerics with no hyphen, so it never
+          # matches the "verify-preview" branch alias — grab that; fall back to
+          # the deterministic branch alias if the output format ever changes.
+          url=$(grep -Eo "https://[a-z0-9]+\.${CF_PROJECT}\.pages\.dev" /tmp/preview-deploy.log | head -1)
+          if [ -z "$url" ]; then
+            url="https://verify-preview.${CF_PROJECT}.pages.dev"
+            echo "Could not parse a deployment URL; using branch alias $url"
+          fi
+          echo "preview_url=$url" >> "$GITHUB_OUTPUT"
+          echo "Preview deployment URL: $url"
+
+      - name: Smoke-gate the preview build BEFORE promoting (fail-closed)
+        run: |
+          set -e
+          BASE="${{ steps.preview.outputs.preview_url }}"
+          echo "Smoke-gating $BASE before promoting to production ..."
+          # 1) /api/health 200 — the build boots and serves.
+          code=000
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -s -o /tmp/preview-health.json -w '%{http_code}' "$BASE/api/health" || echo 000)
+            echo "health attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then break; fi
+            sleep 8
+          done
+          if [ "$code" != "200" ]; then
+            echo "::error::preview /api/health != 200 (last=$code) — NOT promoting to prod"
+            exit 1
+          fi
+          # 2) Public DB-read canary: a nonexistent branding slug hits a real
+          #    SELECT and returns 404 when the DB path is healthy; the handler's
+          #    catch returns 500 when the driver/connection fails at runtime —
+          #    the exact #78 signature. Underscores can't be produced by
+          #    slugify(), so this slug can never collide with a real org.
+          dbc=000
+          for i in 1 2 3 4 5 6 7 8; do
+            dbc=$(curl -s -o /dev/null -w '%{http_code}' \
+              "$BASE/api/branding/__deploy_smoke_canary_nonexistent__" || echo 000)
+            echo "db-read canary attempt $i: HTTP $dbc"
+            if [ "$dbc" = "404" ]; then break; fi
+            sleep 8
+          done
+          if [ "$dbc" != "404" ]; then
+            echo "::error::preview DB-read canary != 404 (got $dbc; 500 = DB driver down like #78) — NOT promoting to prod"
+            exit 1
+          fi
+          echo "✅ preview smoke passed (/api/health 200 + DB-read canary 404) — safe to promote"
+
+      - name: Promote the smoked build to production (--branch=main)
         run: |
           npx wrangler pages deploy .open-next/assets \
             --project-name="$CF_PROJECT" \
