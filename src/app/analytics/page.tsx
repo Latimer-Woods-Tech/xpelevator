@@ -63,6 +63,7 @@ interface LatencyData {
   tierBreakdown: { realtime: number; acceptable: number; slow: number };
   byModel: LatencyGroup[];
   byRouteReason: LatencyGroup[];
+  byModality: LatencyGroup[];
 }
 
 function ScoreBar({ value, max = 10 }: { value: number | null; max?: number }) {
@@ -141,16 +142,28 @@ export default function AnalyticsPage() {
   const [latency, setLatency] = useState<LatencyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Response-speed date window (R-068) — inclusive YYYY-MM-DD bounds, empty = all-time.
+  const [latSince, setLatSince] = useState('');
+  const [latUntil, setLatUntil] = useState('');
+
+  // Response-speed telemetry (R-067/R-068) loads alongside the score analytics
+  // but never blocks the page — a failure just hides the speed section. Accepts
+  // an optional `?since`/`?until` window so the operator can cut it to a period.
+  const loadLatency = (since = '', until = '') => {
+    const qs = new URLSearchParams();
+    if (since) qs.set('since', since);
+    if (until) qs.set('until', until);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    fetch(`/api/analytics/latency${suffix}`)
+      .then(res => (res.ok ? (res.json() as Promise<LatencyData>) : null))
+      .then(setLatency)
+      .catch(() => setLatency(null));
+  };
 
   const load = () => {
     setLoading(true);
     setError(null);
-    // Response-speed telemetry (R-067) loads alongside the score analytics but
-    // never blocks the page — a failure here just hides the speed section.
-    fetch('/api/analytics/latency')
-      .then(res => (res.ok ? (res.json() as Promise<LatencyData>) : null))
-      .then(setLatency)
-      .catch(() => setLatency(null));
+    loadLatency(latSince, latUntil);
     fetch('/api/analytics')
       .then(res => {
         if (!res.ok) throw new Error(`Server error ${res.status}`);
@@ -246,9 +259,18 @@ export default function AnalyticsPage() {
               <ScoringHealthSection health={data.scoringHealth} />
             )}
 
-            {/* ── Response speed (R-067) ──────────────────────────────────── */}
-            {latency && latency.measuredTurns > 0 && (
-              <LatencySection latency={latency} />
+            {/* ── Response speed (R-067) + date window & modality split (R-068) ── */}
+            {latency && typeof latency.measuredTurns === 'number' && (
+              <LatencySection
+                latency={latency}
+                since={latSince}
+                until={latUntil}
+                onWindowChange={(since, until) => {
+                  setLatSince(since);
+                  setLatUntil(until);
+                  loadLatency(since, until);
+                }}
+              />
             )}
 
             {/* ── Score trend ─────────────────────────────────────────────── */}
@@ -385,10 +407,59 @@ function secs(ms: number | null): string {
  * realism route is paying its speed cost. Headline numbers are time-to-first-
  * token (the gap a trainee perceives before the customer starts replying).
  */
-function LatencySection({ latency }: { latency: LatencyData }) {
+function LatencySection({
+  latency,
+  since,
+  until,
+  onWindowChange,
+}: {
+  latency: LatencyData;
+  since: string;
+  until: string;
+  onWindowChange: (since: string, until: string) => void;
+}) {
   const { realtime, acceptable, slow } = latency.tierBreakdown;
+  const windowed = Boolean(since || until);
   return (
     <Section title="Response Speed">
+      {/* Date window (R-068) — the operator's "monthly cut" of felt speed. */}
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <label className="text-xs text-slate-400">
+          From
+          <input
+            type="date"
+            value={since}
+            max={until || undefined}
+            onChange={e => onWindowChange(e.target.value, until)}
+            className="block mt-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
+          />
+        </label>
+        <label className="text-xs text-slate-400">
+          To
+          <input
+            type="date"
+            value={until}
+            min={since || undefined}
+            onChange={e => onWindowChange(since, e.target.value)}
+            className="block mt-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
+          />
+        </label>
+        {windowed && (
+          <button
+            type="button"
+            onClick={() => onWindowChange('', '')}
+            className="text-xs text-slate-400 underline hover:text-slate-200 pb-1"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {latency.measuredTurns === 0 ? (
+        <p className="text-slate-400 text-sm">
+          No measured turns{windowed ? ' in this window' : ' yet'}.
+        </p>
+      ) : (
+        <>
       <p className="text-slate-400 text-xs mb-4">
         How quickly the simulated customer starts replying — time-to-first-token
         across {latency.measuredTurns} measured turn
@@ -423,8 +494,37 @@ function LatencySection({ latency }: { latency: LatencyData }) {
           <LatencyGroupTable groups={latency.byRouteReason} />
         </div>
       )}
+      {latency.byModality.length > 0 && (
+        <div className="mt-5">
+          <h3 className="text-sm font-semibold mb-2 text-slate-200">
+            By modality
+          </h3>
+          <LatencyGroupTable
+            groups={latency.byModality.map(g => ({
+              ...g,
+              key: modalityLabel(g.key),
+            }))}
+          />
+        </div>
+      )}
+        </>
+      )}
     </Section>
   );
+}
+
+/** Trainee-facing label for a conversation modality (R-068). */
+function modalityLabel(key: string): string {
+  switch (key) {
+    case 'CHAT':
+      return 'Chat';
+    case 'VOICE':
+      return 'Voice';
+    case 'PHONE':
+      return 'Phone';
+    default:
+      return key;
+  }
 }
 
 /** A compact table of per-group speed stats (model or routing reason). */

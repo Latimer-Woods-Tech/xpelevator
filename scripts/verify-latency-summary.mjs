@@ -1,15 +1,19 @@
 /**
- * verify-latency-summary.mjs — R-067 post-deploy proof that the response-speed
- * read surface (`GET /api/analytics/latency`) is live, authenticated, and reads
- * the persisted per-turn telemetry (R-066) against the freshly-promoted LWT build.
+ * verify-latency-summary.mjs — R-067/R-068 post-deploy proof that the
+ * response-speed read surface (`GET /api/analytics/latency`) is live,
+ * authenticated, and reads the persisted per-turn telemetry (R-066) against the
+ * freshly-promoted LWT build.
  *
- * Two things this asserts end-to-end:
+ * What this asserts end-to-end:
  *   1. anon `GET /api/analytics/latency` → 401 (Phase-2 read-auth holds on the
  *      new route — no un-authenticated read of tenant timing).
  *   2. after driving ONE real authenticated chat turn (which persists a CUSTOMER
  *      reply row with telemetry), the authenticated summary → 200 with a numeric
  *      `avgTtftMs` / `p95TtftMs`, `measuredTurns >= 1`, and a non-empty `byModel`
  *      — proving the aggregation reads the stored rows, not an empty shell.
+ *   3. R-068: the `byModality` split attributes the CHAT turn to CHAT, and the
+ *      `?since`/`?until` date window behaves — malformed date → 400, a window
+ *      starting today includes the fresh turn, an ancient-only window excludes it.
  *
  * Runs in the deploy job AFTER promotion (BASE = the pages.dev alias), so the new
  * build is guaranteed live. Seeds a throwaway self-owned (org-less) user + session
@@ -162,6 +166,42 @@ async function main() {
     } else {
       console.log(`  ✓ tierBreakdown = ${JSON.stringify(summary.tierBreakdown)}`);
     }
+
+    // R-068: the modality split must be present and attribute the CHAT turn we
+    // just drove to the CHAT modality (the seeded session is type=CHAT).
+    if (!Array.isArray(summary.byModality) || summary.byModality.length === 0) {
+      fail('byModality is empty (R-068 modality split missing)', summary.byModality);
+    } else {
+      const chat = summary.byModality.find((g) => g.key === 'CHAT');
+      if (!chat || chat.turns < 1) fail('byModality has no CHAT group for the seeded CHAT turn', summary.byModality);
+      else console.log(`  ✓ byModality has ${summary.byModality.length} group(s); CHAT turns = ${chat.turns}`);
+    }
+
+    // R-068: the `?since`/`?until` date window. A malformed date → 400; a window
+    // starting today still includes the just-driven turn; an ancient-only window
+    // excludes it (measuredTurns 0). Uses the same parser as the R-065 report.
+    const cookie2 = await mintCookieHeader(userId);
+    const today = new Date().toISOString().slice(0, 10);
+
+    const bad = await req('GET', '/api/analytics/latency?since=not-a-date', cookie2);
+    if (bad.status !== 400) fail(`malformed ?since expected 400, got ${bad.status}`, await drain(bad));
+    else console.log('  ✓ malformed ?since → 400');
+
+    const inWindow = await req('GET', `/api/analytics/latency?since=${today}`, cookie2);
+    const inBody = JSON.parse(await drain(inWindow));
+    if (inWindow.status !== 200 || !(inBody.measuredTurns >= 1)) {
+      fail(`?since=${today} should still include the fresh turn`, inBody);
+    } else {
+      console.log(`  ✓ ?since=${today} → measuredTurns = ${inBody.measuredTurns} (fresh turn included)`);
+    }
+
+    const past = await req('GET', '/api/analytics/latency?until=1970-01-01', cookie2);
+    const pastBody = JSON.parse(await drain(past));
+    if (past.status !== 200 || pastBody.measuredTurns !== 0) {
+      fail('?until=1970-01-01 should exclude all of today\'s turns', pastBody);
+    } else {
+      console.log('  ✓ ?until=1970-01-01 → measuredTurns = 0 (window excludes today)');
+    }
   } finally {
     if (sessionId) {
       await sql`DELETE FROM scores WHERE session_id = ${sessionId}`;
@@ -176,7 +216,7 @@ async function main() {
     console.error('\n✗ the latency read surface did not behave as expected.');
     return;
   }
-  console.log('\n✅ R-067 VERIFIED — anon 401 + authenticated summary reads persisted turn telemetry (avg/p95/byModel).');
+  console.log('\n✅ R-067/R-068 VERIFIED — anon 401 + authenticated summary reads persisted turn telemetry (avg/p95/byModel), modality split + date window hold.');
 }
 
 main().catch((e) => {

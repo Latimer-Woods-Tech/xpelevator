@@ -36,6 +36,12 @@ export interface LatencyTurn {
   model: string | null;
   /** Why that model was chosen (`route_reason`), or null on legacy rows. */
   routeReason: string | null;
+  /**
+   * Conversation modality of the owning session (`simulation_sessions.type`:
+   * `CHAT` | `VOICE` | `PHONE`), or null when unknown. Lets a manager answer
+   * "is voice/phone the slow leg?" from stored data (R-068).
+   */
+  modality: string | null;
 }
 
 /** Per-group (model or route-reason) speed summary. */
@@ -72,6 +78,11 @@ export interface LatencySummary {
   byModel: LatencyGroupSummary[];
   /** Per-route-reason summaries, most-measured first. */
   byRouteReason: LatencyGroupSummary[];
+  /**
+   * Per-modality summaries (`CHAT` | `VOICE` | `PHONE`), most-measured first —
+   * the "is voice/phone the slow leg?" split (R-068).
+   */
+  byModality: LatencyGroupSummary[];
 }
 
 const KNOWN_TIERS: readonly SummaryTier[] = ['realtime', 'acceptable', 'slow'];
@@ -169,6 +180,7 @@ export function summarizeLatency(turns: readonly LatencyTurn[]): LatencySummary 
       tierBreakdown: { realtime: 0, acceptable: 0, slow: 0 },
       byModel: [],
       byRouteReason: [],
+      byModality: [],
     };
   }
 
@@ -193,5 +205,6 @@ export function summarizeLatency(turns: readonly LatencyTurn[]): LatencySummary 
     tierBreakdown,
     byModel: groupBy(turns, (t) => t.model),
     byRouteReason: groupBy(turns, (t) => t.routeReason),
+    byModality: groupBy(turns, (t) => t.modality),
   };
 }
