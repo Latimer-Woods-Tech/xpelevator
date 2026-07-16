@@ -28,10 +28,11 @@ export interface SessionViewer {
 /**
  * Whether `viewer` may access `session`.
  *
- * Owner-or-same-org-admin. Global (null-org) sessions remain owner-only for
- * members; an admin whose org matches the session's org (including the null ==
- * null "no org" case) may also access it. `null` and `undefined` orgIds are
- * normalized so a real DB `null` and an absent field compare equal.
+ * Owner-or-same-org-admin. Admin cross-user access requires a CONCRETE org
+ * match — "no org" is never treated as a shared tenant. Every self-registered
+ * user has `org_id = NULL`, so the previous `null === null` rule let any
+ * null-org ADMIN read every self-registered user's sessions, transcripts, and
+ * scores. Null-org sessions are therefore owner-only.
  */
 export function canAccessSession(
   session: SessionOwnership,
@@ -40,6 +41,7 @@ export function canAccessSession(
   const ownsIt = session.userId != null && session.userId === viewer.id;
   const sameOrgAdmin =
     viewer.role === 'ADMIN' &&
-    (session.orgId ?? null) === (viewer.orgId ?? null);
+    session.orgId != null &&
+    session.orgId === (viewer.orgId ?? null);
   return ownsIt || sameOrgAdmin;
 }

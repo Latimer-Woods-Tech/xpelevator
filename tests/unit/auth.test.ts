@@ -257,6 +257,70 @@ describe('NextAuth credentials provider', () => {
     expect(result?.email).toBe('bob@example.com');
   });
 
+  it('authorize does NOT auto-create a user in production', async () => {
+    vi.resetModules();
+    let captured: CapturedConfig = null;
+    // SELECT → no user. An INSERT must never follow in production.
+    const sqlMock = mockAuthDeps(() => Promise.resolve([]));
+    vi.doMock('next-auth/providers/credentials', () => ({
+      default: vi.fn((config: NonNullable<CapturedConfig>) => {
+        captured = config;
+        return config;
+      }),
+    }));
+
+    await import('@/auth');
+    (process.env as Record<string, string>).NODE_ENV = 'production';
+    try {
+      const result = await captured!.authorize?.({ email: 'stranger@example.com' });
+      expect(result).toBeNull();
+      // Only the SELECT ran — no auto-create INSERT.
+      expect(sqlMock).toHaveBeenCalledTimes(1);
+    } finally {
+      (process.env as Record<string, string>).NODE_ENV = 'test';
+    }
+  });
+
+  it('Credentials provider excluded in production unless AUTH_CREDENTIALS_ENABLED=true', async () => {
+    const loadProviders = async () => {
+      vi.resetModules();
+      const credentialsMock = vi.fn((c: unknown) => c);
+      const sqlMock = vi.fn(() => Promise.resolve([]));
+      vi.doMock('@/lib/db', () => ({ sql: sqlMock, default: sqlMock }));
+      vi.doMock('next-auth/providers/github', () => ({ default: vi.fn() }));
+      vi.doMock('next-auth/providers/credentials', () => ({ default: credentialsMock }));
+      let capturedProviders: unknown[] = [];
+      vi.doMock('next-auth', () => ({
+        default: vi.fn((config: { providers: unknown[] }) => {
+          capturedProviders = config.providers;
+          return { handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() };
+        }),
+      }));
+      await import('@/auth');
+      return { capturedProviders, credentialsMock };
+    };
+
+    try {
+      (process.env as Record<string, string>).NODE_ENV = 'production';
+      delete process.env.AUTH_CREDENTIALS_ENABLED;
+      const closed = await loadProviders();
+      expect(closed.credentialsMock).not.toHaveBeenCalled();
+      expect(closed.capturedProviders).toHaveLength(0);
+
+      process.env.AUTH_CREDENTIALS_ENABLED = 'true';
+      const opted = await loadProviders();
+      expect(opted.credentialsMock).toHaveBeenCalled();
+
+      (process.env as Record<string, string>).NODE_ENV = 'test';
+      delete process.env.AUTH_CREDENTIALS_ENABLED;
+      const dev = await loadProviders();
+      expect(dev.credentialsMock).toHaveBeenCalled();
+    } finally {
+      (process.env as Record<string, string>).NODE_ENV = 'test';
+      delete process.env.AUTH_CREDENTIALS_ENABLED;
+    }
+  });
+
   it('GitHub provider included only when both env vars set', async () => {
     vi.resetModules();
     process.env.AUTH_GITHUB_ID = 'gh-id';

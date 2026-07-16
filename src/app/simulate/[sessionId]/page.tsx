@@ -8,6 +8,7 @@ import { useChatSession } from '@/hooks/useChatSession';
 import ChatInterface from '@/components/ChatInterface';
 import VoiceChatInterface from '@/components/VoiceChatInterface';
 import PhoneInterface from '@/components/PhoneInterface';
+import { scoreTextClass, scoreBarClass } from '@/lib/score-color';
 
 export default function SimulationPage() {
   const params = useParams();
@@ -92,31 +93,13 @@ export default function SimulationPage() {
                   <div key={s.id}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-medium">{s.criteria.name}</span>
-                      <span
-                        className={`text-sm font-bold ${
-                          s.score >= 8
-                            ? 'text-green-400'
-                            : s.score >= 6
-                            ? 'text-blue-400'
-                            : s.score >= 4
-                            ? 'text-yellow-400'
-                            : 'text-red-400'
-                        }`}
-                      >
+                      <span className={`text-sm font-bold ${scoreTextClass(s.score)}`}>
                         {s.score}/10
                       </span>
                     </div>
                     <div className="w-full bg-slate-700 rounded-full h-1.5 mb-1">
                       <div
-                        className={`h-1.5 rounded-full ${
-                          s.score >= 8
-                            ? 'bg-green-500'
-                            : s.score >= 6
-                            ? 'bg-blue-500'
-                            : s.score >= 4
-                            ? 'bg-yellow-500'
-                            : 'bg-red-500'
-                        }`}
+                        className={`h-1.5 rounded-full ${scoreBarClass(s.score)}`}
                         style={{ width: `${s.score * 10}%` }}
                       />
                     </div>

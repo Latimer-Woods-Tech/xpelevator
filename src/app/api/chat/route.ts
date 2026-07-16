@@ -3,7 +3,6 @@ import { sql } from '@/lib/db';
 import {
   buildSessionSystemPrompt,
   streamNextCustomerMessage,
-  scoreSession,
   customerModelForDifficulty,
   resolveScenarioDifficulty,
 } from '@/lib/ai';
@@ -11,6 +10,8 @@ import { classifyTurnLatency, routeReasonForDifficulty } from '@/lib/latency';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
+import { MAX_AGENT_MESSAGE_CHARS, exceedsTurnRate } from '@/lib/limits';
+import { finalizeAndScoreSession } from '@/lib/session-scoring';
 
 
 // POST /api/chat
@@ -26,19 +27,22 @@ export async function POST(request: Request) {
     const userOrgId = authSession.user.orgId;
     const userRole = authSession.user.role;
 
-    console.log('[Chat API] POST request received');
     const body = await request.json();
     const { sessionId, content } = body as { sessionId: string; content: string };
 
-    console.log('[Chat API] Request body:', { sessionId: sessionId?.substring(0, 8), content: content?.substring(0, 50) });
-
     if (!sessionId || !content?.trim()) {
-      console.error('[Chat API] Missing required fields');
       return NextResponse.json({ error: 'sessionId and content are required' }, { status: 400 });
+    }
+    // Every turn is a billable LLM call — cap message size so oversized bodies
+    // can't inflate token spend (and prompt-stuff the customer model).
+    if (content.length > MAX_AGENT_MESSAGE_CHARS) {
+      return NextResponse.json(
+        { error: `Message too long (max ${MAX_AGENT_MESSAGE_CHARS} characters)` },
+        { status: 400 }
+      );
     }
 
     // ── 1. Load session ───────────────────────────────────────────────────────
-    console.log('[Chat API] Loading session:', sessionId);
     const sessionResult = await sql`
       SELECT 
         ss.id,
@@ -55,7 +59,8 @@ export async function POST(request: Request) {
           json_agg(
             json_build_object(
               'role', m.role,
-              'content', m.content
+              'content', m.content,
+              'timestamp', m.timestamp
             ) ORDER BY m.timestamp
           ) FILTER (WHERE m.id IS NOT NULL),
           '[]'
@@ -80,15 +85,24 @@ export async function POST(request: Request) {
 
     // Multi-tenancy: verify user can access this session (owner or same-org admin)
     if (!canAccessSession(session, { id: userId, role: userRole, orgId: userOrgId })) {
-      console.error('[Chat API] Access denied for session:', sessionId);
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    console.log('[Chat API] Session loaded:', { status: session.status, type: session.type, scenario: session.scenario.name });
-
     if (session.status === 'COMPLETED' || session.status === 'CANCELLED') {
-      console.error('[Chat API] Session already closed');
       return NextResponse.json({ error: 'Session is already closed' }, { status: 400 });
+    }
+
+    // Turn throttle: a human can't reply in under MIN_TURN_INTERVAL_MS; a
+    // script hammering the endpoint burns Groq tokens. Enforced against DB
+    // message timestamps so it holds across Worker isolates.
+    const lastAgentMessage = [...(session.messages as Array<{ role: string; timestamp?: string }>)]
+      .reverse()
+      .find(m => m.role === 'AGENT');
+    if (exceedsTurnRate(lastAgentMessage?.timestamp, Date.now())) {
+      return NextResponse.json(
+        { error: 'Too many messages — slow down' },
+        { status: 429 }
+      );
     }
 
     // ── 2. Save agent message ─────────────────────────────────────────────────
@@ -148,9 +162,6 @@ export async function POST(request: Request) {
     // Stable telemetry token recording WHY this model was chosen (R-066), stored
     // alongside the turn's latency on the reply row so a slow turn explains itself.
     const routeReason = routeReasonForDifficulty(difficulty);
-    console.log('[Chat API] Customer model:', customerModel);
-    console.log('[Chat API] System prompt length:', systemPrompt.length);
-    console.log('[Chat API] System prompt preview:', systemPrompt.substring(0, 150) + '...');
 
     // Include the just-saved agent message in history (skip [START] signal)
     const history = [
@@ -160,8 +171,6 @@ export async function POST(request: Request) {
       })),
       ...(isStartSignal ? [] : [{ role: 'AGENT' as const, content: content.trim() }]),
     ];
-    console.log('[Chat API] Conversation history length:', history.length);
-    console.log('[Chat API] Is start signal:', isStartSignal);
 
     // ── 5. Stream AI response ─────────────────────────────────────────────────
     const encoder = new TextEncoder();
@@ -538,74 +547,15 @@ async function endSession(
 ) {
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 
-  // Mark session COMPLETED
-  await sql`
-    UPDATE simulation_sessions
-    SET status = 'COMPLETED', ended_at = NOW()
-    WHERE id = ${sessionId}
-  `;
-
-  // Resolve scoring criteria for this session's job title (active only). This
-  // is fetched here — at end-of-session — rather than on every conversational
-  // turn, so the criteria join stays off the streamed-reply hot path. Falls
-  // back to all active criteria if the job has no explicit links (unchanged
-  // scoring semantics vs. the previous per-turn load).
-  let criteria = await sql`
-    SELECT c.id, c.name, c.description, c.weight
-    FROM simulation_sessions ss
-    JOIN job_criteria jc ON jc.job_title_id = ss.job_title_id
-    JOIN criteria c ON c.id = jc.criteria_id
-    WHERE ss.id = ${sessionId} AND c.active = true
-  `;
-  if (criteria.length === 0) {
-    criteria = await sql`SELECT id, name, description, weight FROM criteria WHERE active = true`;
-  }
-
-  // Auto-score using AI
+  // Mark COMPLETED, score the transcript, and persist scores + scoring_status
+  // via the shared end-of-session path (identical to the phone path). The
+  // transcript is session.messages as of the turn that ended the session —
+  // criteria resolution stays off the per-turn hot path by living in here.
   const transcript = session.messages.map((m: { role: string; content: string }) => ({
     role: m.role as 'CUSTOMER' | 'AGENT',
     content: m.content,
   }));
-
-  let scores: Array<{ criteriaId: string; score: number; justification: string }> = [];
-  const scorable = transcript.length >= 2 && criteria.length > 0;
-  if (scorable) {
-    try {
-      scores = await scoreSession(transcript, criteria as any);
-    } catch (err) {
-      console.error('[chat] Auto-scoring failed:', err);
-    }
-  }
-  // A scorable session that produced zero scores is a scoring-engine failure
-  // (expired credential, parse failure, empty judge output) — not a genuinely
-  // unscored call. Surface it so the client shows "couldn't score this session"
-  // instead of a silent zero the manager can't distinguish from a bad call.
-  const scoringFailed = scorable && scores.length === 0;
-
-  // Save scores
-  if (scores.length > 0) {
-    for (const s of scores) {
-      await sql`
-        INSERT INTO scores (id, session_id, criteria_id, score, feedback, scored_at)
-        VALUES (gen_random_uuid(), ${sessionId}, ${s.criteriaId}, ${s.score}, ${s.justification}, NOW())
-      `;
-    }
-  }
-
-  // Persist WHY a session has (or lacks) scores so the manager report can tell a
-  // scoring-engine failure apart from a genuinely un-scorable call — a `null`
-  // score in the analytics/CSV/PDF is otherwise indistinguishable between the
-  // two, which is the "managers don't trust the /10 scores" kill-signal.
-  const scoringStatus = !scorable
-    ? 'NOT_SCORABLE'
-    : scores.length > 0
-      ? 'SCORED'
-      : 'FAILED';
-  await sql`
-    UPDATE simulation_sessions
-    SET scoring_status = ${scoringStatus}
-    WHERE id = ${sessionId}
-  `;
+  const { scoringFailed } = await finalizeAndScoreSession(sessionId, transcript);
 
   // Return final session state
   const finalSessionResult = await sql`

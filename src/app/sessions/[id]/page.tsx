@@ -1,6 +1,10 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { sql } from '@/lib/db';
+import { auth, signOut } from '@/auth';
+import { PageShell, Container, Badge, ButtonLink } from '@/components/ui';
+import { TopNav } from '@/components/ui/TopNav';
+import { scoreTextClass, scoreBarClass } from '@/lib/score-color';
 
 
 interface Props {
@@ -84,17 +88,15 @@ export default async function SessionDetailPage({ params }: Props) {
     return Math.round(weightedSum / totalWeight);
   })();
 
-  // Scores are on a 1–10 scale
-  const scoreColor = (s: number) =>
-    s >= 8 ? 'text-green-400' : s >= 5 ? 'text-yellow-400' : 'text-red-400';
+  // Scores are on a 1–10 scale — shared scale (score-color.ts), was a local
+  // 3-tier copy that disagreed with the other pages' thresholds.
+  const scoreColor = scoreTextClass;
+  const barColor = scoreBarClass;
 
-  const barColor = (s: number) =>
-    s >= 8 ? 'bg-green-500' : s >= 5 ? 'bg-yellow-500' : 'bg-red-500';
-
-  const statusColors: Record<string, string> = {
-    IN_PROGRESS: 'bg-blue-900/50 text-blue-400',
-    COMPLETED: 'bg-green-900/50 text-green-400',
-    ABANDONED: 'bg-slate-700 text-slate-400',
+  const statusTone = (status: string): 'success' | 'warning' | 'neutral' => {
+    if (status === 'COMPLETED') return 'success';
+    if (status === 'IN_PROGRESS') return 'warning';
+    return 'neutral';
   };
 
   const formatTime = (d: Date) =>
@@ -102,10 +104,18 @@ export default async function SessionDetailPage({ params }: Props) {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
     });
 
+  const authSession = await auth();
+  async function handleSignOut() {
+    'use server';
+    await signOut({ redirectTo: '/auth/signin' });
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white">
-      <div className="max-w-4xl mx-auto px-6 py-12">
-        <Link href="/sessions" className="text-blue-400 hover:text-blue-300 text-sm mb-8 inline-block">
+    <PageShell>
+      <TopNav user={authSession?.user} signOutAction={authSession?.user ? handleSignOut : undefined} />
+      <main>
+      <Container className="py-12">
+        <Link href="/sessions" className="text-brand-soft hover:text-brand text-sm mb-8 inline-block">
           &larr; Back to Sessions
         </Link>
 
@@ -113,9 +123,7 @@ export default async function SessionDetailPage({ params }: Props) {
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2 flex-wrap">
             <h1 className="text-2xl font-bold">{session.scenario.name}</h1>
-            <span className={`text-xs font-medium px-2 py-1 rounded ${statusColors[session.status] || 'bg-slate-700 text-slate-300'}`}>
-              {session.status.replace('_', ' ')}
-            </span>
+            <Badge tone={statusTone(session.status)}>{session.status.replace('_', ' ')}</Badge>
           </div>
           <div className="text-slate-400 text-sm">
             {session.jobTitle.name} &middot; {formatTime(session.createdAt)}
@@ -200,16 +208,14 @@ export default async function SessionDetailPage({ params }: Props) {
             )}
 
             {session.status === 'IN_PROGRESS' && (
-              <Link
-                href={`/simulate/${session.id}`}
-                className="mt-4 block w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl text-center text-sm font-medium transition-colors"
-              >
+              <ButtonLink href={`/simulate/${session.id}`} className="mt-4 w-full">
                 Resume Session →
-              </Link>
+              </ButtonLink>
             )}
           </div>
         </div>
-      </div>
-    </div>
+      </Container>
+      </main>
+    </PageShell>
   );
 }

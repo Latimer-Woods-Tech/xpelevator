@@ -21,10 +21,23 @@ import { NextResponse } from 'next/server';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { sql } from '@/lib/db';
 import { initiateCall, encodeClientState } from '@/lib/telnyx';
+import { requireAuth, AuthError } from '@/lib/auth-api';
+import { canAccessSession } from '@/lib/session-access';
 
 
 export async function POST(request: Request) {
   try {
+    // This endpoint places a billable outbound PSTN call and resets the
+    // session transcript — it must be authenticated and the caller must own
+    // the session (or be a same-org admin). Middleware only checks cookie
+    // presence, so the real gate is here.
+    const { session: authSession } = await requireAuth(request);
+    const viewer = {
+      id: authSession.user.id,
+      role: authSession.user.role,
+      orgId: authSession.user.orgId,
+    };
+
     const { sessionId, to, from } = (await request.json()) as {
       sessionId: string;
       to: string;
@@ -34,12 +47,18 @@ export async function POST(request: Request) {
     if (!sessionId || !to) {
       return NextResponse.json({ error: 'sessionId and to are required' }, { status: 400 });
     }
+    if (!/^\+[1-9]\d{6,14}$/.test(to)) {
+      return NextResponse.json({ error: 'to must be an E.164 phone number' }, { status: 400 });
+    }
 
     // Verify the session exists and is a PHONE type
     const sessionRows = await sql`
-      SELECT 
+      SELECT
         ss.id,
         ss.type,
+        ss.status,
+        ss.user_id as "userId",
+        ss.org_id as "orgId",
         ss.scenario_id as "scenarioId",
         ss.job_title_id as "jobTitleId",
         json_build_object('id', s.id, 'name', s.name) as scenario,
@@ -54,8 +73,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
     const session: any = sessionRows[0];
+    if (!canAccessSession({ userId: session.userId, orgId: session.orgId }, viewer)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
     if (session.type !== 'PHONE') {
       return NextResponse.json({ error: 'Session is not a PHONE type' }, { status: 400 });
+    }
+    // A completed session already has a scored transcript — never wipe it by
+    // re-dialing. Start a new session instead.
+    if (session.status === 'COMPLETED') {
+      return NextResponse.json(
+        { error: 'Session is already completed — start a new simulation to call again' },
+        { status: 409 }
+      );
     }
 
     // Encode session context into Telnyx client_state (threaded through all webhooks)
@@ -105,6 +135,9 @@ export async function POST(request: Request) {
       sessionId,
     });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error('Telnyx call initiation error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to initiate call' },

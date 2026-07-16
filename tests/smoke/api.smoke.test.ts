@@ -1,6 +1,24 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 
-const BASE_URL = process.env.BASE_URL ?? 'http://localhost:3000';
+/** A usable smoke target is an absolute http(s) URL; anything else (unset, '',
+ * a bare '/') is not a real deployment and means "no target configured". */
+function isRealTarget(v: string | undefined): v is string {
+  if (!v) return false;
+  try {
+    const u = new URL(v);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+// The target comes from SMOKE_BASE_URL, NOT BASE_URL: Vite forces
+// process.env.BASE_URL to its `base` ('/') under vitest, so BASE_URL can never
+// carry a real deploy URL here. When a real target is set, an unreachable
+// target is a hard failure (the deploy is down); with none, the suite skips
+// visibly instead of passing vacuously.
+const EXPLICIT_TARGET = isRealTarget(process.env.SMOKE_BASE_URL);
+const BASE_URL = EXPLICIT_TARGET ? process.env.SMOKE_BASE_URL! : 'http://localhost:3000';
 const TIMEOUT_MS = 15_000;
 
 async function fetchJson(path: string) {
@@ -25,14 +43,15 @@ describe('Smoke: live API', () => {
     } catch {
       reachable = false;
     }
-    if (!reachable) {
-      // eslint-disable-next-line no-console
-      console.warn(`Skipping smoke tests; cannot reach ${BASE_URL}`);
+    // An explicitly-targeted-but-unreachable host is a hard failure — silently
+    // passing here is exactly the vacuous-green bug smoke tests must not have.
+    if (!reachable && EXPLICIT_TARGET) {
+      throw new Error(`Smoke target ${BASE_URL} is unreachable — /api/health did not return ok`);
     }
   });
 
-  it('serves /api/criteria with an array', async () => {
-    if (!reachable) return;
+  it('serves /api/criteria with an array', async (ctx) => {
+    if (!reachable) ctx.skip();
     const { res, json } = await fetchJson('/api/criteria');
     expect(res.status).toBe(200);
     expect(Array.isArray(json)).toBe(true);
@@ -42,8 +61,8 @@ describe('Smoke: live API', () => {
     }
   }, TIMEOUT_MS);
 
-  it('serves /api/jobs with an array', async () => {
-    if (!reachable) return;
+  it('serves /api/jobs with an array', async (ctx) => {
+    if (!reachable) ctx.skip();
     const { res, json } = await fetchJson('/api/jobs');
     expect(res.status).toBe(200);
     expect(Array.isArray(json)).toBe(true);

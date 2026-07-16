@@ -36,13 +36,22 @@ declare module 'next-auth' {
 const githubProvider =
   process.env.AUTH_GITHUB_ID && process.env.AUTH_GITHUB_SECRET ? [GitHub] : [];
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
-  providers: [
-    ...githubProvider,
+// The Credentials provider performs NO password verification — it signs in any
+// email that exists (and outside production auto-creates one). That is a
+// dev/demo convenience, not an authentication mechanism, so in production it is
+// excluded entirely unless explicitly opted into with AUTH_CREDENTIALS_ENABLED=true
+// (e.g. a sales-demo deployment that accepts the risk). Production sign-in is
+// OAuth (GitHub) unless that flag is set.
+const credentialsEnabled =
+  process.env.NODE_ENV !== 'production' ||
+  process.env.AUTH_CREDENTIALS_ENABLED === 'true';
 
+const credentialsProvider = credentialsEnabled
+  ? [
     // Credentials provider — looks up user by email in the database.
-    // For demo/dev: if no user exists, creates one with MEMBER role.
-    // For production: set CREDENTIALS_REQUIRE_EXISTING=true to only allow existing users.
+    // Dev/demo only: if no user exists, creates one with MEMBER role.
+    // Auto-creation never happens in production, and can be disabled anywhere
+    // with CREDENTIALS_REQUIRE_EXISTING=true.
     Credentials({
       credentials: {
         email: { label: 'Email', type: 'email', placeholder: 'you@example.com' },
@@ -68,8 +77,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             role: existingUsers[0].role as string,
           } : null;
 
-          // In dev/demo mode, auto-create user if not exists
-          if (!user && process.env.CREDENTIALS_REQUIRE_EXISTING !== 'true') {
+          // Auto-create user if not exists — dev/demo only, never in production
+          // (open registration would hand out authenticated accounts to anyone).
+          const allowAutoCreate =
+            process.env.NODE_ENV !== 'production' &&
+            process.env.CREDENTIALS_REQUIRE_EXISTING !== 'true';
+          if (!user && allowAutoCreate) {
             const created = await sql`
               INSERT INTO users (id, email, name, role, created_at)
               VALUES (gen_random_uuid(), ${email}, ${email.split('@')[0]}, 'MEMBER', NOW())
@@ -99,7 +112,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         }
       },
     }),
-  ],
+  ]
+  : [];
+
+export const { handlers, signIn, signOut, auth } = NextAuth({
+  providers: [...githubProvider, ...credentialsProvider],
 
   pages: {
     signIn: '/auth/signin',

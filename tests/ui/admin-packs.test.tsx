@@ -24,7 +24,15 @@ vi.mock('next/link', () => ({
 async function renderAdmin() {
   vi.resetModules();
   const { default: Page } = await import('@/app/admin/page');
-  return render(<Page />);
+  // The admin tabs now use the toast/confirm feedback context (they replaced
+  // native alert()/confirm()), so the page must render under FeedbackProvider —
+  // exactly as it does in the app's Providers tree.
+  const { FeedbackProvider } = await import('@/components/ui/feedback');
+  return render(
+    <FeedbackProvider>
+      <Page />
+    </FeedbackProvider>
+  );
 }
 
 function jsonResponse(body: unknown, status = 200) {

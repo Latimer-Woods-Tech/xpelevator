@@ -22,10 +22,10 @@ import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { getGroqClient } from '@/lib/groq-fetch';
 import {
   buildSessionSystemPrompt,
-  scoreSession,
   customerModelForDifficulty,
   resolveScenarioDifficulty,
 } from '@/lib/ai';
+import { finalizeAndScoreSession } from '@/lib/session-scoring';
 import { sql } from '@/lib/db';
 import {
   callSpeak,
@@ -283,7 +283,8 @@ async function handleEvent(
         if (!state) break;
 
         const transcriptionData = payload.transcription_data;
-        console.log(`[telnyx] call.transcription: is_final=${transcriptionData?.is_final}, transcript='${transcriptionData?.transcript?.slice(0, 80) ?? ''}', language=${transcriptionData?.language}`);
+        // Log metadata only — never the transcript text (caller PII).
+        console.log(`[telnyx] call.transcription: is_final=${transcriptionData?.is_final}, language=${transcriptionData?.language}`);
         if (!transcriptionData?.is_final) {
           // Partial result — ignore, wait for is_final=true
           break;
@@ -371,47 +372,21 @@ async function handleEvent(
         const replyRouteReason = routeReasonForDifficulty(resolveScenarioDifficulty(script));
 
         if (isResolved) {
-          // Mark session completed
-          await sql`
-            UPDATE simulation_sessions
-            SET status = 'COMPLETED', ended_at = NOW()
-            WHERE id = ${state.sessionId}
-          `;
-          // Load criteria for this job title (fallback: all active criteria)
-          const criteriaRows = await sql`
-            SELECT c.id, c.name, c.description, c.weight
-            FROM job_criteria jc
-            JOIN criteria c ON c.id = jc.criteria_id
-            WHERE jc.job_title_id = ${state.jobTitleId} AND c.active = true
-          `;
-          let scoringCriteria = criteriaRows as any[];
-          if (scoringCriteria.length === 0) {
-            const globalCriteria = await sql`SELECT id, name, description, weight FROM criteria WHERE active = true`;
-            scoringCriteria = globalCriteria as any[];
-          }
-          // Load full transcript for scoring
+          // Load the full transcript from the DB, then run the SAME
+          // end-of-session path as chat (COMPLETED + score + batched insert +
+          // scoring_status). Previously this branch re-implemented scoring and
+          // never wrote scoring_status, so every phone session was `null` in
+          // the manager report.
           const allMessages = await sql`
             SELECT role, content FROM chat_messages
             WHERE session_id = ${state.sessionId}
             ORDER BY timestamp ASC
           `;
-          const fullTranscript = (allMessages as any[]).map((m: any) => ({
+          const fullTranscript = (allMessages as Array<{ role: string; content: string }>).map((m) => ({
             role: m.role as 'CUSTOMER' | 'AGENT',
             content: m.content,
           }));
-          if (fullTranscript.length >= 2 && scoringCriteria.length > 0) {
-            try {
-              const scores = await scoreSession(fullTranscript, scoringCriteria);
-              for (const s of scores) {
-                await sql`
-                  INSERT INTO scores (id, session_id, criteria_id, score, feedback, scored_at)
-                  VALUES (gen_random_uuid(), ${state.sessionId}, ${s.criteriaId}, ${s.score}, ${s.justification}, NOW())
-                `;
-              }
-            } catch (err) {
-              console.error('[telnyx] Auto-scoring failed:', err);
-            }
-          }
+          await finalizeAndScoreSession(state.sessionId, fullTranscript);
         }
 
         const newState: TelnyxClientState = {

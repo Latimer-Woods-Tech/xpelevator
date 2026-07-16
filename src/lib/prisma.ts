@@ -1,4 +1,12 @@
-// ── Prisma client for Cloudflare Workers via Neon adapter ───────────────────
+// ── Prisma client — SCHEMA/MIGRATIONS + TEST TOOLING ONLY ───────────────────
+//
+// Decision (P2-4): Prisma owns the schema (prisma/schema.prisma) and migrations,
+// and provides the data-factory client for the live integration-test helper
+// (tests/integration/helpers/db.ts). It is NOT used by production request paths:
+// every src/app/** route queries Neon directly via `sql` from '@/lib/db'. This
+// boundary is enforced by a no-restricted-imports ESLint rule over src/app/**.
+// Do not import this module from application code — the Prisma client has known
+// runtime incompatibilities on the Cloudflare Workers edge (see LESSONS_LEARNED).
 //
 // Uses PrismaNeonHTTP which communicates with Neon via HTTP. The HTTP adapter
 // completely bypasses Prisma's query engine, sending SQL directly to Neon's API.

@@ -166,10 +166,13 @@ export async function verifyTelnyxWebhook(
 ): Promise<boolean> {
   const publicKey = process.env.TELNYX_PUBLIC_KEY;
 
-  // If no public key configured, skip verification (dev mode)
+  // No public key configured: skip verification only outside production.
+  // In production a missing key must reject (fail closed) — otherwise a
+  // misconfigured secret silently accepts forged webhook events.
   if (!publicKey) {
     if (process.env.NODE_ENV === 'production') {
-      console.warn('[Telnyx] TELNYX_PUBLIC_KEY not set — webhook verification disabled in production!');
+      console.error('[Telnyx] TELNYX_PUBLIC_KEY not set — rejecting webhook (fail closed)');
+      return false;
     }
     return true;
   }
