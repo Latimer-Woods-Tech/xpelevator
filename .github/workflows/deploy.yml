@@ -25,6 +25,13 @@ env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+# checkout needs contents:read; the blocked-promotion alert step opens/comments a
+# GitHub issue, which needs issues:write. Declared explicitly (default token would
+# otherwise vary by repo setting). wrangler auth uses CF_API_TOKEN, not this token.
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   # Apply any pending Prisma migrations to the live Neon DB BEFORE the new worker
   # is deployed. `deploy` needs this, so code that reads a new column can never go
@@ -219,6 +226,7 @@ jobs:
           echo "Preview deployment URL: $url"
 
       - name: Smoke-gate the preview build BEFORE promoting (fail-closed)
+        id: smoke
         run: |
           set -e
           BASE="${{ steps.preview.outputs.preview_url }}"
@@ -253,6 +261,37 @@ jobs:
             exit 1
           fi
           echo "✅ preview smoke passed (/api/health 200 + DB-read canary 404) — safe to promote"
+
+      # ── Alert on a blocked promotion ───────────────────────────────────────
+      # The preview→smoke→promote gate above is fail-closed: if the preview
+      # deploy or the smoke check fails, the "Promote" step below is skipped and
+      # prod stays on the last-good build (trainees are safe). But that block is
+      # otherwise SILENT — just a red-X job in the Actions tab — so a merged
+      # change can quietly fail to ship without anyone noticing. This mirrors the
+      # #82 uptime-monitor alerting: open (or comment on) a single GitHub alert
+      # issue whenever the gate blocks a promotion. Scoped to the pre-promotion
+      # steps only (`preview` / `smoke`); it sits BEFORE Promote so a
+      # post-promotion verify failure never trips this particular alert.
+      - name: Alert on a blocked promotion (pre-promotion gate failed)
+        if: ${{ failure() && (steps.preview.conclusion == 'failure' || steps.smoke.conclusion == 'failure') }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const blocker = '${{ steps.smoke.conclusion }}' === 'failure'
+              ? 'the pre-promotion **smoke check** (`/api/health` 200 + DB-read canary 404 on the preview URL)'
+              : 'the **preview deployment** step (the build never reached a smoke-able preview URL)';
+            const reason =
+              `The fail-closed preview→smoke→promote gate **blocked a promotion to production**: ${blocker} failed, ` +
+              `so the "Promote to production" step was skipped. ` +
+              `**xpelevator.com is unaffected — it stays on the last-good build** (this is the gate working as designed, #78 prevention). ` +
+              `But the merged change did **NOT** ship. Fix the build/DB issue the run log shows, then re-run this deploy to promote it.`;
+            await require('./scripts/monitor-alert.cjs')({
+              github, context, reason,
+              job: 'deploy / preview→smoke→promote',
+              title: '🔴 [deploy] xpelevator promotion blocked by the smoke gate',
+              intro: 'The fail-closed deploy gate blocked a promotion to production before a bad build could reach live trainees.',
+              source: '`.github/workflows/deploy.yml` (preview→smoke→promote gate, tracked on #16).',
+            });
 
       - name: Promote the smoked build to production (--branch=main)
         run: |
