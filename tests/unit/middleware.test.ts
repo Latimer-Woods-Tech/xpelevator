@@ -39,4 +39,43 @@ describe('middleware auth gate', () => {
       expect(res.status, `${path} should be gated`).toBe(401);
     }
   });
+
+  it('lets anonymous callers reach the public /api/scenario-packs catalog', () => {
+    const res = middleware(anonRequest('/api/scenario-packs'));
+    expect(passedThrough(res)).toBe(true);
+  });
+
+  it('gates the admin import subpath — a public route does NOT expose subpaths', () => {
+    // Regression guard: /api/scenario-packs is public (exact), but the write
+    // action /api/scenario-packs/import must stay gated at the middleware (the
+    // handler also enforces ADMIN). A prefix-match public rule would leak it.
+    const res = middleware(anonRequest('/api/scenario-packs/import'));
+    expect(res.status).toBe(401);
+  });
+
+  it('lets anonymous callers reach the public client-facing brand read /api/branding/[slug]', () => {
+    // R-050: the brand-safe, slug-keyed read must be reachable pre-sign-in so an
+    // operator's brand renders on the login shell. Public by prefix (dynamic
+    // [slug] segment); the handler returns only brand-safe fields.
+    for (const slug of ['acme', 'operator-1', 'a-b-c']) {
+      const res = middleware(anonRequest(`/api/branding/${slug}`));
+      expect(passedThrough(res), `/api/branding/${slug} should be public`).toBe(true);
+    }
+  });
+
+  it('keeps the admin branding write path /api/orgs/[id]/branding gated', () => {
+    // The public read is /api/branding/[slug]; the admin write stays under
+    // /api/orgs/[id]/branding and MUST remain gated (a 401 at the middleware).
+    // Guards that opening the read prefix did not widen the write surface.
+    const res = middleware(anonRequest('/api/orgs/org-1/branding'));
+    expect(res.status).toBe(401);
+  });
+
+  it('gates the self-context route /api/me (R-051) — never public', () => {
+    // /api/me returns the caller's own identity + org context and MUST require
+    // auth. A near-miss to the public /api/branding prefix, so this pins that it
+    // is not accidentally opened.
+    const res = middleware(anonRequest('/api/me'));
+    expect(res.status).toBe(401);
+  });
 });

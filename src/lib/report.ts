@@ -32,6 +32,12 @@ export interface ReportSession {
   scenario: string | null;
   scores: ReportScore[];
   /**
+   * Owning client-org name — populated only by the operator portfolio roll-up
+   * (`?scope=clients`), where sessions span many client orgs and must be
+   * attributed. Absent/`null` on the single-org report, which never renders it.
+   */
+  organization?: string | null;
+  /**
    * Raw end-of-session scoring outcome (`SCORED` | `FAILED` | `NOT_SCORABLE`),
    * or `null`/`undefined` for sessions completed before the column existed.
    */
@@ -205,6 +211,232 @@ export function sessionsToPdf(sessions: readonly ReportSession[]): Uint8Array {
     title: 'XPElevator — Session Report',
     subtitle: `Generated ${generated} · ${count} completed session${count === 1 ? '' : 's'} · score shown is the weighted average /10`,
     columns: PDF_COLUMNS,
+    rows,
+  });
+}
+
+// ─── Operator portfolio roll-up ──────────────────────────────────────────────
+//
+// The single-client artifacts above answer "how is THIS client doing?". The
+// roll-up answers "how is my whole book of clients doing?" — one export spanning
+// every client org beneath an operator. It reuses the same per-session weighting
+// and scoring logic; the only shape difference is a leading `Organization`
+// column that attributes each session to its client org (the whole point of a
+// portfolio view). The single-org columns above are left byte-stable — this is a
+// distinct, additive column set, never a mutation of `REPORT_COLUMNS`.
+
+/** Roll-up column order — the single-org columns, prefixed with `Organization`. */
+export const ROLLUP_COLUMNS: readonly string[] = ['Organization', ...REPORT_COLUMNS];
+
+/** A session's owning client-org name for the roll-up (`(unassigned)` if null). */
+function reportOrg(session: ReportSession): string {
+  return session.organization ?? '(unassigned)';
+}
+
+/** Serialise sessions to the operator portfolio roll-up CSV string. */
+export function rollupSessionsToCsv(sessions: readonly ReportSession[]): string {
+  const rows: CsvCell[][] = sessions.map((session) => {
+    const r = sessionToReportRow(session);
+    return [
+      reportOrg(session),
+      r.sessionId,
+      r.date,
+      r.trainee,
+      r.jobTitle,
+      r.scenario,
+      r.modality,
+      r.criteriaScored,
+      r.averageScore,
+      r.weightedAverage,
+      r.scoring,
+    ];
+  });
+  return toCsv(ROLLUP_COLUMNS, rows);
+}
+
+/**
+ * Column layout for the roll-up PDF. Widths are PDF points and sum to 532 — the
+ * full printable width of a US-Letter page at a 40pt margin — after trimming the
+ * single-org widths to make room for the leading `Organization` column.
+ */
+const ROLLUP_PDF_COLUMNS: readonly PdfColumn[] = [
+  { header: 'Organization', width: 70 },
+  { header: 'Session', width: 48 },
+  { header: 'Date', width: 52 },
+  { header: 'Trainee', width: 78 },
+  { header: 'Job Title', width: 70 },
+  { header: 'Scenario', width: 70 },
+  { header: 'Mode', width: 30 },
+  { header: '#', width: 16 },
+  { header: 'Avg', width: 28 },
+  { header: 'Wtd', width: 30 },
+  { header: 'Scoring', width: 40 },
+];
+
+// ─── Operator portfolio per-client totals (summary view) ─────────────────────
+//
+// The roll-up above is one row per session (the detail). The summary answers the
+// operator's at-a-glance question — "how is EACH client doing, and my whole book
+// overall?" — as one rolled-up row per client org plus a portfolio grand total.
+// The per-client headline number pools every score across all of that client's
+// sessions (`sum(score*weight)/sum(weight)`), the same weighting the per-session
+// number and in-app analytics use, extended to the client's whole set. This is a
+// distinct, additive artifact — the detail columns/functions above are untouched.
+
+/** One client org's rolled-up totals across its sessions in the report. */
+export interface ClientTotal {
+  /** Owning client-org name (`(unassigned)` when a session has no org). */
+  organization: string;
+  /** How many completed sessions this client has in the report window. */
+  sessions: number;
+  /** How many of those sessions produced a weighted score. */
+  scored: number;
+  /** Weighted average /10 pooled across ALL the client's scores, or `null`. */
+  weightedAverage: number | null;
+}
+
+/** Summary column order — one totals row per client, then a portfolio total. */
+export const ROLLUP_SUMMARY_COLUMNS: readonly string[] = [
+  'Organization',
+  'Sessions',
+  'Scored',
+  'Weighted Average',
+];
+
+/** Label for the trailing portfolio grand-total row (distinct from any org). */
+const PORTFOLIO_TOTAL_LABEL = 'TOTAL (all clients)';
+
+/**
+ * Pool every score across a set of sessions into one weighted average
+ * (`sum(score*weight)/sum(weight)`) — the per-session convention extended to the
+ * whole set. `null` when the set carries no positive-weight scores.
+ */
+function pooledWeightedAverage(sessions: readonly ReportSession[]): number | null {
+  let weightedSum = 0;
+  let weightTotal = 0;
+  for (const s of sessions) {
+    for (const sc of s.scores ?? []) {
+      weightedSum += sc.score * sc.criteria.weight;
+      weightTotal += sc.criteria.weight;
+    }
+  }
+  return weightTotal > 0 ? round1(weightedSum / weightTotal) : null;
+}
+
+/** A session counts as "scored" when it yields a non-null weighted average. */
+function isScored(session: ReportSession): boolean {
+  return sessionToReportRow(session).weightedAverage != null;
+}
+
+/**
+ * Roll a flat session set up to one totals row per client org, sorted by org
+ * name. Sessions with no org fold into `(unassigned)`. Does NOT include the
+ * portfolio grand total — the serialisers append that as a trailing row.
+ */
+export function rollupClientTotals(
+  sessions: readonly ReportSession[],
+): ClientTotal[] {
+  const byOrg = new Map<string, ReportSession[]>();
+  for (const session of sessions) {
+    const org = reportOrg(session);
+    const group = byOrg.get(org);
+    if (group) group.push(session);
+    else byOrg.set(org, [session]);
+  }
+  return [...byOrg.entries()]
+    .map(([organization, group]) => ({
+      organization,
+      sessions: group.length,
+      scored: group.filter(isScored).length,
+      weightedAverage: pooledWeightedAverage(group),
+    }))
+    .sort((a, b) => a.organization.localeCompare(b.organization));
+}
+
+/** Serialise the per-client totals + portfolio grand total to a CSV string. */
+export function rollupSummaryToCsv(sessions: readonly ReportSession[]): string {
+  const totals = rollupClientTotals(sessions);
+  const rows: CsvCell[][] = totals.map((t) => [
+    t.organization,
+    t.sessions,
+    t.scored,
+    t.weightedAverage,
+  ]);
+  if (sessions.length > 0) {
+    rows.push([
+      PORTFOLIO_TOTAL_LABEL,
+      sessions.length,
+      totals.reduce((n, t) => n + t.scored, 0),
+      pooledWeightedAverage(sessions),
+    ]);
+  }
+  return toCsv(ROLLUP_SUMMARY_COLUMNS, rows);
+}
+
+/**
+ * Column layout for the summary PDF. Widths are PDF points and sum to 522 —
+ * inside the 532pt printable width of a US-Letter page at a 40pt margin.
+ */
+const ROLLUP_SUMMARY_PDF_COLUMNS: readonly PdfColumn[] = [
+  { header: 'Organization', width: 240 },
+  { header: 'Sessions', width: 90 },
+  { header: 'Scored', width: 90 },
+  { header: 'Weighted Avg', width: 102 },
+];
+
+/** Serialise the per-client totals + portfolio grand total to a PDF (bytes). */
+export function rollupSummaryToPdf(sessions: readonly ReportSession[]): Uint8Array {
+  const totals = rollupClientTotals(sessions);
+  const rows: (string | number)[][] = totals.map((t) => [
+    t.organization,
+    t.sessions,
+    t.scored,
+    pdfScore(t.weightedAverage),
+  ]);
+  if (sessions.length > 0) {
+    rows.push([
+      PORTFOLIO_TOTAL_LABEL,
+      sessions.length,
+      totals.reduce((n, t) => n + t.scored, 0),
+      pdfScore(pooledWeightedAverage(sessions)),
+    ]);
+  }
+
+  const generated = new Date().toISOString().slice(0, 10);
+  const n = totals.length;
+  return renderTablePdf({
+    title: 'XPElevator — Portfolio Summary',
+    subtitle: `Generated ${generated} · ${n} client organisation${n === 1 ? '' : 's'} · weighted average /10 pooled across each client's sessions`,
+    columns: ROLLUP_SUMMARY_PDF_COLUMNS,
+    rows,
+  });
+}
+
+/** Serialise sessions to the operator portfolio roll-up PDF (raw bytes). */
+export function rollupSessionsToPdf(sessions: readonly ReportSession[]): Uint8Array {
+  const rows = sessions.map((session) => {
+    const r = sessionToReportRow(session);
+    return [
+      reportOrg(session),
+      r.sessionId.slice(0, 8),
+      r.date,
+      r.trainee,
+      r.jobTitle,
+      r.scenario,
+      r.modality,
+      r.criteriaScored,
+      pdfScore(r.averageScore),
+      pdfScore(r.weightedAverage),
+      r.scoring,
+    ];
+  });
+
+  const generated = new Date().toISOString().slice(0, 10);
+  const count = rows.length;
+  return renderTablePdf({
+    title: 'XPElevator — Portfolio Report',
+    subtitle: `Generated ${generated} · ${count} completed session${count === 1 ? '' : 's'} across your client organisations · score shown is the weighted average /10`,
+    columns: ROLLUP_PDF_COLUMNS,
     rows,
   });
 }

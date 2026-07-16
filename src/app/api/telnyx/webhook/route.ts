@@ -20,7 +20,11 @@
 import { NextResponse } from 'next/server';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { getGroqClient } from '@/lib/groq-fetch';
-import { buildSessionSystemPrompt } from '@/lib/ai';
+import {
+  buildSessionSystemPrompt,
+  customerModelForDifficulty,
+  resolveScenarioDifficulty,
+} from '@/lib/ai';
 import { finalizeAndScoreSession } from '@/lib/session-scoring';
 import { sql } from '@/lib/db';
 import {
@@ -32,6 +36,12 @@ import {
   encodeClientState,
 } from '@/lib/telnyx';
 import { verifyTelnyxWebhook } from '@/lib/auth-api';
+import {
+  classifyPhoneTurn,
+  phoneTurnTelemetry,
+  routeReasonForDifficulty,
+  type PersistedTurnTelemetry,
+} from '@/lib/latency';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -155,6 +165,11 @@ async function handleEvent(
           break;
         }
 
+        // Phone-turn latency (R-058) — the opening leg: call answered → the
+        // simulated customer's first words. `turnStart` here is the moment the
+        // call connects; the gap the trainee waits through before hearing anyone.
+        const openTurnStart = Date.now();
+
         // Load scenario script for the opening line
         const scenarioRows = await sql`
           SELECT id, script FROM scenarios WHERE id = ${state.scenarioId}
@@ -163,22 +178,32 @@ async function handleEvent(
         const script = (scenario?.script ?? {}) as Record<string, unknown>;
 
         // Generate AI opening line via Groq
+        // Conversation-speed lever (R-059): mirror the chat path — pick the model
+        // tier by scenario difficulty instead of hard-coding the heavy 70B model
+        // on every phone turn. Hard scenarios keep the higher-realism 70B model;
+        // easy/medium use the ~3x faster 8B model so the simulated customer starts
+        // speaking closer to real-time (directly targeting the founder's
+        // "half-speed" voice signal — R-058 showed the phone path ran 70B always).
+        const customerModel = customerModelForDifficulty(resolveScenarioDifficulty(script));
         const systemPromptOpening = buildSessionSystemPrompt(state.scenarioName, script, state.sessionId);
         const client = getGroqClient();
         const opening = await client.chatCompletion({
-          model: 'llama-3.3-70b-versatile',
+          model: customerModel,
           messages: [
             { role: 'system', content: systemPromptOpening },
             { role: 'user', content: '[START_CONVERSATION]' },
           ],
           max_tokens: 100,
         });
+        const openReplyReadyMs = Date.now() - openTurnStart;
 
         const openingText = opening.choices[0]?.message?.content?.trim() ?? 'Hello?';
         const cleanOpening = openingText.replace('[RESOLVED]', '').trim();
 
-        // Save AI opening (CUSTOMER role)
-        await saveMessage(state.sessionId, 'CUSTOMER', cleanOpening);
+        // Save AI opening (CUSTOMER role) — keep its id so this turn's latency
+        // telemetry (R-070) can be stamped once callSpeak gives the dispatch total.
+        const openingMsgId = await saveMessage(state.sessionId, 'CUSTOMER', cleanOpening);
+        const openRouteReason = routeReasonForDifficulty(resolveScenarioDifficulty(script));
 
         // Speak the opening — call.speak.ended will trigger startTranscription
         const newState = { ...state, turnCount: 1 };
@@ -186,6 +211,21 @@ async function handleEvent(
           await callSpeak(call_control_id, {
             payload: cleanOpening,
             clientState: encodeClientState(newState as unknown as Record<string, unknown>),
+          });
+          const openTiming = classifyPhoneTurn(openReplyReadyMs, Date.now() - openTurnStart);
+          // Persist the same felt-speed number the log reports so the R-068
+          // byModality split populates the PHONE bucket (R-070).
+          await stampTurnTelemetry(
+            openingMsgId,
+            phoneTurnTelemetry(openTiming, customerModel, openRouteReason),
+          );
+          console.log('[telnyx] latency', {
+            sessionId: state.sessionId.slice(0, 8),
+            leg: 'opening',
+            model: customerModel,
+            replyReadyMs: openTiming.replyReadyMs,
+            speakDispatchMs: openTiming.speakDispatchMs,
+            tier: openTiming.tier,
           });
           console.log('[telnyx] call.answered: callSpeak succeeded, session:', state.sessionId);
         } catch (speakErr) {
@@ -272,6 +312,14 @@ async function handleEvent(
           break;
         }
 
+        // Phone-turn latency instrumentation (R-058): the founder's "half-speed"
+        // signal was about the spoken experience. R-057 proved the chat text turn
+        // is real-time, so the lag lives elsewhere on the voice path. `turnStart`
+        // marks the trainee stopping speaking (the final transcript in hand); we
+        // then measure the server-controllable gap before the simulated customer
+        // can speak again: model reply generated, then dispatched to Telnyx TTS.
+        const turnStart = Date.now();
+
         // Stop transcription and kick off Groq in parallel for lower latency.
         // We save the message and load history while Telnyx processes the stop.
         const [, scenarioRows, messages] = await Promise.all([
@@ -296,10 +344,13 @@ async function handleEvent(
         // Append the current agent turn so Groq has it in context
         groqMessages.push({ role: 'user' as const, content: transcript });
 
+        // Same conversation-speed lever as the opening leg (R-059): route the
+        // reply turn by difficulty rather than always paying the 70B latency.
+        const customerModel = customerModelForDifficulty(resolveScenarioDifficulty(script));
         const systemPromptGather = buildSessionSystemPrompt(state.scenarioName, script, state.sessionId);
         const client = getGroqClient();
         const aiReply = await client.chatCompletion({
-          model: 'llama-3.3-70b-versatile',
+          model: customerModel,
           messages: [
             { role: 'system', content: systemPromptGather },
             ...groqMessages,
@@ -308,12 +359,17 @@ async function handleEvent(
           temperature: 0.8,
         });
 
+        // Model reply is ready — the compute leg the trainee waits through.
+        const replyReadyMs = Date.now() - turnStart;
+
         const aiText = aiReply.choices[0]?.message?.content?.trim() ?? '';
         const isResolved = aiText.includes('[RESOLVED]');
         const cleanText = aiText.replace('[RESOLVED]', '').trim();
 
-        // Save AI reply to DB (AI = CUSTOMER role)
-        await saveMessage(state.sessionId, 'CUSTOMER', cleanText);
+        // Save AI reply to DB (AI = CUSTOMER role) — keep its id so this turn's
+        // latency telemetry (R-070) can be stamped once the dispatch total is known.
+        const replyMsgId = await saveMessage(state.sessionId, 'CUSTOMER', cleanText);
+        const replyRouteReason = routeReasonForDifficulty(resolveScenarioDifficulty(script));
 
         if (isResolved) {
           // Load the full transcript from the DB, then run the SAME
@@ -340,9 +396,27 @@ async function handleEvent(
 
         // Speak AI reply — call.speak.ended will restart startTranscription automatically
         // (or hang up if isResolved — checked in call.speak.ended handler)
+        const speakStart = Date.now();
         await callSpeak(call_control_id, {
           payload: cleanText,
           clientState: encodeClientState(newState as unknown as Record<string, unknown>),
+        });
+        // Dispatch gap excludes the resolved-turn scoring block above so the metric
+        // is comparable turn-to-turn: reply-ready time + the TTS dispatch itself.
+        const replyTiming = classifyPhoneTurn(replyReadyMs, replyReadyMs + (Date.now() - speakStart));
+        // Persist the same felt-speed number the log reports so the R-068
+        // byModality split populates the PHONE bucket (R-070).
+        await stampTurnTelemetry(
+          replyMsgId,
+          phoneTurnTelemetry(replyTiming, customerModel, replyRouteReason),
+        );
+        console.log('[telnyx] latency', {
+          sessionId: state.sessionId.slice(0, 8),
+          leg: 'reply',
+          model: customerModel,
+          replyReadyMs: replyTiming.replyReadyMs,
+          speakDispatchMs: replyTiming.speakDispatchMs,
+          tier: replyTiming.tier,
         });
         break;
       }
@@ -366,9 +440,35 @@ async function handleEvent(
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-async function saveMessage(sessionId: string, role: 'CUSTOMER' | 'AGENT', content: string) {
-  await sql`
+async function saveMessage(
+  sessionId: string,
+  role: 'CUSTOMER' | 'AGENT',
+  content: string,
+): Promise<string> {
+  const rows = await sql`
     INSERT INTO chat_messages (id, session_id, role, content, timestamp)
     VALUES (gen_random_uuid(), ${sessionId}, ${role}, ${content}, NOW())
+    RETURNING id
+  `;
+  return (rows as Array<{ id: string }>)[0].id;
+}
+
+/**
+ * Stamp a saved CUSTOMER phone-turn row with its latency telemetry (R-070).
+ * The phone path saves the reply BEFORE the TTS-dispatch total is known (the row
+ * must exist for the resolved-turn scoring read), so telemetry is written as a
+ * follow-up UPDATE once `classifyPhoneTurn` has the full timing — mirroring the
+ * columns R-066 persists at the chat path's CUSTOMER INSERT. AGENT rows and any
+ * turn where dispatch never completes stay NULL, exactly like the chat path.
+ */
+async function stampTurnTelemetry(messageId: string, t: PersistedTurnTelemetry) {
+  await sql`
+    UPDATE chat_messages
+    SET ttft_ms = ${t.ttftMs},
+        total_ms = ${t.totalMs},
+        latency_tier = ${t.latencyTier},
+        model = ${t.model},
+        route_reason = ${t.routeReason}
+    WHERE id = ${messageId}
   `;
 }

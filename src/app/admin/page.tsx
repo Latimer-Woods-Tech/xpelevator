@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { Criteria, JobTitle, Scenario } from '@/types';
 import { useToast, useConfirm } from '@/components/ui/feedback';
+import type { PackStatus, ScenarioUpgradeItem, UpgradePreviewCounts } from '@/lib/scenario-packs';
+import { upgradeActionLabel, summarizeUpgradeCounts } from '@/lib/scenario-packs';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 // (Criteria, JobTitle, Scenario imported from @/types)
@@ -1017,9 +1019,256 @@ function OrgsTab() {
   );
 }
 
+// ─── Scenario Packs Tab ──────────────────────────────────────────────────────
+//
+// The felt operator control on top of the starter scenario-library packs. It
+// reads GET /api/scenario-packs/status (ADMIN, org-scoped) to show, per pack,
+// whether this workspace has imported it and whether an opt-in upgrade is
+// available, then materialises the write routes shipped earlier:
+//   - Import  → POST /api/scenario-packs/import  (R-047)
+//   - Upgrade → POST /api/scenario-packs/upgrade (R-054)
+// so an operator can stand up sellable day-one inventory and re-sync a frozen
+// pack without touching the API by hand. Copy follows the org rule (no "AI").
+
+const PACK_STATE_BADGE: Record<PackStatus['state'], { label: string; cls: string }> = {
+  not_imported: { label: 'Not imported', cls: 'bg-slate-700/60 text-slate-300 border-slate-600' },
+  up_to_date: { label: 'Up to date', cls: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/50' },
+  upgrade_available: { label: 'Upgrade available', cls: 'bg-amber-900/40 text-amber-300 border-amber-700/50' },
+};
+
+type PackUpgradePreview = {
+  targetVersion: number | null;
+  counts: UpgradePreviewCounts;
+  items: ScenarioUpgradeItem[];
+};
+
+function ScenarioPacksTab() {
+  const [packs, setPacks] = useState<PackStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  // Per-pack dry-run preview (R-062): fetched on demand, cleared on commit/cancel.
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PackUpgradePreview | null>(null);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetch('/api/scenario-packs/status')
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error((body as { error?: string }).error || `Failed to load packs (${r.status})`);
+        }
+        return r.json();
+      })
+      .then((d: { packs: PackStatus[] }) => { setPacks(d.packs || []); setLoading(false); })
+      .catch((e: Error) => { setError(e.message); setLoading(false); });
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // Fetch the dry-run audit (no writes) so the operator sees the exact per-scenario
+  // drift before committing — replaces the old blind confirm() on upgrade (R-062).
+  const previewUpgrade = async (packId: string) => {
+    setBusyId(packId);
+    setPreviewId(packId);
+    setPreview(null);
+    setNotes((n) => ({ ...n, [packId]: '' }));
+    try {
+      const res = await fetch('/api/scenario-packs/upgrade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packId, dryRun: true }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPreviewId(null);
+        setNotes((n) => ({ ...n, [packId]: `Failed: ${(body as { error?: string }).error || res.statusText}` }));
+        return;
+      }
+      const b = body as { targetVersion?: number | null; counts?: UpgradePreviewCounts; items?: ScenarioUpgradeItem[] };
+      setPreview({
+        targetVersion: b.targetVersion ?? null,
+        counts: b.counts ?? { update: 0, insert: 0, unchanged: 0, orphaned: 0 },
+        items: b.items ?? [],
+      });
+    } catch (e) {
+      setPreviewId(null);
+      setNotes((n) => ({ ...n, [packId]: `Failed: ${e instanceof Error ? e.message : 'Unknown error'}` }));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const cancelPreview = () => {
+    setPreviewId(null);
+    setPreview(null);
+  };
+
+  // confirmMsg === null skips the blocking confirm() — used when the operator has
+  // already reviewed the dry-run preview and clicks Confirm inside it.
+  const act = async (packId: string, action: 'import' | 'upgrade', confirmMsg: string | null) => {
+    if (confirmMsg !== null && !confirm(confirmMsg)) return;
+    setBusyId(packId);
+    setNotes((n) => ({ ...n, [packId]: '' }));
+    try {
+      const res = await fetch(`/api/scenario-packs/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setNotes((n) => ({ ...n, [packId]: `Failed: ${(body as { error?: string }).error || res.statusText}` }));
+        return;
+      }
+      if (action === 'upgrade') {
+        // Committed — dismiss any open preview for this pack.
+        setPreviewId((cur) => (cur === packId ? null : cur));
+        setPreview((cur) => (previewId === packId ? null : cur));
+      }
+      if (action === 'import') {
+        const count = (body as { scenarios?: { created?: number } }).scenarios?.created;
+        setNotes((n) => ({ ...n, [packId]: count != null ? `Imported — ${count} scenario${count === 1 ? '' : 's'} added to your workspace.` : 'Imported into your workspace.' }));
+      } else {
+        const s = (body as { scenarios?: { updated?: number; inserted?: number; orphaned?: number } }).scenarios;
+        const updated = s?.updated ?? 0;
+        const inserted = s?.inserted ?? 0;
+        const orphaned = s?.orphaned ?? 0;
+        setNotes((n) => ({
+          ...n,
+          [packId]: updated + inserted === 0
+            ? 'Already up to date — nothing changed.'
+            : `Upgraded — ${updated} updated, ${inserted} added${orphaned > 0 ? `, ${orphaned} retired scenario${orphaned === 1 ? '' : 's'} left in place` : ''}.`,
+        }));
+      }
+      refresh();
+    } catch (e) {
+      setNotes((n) => ({ ...n, [packId]: `Failed: ${e instanceof Error ? e.message : 'Unknown error'}` }));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div>
+      <TabIntro
+        icon="📦"
+        title="Scenario library packs"
+        description="Curated per-vertical packs give your workspace ready-made training inventory on day one. Import a pack to add its role and scenarios to this organization; when a pack has newer content, upgrade to re-sync it. Importing never overwrites scenarios you have edited — a pack you have tuned for a client stays frozen until you choose to upgrade."
+      />
+
+      {loading && <p className="text-slate-400 text-sm">Loading packs…</p>}
+      {error && !loading && (
+        <div className="bg-red-950/40 border border-red-800/40 rounded-xl px-5 py-4 text-sm text-red-300">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && (
+        <div className="space-y-4">
+          {packs.map((p) => {
+            const badge = PACK_STATE_BADGE[p.state];
+            const busy = busyId === p.packId;
+            return (
+              <div key={p.packId} className="bg-slate-800/50 border border-slate-700 rounded-xl px-5 py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold">{p.packName}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span>
+                    </div>
+                    <div className="text-xs text-slate-400 mt-1">
+                      {p.vertical} · role: {p.role} · {p.catalogScenarioCount} scenario{p.catalogScenarioCount === 1 ? '' : 's'}
+                      {p.state !== 'not_imported' && ` · ${p.importedScenarioCount} in your workspace`}
+                    </div>
+                    {p.state === 'upgrade_available' && (
+                      <div className="text-xs text-amber-300/90 mt-1">
+                        {p.drift.update} to update, {p.drift.insert} to add
+                        {p.drift.orphaned > 0 ? `, ${p.drift.orphaned} retired (left in place)` : ''}
+                      </div>
+                    )}
+                  </div>
+                  <div className="shrink-0">
+                    {p.state === 'not_imported' && (
+                      <button
+                        onClick={() => act(p.packId, 'import', `Import "${p.packName}" into your workspace? This adds its role and ${p.catalogScenarioCount} scenarios.`)}
+                        disabled={busy}
+                        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        {busy ? 'Importing…' : 'Import pack'}
+                      </button>
+                    )}
+                    {p.state === 'upgrade_available' && (
+                      <button
+                        onClick={() => previewUpgrade(p.packId)}
+                        disabled={busy}
+                        className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        {busy && previewId === p.packId ? 'Loading…' : 'Preview changes'}
+                      </button>
+                    )}
+                    {p.state === 'up_to_date' && (
+                      <span className="text-xs text-emerald-400">✓ current</span>
+                    )}
+                  </div>
+                </div>
+                {previewId === p.packId && preview && (
+                  <div className="mt-3 border-t border-slate-700/60 pt-3">
+                    <div className="text-xs font-medium text-slate-200 mb-2">
+                      Preview — upgrade to version {preview.targetVersion ?? '?'}
+                    </div>
+                    <p className="text-xs text-slate-400 mb-3">{summarizeUpgradeCounts(preview.counts)}</p>
+                    <ul className="space-y-1 mb-3 max-h-64 overflow-y-auto">
+                      {preview.items.map((it) => {
+                        const a = upgradeActionLabel(it.action);
+                        return (
+                          <li key={`${it.action}:${it.sourceScenarioKey}`} className="flex items-center gap-2 text-xs">
+                            <span className={`px-2 py-0.5 rounded-full border shrink-0 ${a.cls}`}>{a.label}</span>
+                            <span className="text-slate-300 truncate">{it.name}</span>
+                            {it.action === 'update' && (
+                              <span className="text-slate-500 shrink-0">v{it.fromVersion ?? '—'} → v{it.toVersion ?? '—'}</span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => act(p.packId, 'upgrade', null)}
+                        disabled={busy || preview.counts.update + preview.counts.insert === 0}
+                        className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                      >
+                        {busy && previewId === p.packId ? 'Upgrading…' : 'Confirm upgrade'}
+                      </button>
+                      <button
+                        onClick={cancelPreview}
+                        disabled={busy}
+                        className="border border-slate-600 hover:border-slate-500 disabled:opacity-50 text-slate-300 px-4 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {notes[p.packId] && (
+                  <div className="text-xs text-slate-300 mt-3 border-t border-slate-700/60 pt-3">{notes[p.packId]}</div>
+                )}
+              </div>
+            );
+          })}
+          {packs.length === 0 && <p className="text-slate-400 text-sm">No scenario packs are available yet.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
-type Tab = 'criteria' | 'jobs' | 'scenarios' | 'job-criteria' | 'orgs';
+type Tab = 'criteria' | 'jobs' | 'scenarios' | 'job-criteria' | 'orgs' | 'packs';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'criteria', label: 'Scoring Criteria' },
@@ -1027,6 +1276,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'scenarios', label: 'Scenarios' },
   { id: 'job-criteria', label: 'Job ↔ Criteria' },
   { id: 'orgs', label: 'Organizations' },
+  { id: 'packs', label: 'Scenario Packs' },
 ];
 
 export default function AdminPage() {
@@ -1074,6 +1324,7 @@ export default function AdminPage() {
         {activeTab === 'scenarios' && <ScenariosTab />}
         {activeTab === 'job-criteria' && <JobCriteriaTab />}
         {activeTab === 'orgs' && <OrgsTab />}
+        {activeTab === 'packs' && <ScenarioPacksTab />}
       </div>
     </div>
   );

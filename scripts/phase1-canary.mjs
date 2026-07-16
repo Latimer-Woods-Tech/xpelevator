@@ -125,10 +125,46 @@ async function main() {
 
   // ── 4. Drive the conversation ──────────────────────────────────────────────
   // [START] → customer opener; then a real agent turn; then [END] → score.
-  const startRes = await req('POST', '/api/chat', cookie, { sessionId, content: '[START]' });
-  const startTxt = await drain(startRes);
-  if (startRes.status !== 200) fail(`chat [START] -> ${startRes.status}`, startTxt);
+  //
+  // Conversation-latency instrumentation (R-057): the opener's terminal SSE
+  // event must carry a numeric `timing` object so speed is a monitored metric,
+  // not a vibe — the founder-flagged "half-speed" feel becomes trackable.
+  //
+  // This canary auto-fires on a merge to `main` (paths filter), CONCURRENTLY
+  // with the separate "Deploy to Cloudflare Pages" workflow — so for the first
+  // minutes after a merge, BASE can still be serving the PREVIOUS build, whose
+  // `done` event has no `timing`. Retry the opener until the new build's timing
+  // object appears (bounded), instead of failing on a build-propagation race.
+  const MAX_START_ATTEMPTS = 15;
+  const START_RETRY_MS = 20000;
+  let startTxt = '';
+  let timing;
+  for (let attempt = 1; attempt <= MAX_START_ATTEMPTS; attempt++) {
+    const startRes = await req('POST', '/api/chat', cookie, { sessionId, content: '[START]' });
+    startTxt = await drain(startRes);
+    if (startRes.status !== 200) fail(`chat [START] -> ${startRes.status}`, startTxt);
+    const m = startTxt.match(/"timing":\s*(\{[^}]*\})/);
+    if (m) {
+      try {
+        timing = JSON.parse(m[1]);
+      } catch {
+        fail('chat [START] timing object is not valid JSON', m[1]);
+      }
+      break;
+    }
+    if (attempt < MAX_START_ATTEMPTS) {
+      console.log(`  [START] attempt ${attempt}: no timing yet (new build may still be propagating) — retrying in ${START_RETRY_MS / 1000}s...`);
+      await new Promise((r) => setTimeout(r, START_RETRY_MS));
+    }
+  }
   console.log(`✓ [START] streamed (${startTxt.length} bytes of SSE)`);
+  if (!timing) {
+    fail('chat [START] SSE carried no timing object after retries — latency instrumentation missing', startTxt.slice(-400));
+  }
+  if (typeof timing.ttftMs !== 'number' || typeof timing.totalMs !== 'number' || typeof timing.tier !== 'string') {
+    fail('timing present but ttftMs/totalMs/tier not the expected shape', JSON.stringify(timing));
+  }
+  console.log(`✓ turn latency instrumented: ttft=${timing.ttftMs}ms total=${timing.totalMs}ms tier=${timing.tier}`);
 
   const turnRes = await req('POST', '/api/chat', cookie, { sessionId, content: AGENT_LINE });
   const turnTxt = await drain(turnRes);

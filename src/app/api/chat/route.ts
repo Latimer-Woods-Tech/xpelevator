@@ -6,6 +6,7 @@ import {
   customerModelForDifficulty,
   resolveScenarioDifficulty,
 } from '@/lib/ai';
+import { classifyTurnLatency, routeReasonForDifficulty } from '@/lib/latency';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
@@ -156,9 +157,11 @@ export async function POST(request: Request) {
     // Conversation-speed lever: pick the model tier by scenario difficulty. Hard
     // scenarios keep the higher-realism 70B model; easy/medium use the ~3x faster
     // 8B model so the customer's reply streams back closer to real-time.
-    const customerModel = customerModelForDifficulty(
-      resolveScenarioDifficulty(session.scenario.script)
-    );
+    const difficulty = resolveScenarioDifficulty(session.scenario.script);
+    const customerModel = customerModelForDifficulty(difficulty);
+    // Stable telemetry token recording WHY this model was chosen (R-066), stored
+    // alongside the turn's latency on the reply row so a slow turn explains itself.
+    const routeReason = routeReasonForDifficulty(difficulty);
 
     // Include the just-saved agent message in history (skip [START] signal)
     const history = [
@@ -175,12 +178,36 @@ export async function POST(request: Request) {
 
     const readable = new ReadableStream({
       async start(controller) {
+        // Conversation-latency instrumentation (R-057): the founder-flagged
+        // "half-speed" feel is now a measured metric. `turnStart` is captured at
+        // the moment we begin generating, `ttftMs` at the first streamed token
+        // (the gap a trainee actually perceives), `totalMs` at the last.
+        const turnStart = Date.now();
+        let ttftMs = 0;
+        let firstChunkSeen = false;
         try {
           for await (const chunk of streamNextCustomerMessage(systemPrompt, history, customerModel)) {
+            if (!firstChunkSeen) {
+              firstChunkSeen = true;
+              ttftMs = Date.now() - turnStart;
+            }
             fullResponse += chunk;
             const event = `data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`;
             controller.enqueue(encoder.encode(event));
           }
+
+          const totalMs = Date.now() - turnStart;
+          // If the model yielded nothing, there is no first token — attribute the
+          // whole elapsed time to TTFT so the tier reflects the perceived wait.
+          const timing = classifyTurnLatency(firstChunkSeen ? ttftMs : totalMs, totalMs);
+          // Structured latency line — surfaced in logs so speed is tracked, not a vibe.
+          console.log('[chat] latency', {
+            sessionId: sessionId.substring(0, 8),
+            model: customerModel,
+            ttftMs: timing.ttftMs,
+            totalMs: timing.totalMs,
+            tier: timing.tier,
+          });
 
           // The agent-message INSERT was fired before streaming so it overlaps
           // the model latency; ensure it has landed before we persist the reply
@@ -191,15 +218,21 @@ export async function POST(request: Request) {
           const isResolved = /\[RESOLVED\]/i.test(fullResponse);
           const cleanedResponse = fullResponse.replace(/\[RESOLVED\]\s*$/i, '').trim();
 
-          // Save the full AI message to DB
+          // Save the full AI message to DB, stamping this turn's latency telemetry
+          // (R-066) so the felt-speed metric becomes a durable, queryable record —
+          // not just a live badge (R-060) + an ephemeral log line (R-057).
           await sql`
-            INSERT INTO chat_messages (id, session_id, role, content, timestamp)
-            VALUES (gen_random_uuid(), ${sessionId}, 'CUSTOMER', ${cleanedResponse}, NOW())
+            INSERT INTO chat_messages
+              (id, session_id, role, content, timestamp,
+               ttft_ms, total_ms, latency_tier, model, route_reason)
+            VALUES
+              (gen_random_uuid(), ${sessionId}, 'CUSTOMER', ${cleanedResponse}, NOW(),
+               ${timing.ttftMs}, ${timing.totalMs}, ${timing.tier}, ${customerModel}, ${routeReason})
           `;
 
           if (isResolved) {
             // Customer signalled resolution — auto-end the session
-            const sessionEndingEvent = `data: ${JSON.stringify({ type: 'session_ending', content: cleanedResponse })}\n\n`;
+            const sessionEndingEvent = `data: ${JSON.stringify({ type: 'session_ending', content: cleanedResponse, timing })}\n\n`;
             controller.enqueue(encoder.encode(sessionEndingEvent));
 
             // Reload the transcript with the newly-saved message included.
@@ -229,7 +262,7 @@ export async function POST(request: Request) {
             controller.enqueue(encoder.encode(sessionEndedEvent));
           } else {
             // Normal turn — send done event
-            const doneEvent = `data: ${JSON.stringify({ type: 'done', content: cleanedResponse })}\n\n`;
+            const doneEvent = `data: ${JSON.stringify({ type: 'done', content: cleanedResponse, timing })}\n\n`;
             controller.enqueue(encoder.encode(doneEvent));
           }
           controller.close();

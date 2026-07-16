@@ -2,7 +2,7 @@ import type { ComponentType } from 'react';
 import { auth, signOut } from '@/auth';
 import { PageShell, Container, Card, Wordmark } from '@/components/ui';
 import { TopNav } from '@/components/ui/TopNav';
-import { TargetIcon, BarChartIcon, SettingsIcon, TrendingUpIcon } from '@/components/ui/icons';
+import { TargetIcon, BarChartIcon, SettingsIcon, TrendingUpIcon, BuildingIcon } from '@/components/ui/icons';
 
 const CARDS: Array<{
   href: string;
@@ -34,6 +34,12 @@ const CARDS: Array<{
     title: 'Analytics',
     body: 'Track score trends over time, per-criteria performance, and phone vs chat breakdowns.',
   },
+  {
+    href: '/operator',
+    Icon: BuildingIcon,
+    title: 'Operator Workspace',
+    body: 'Create and manage the client organisations beneath you — buy seats wholesale, set your own retail.',
+  },
 ];
 
 export default async function Home() {
@@ -61,7 +67,7 @@ export default async function Home() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
             {CARDS.map((c) => (
               <a key={c.href} href={c.href} className="group block">
                 <Card interactive className="h-full p-8">

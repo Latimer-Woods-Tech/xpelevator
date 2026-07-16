@@ -6,6 +6,13 @@ import {
   sessionsToReportRows,
   sessionsToCsv,
   sessionsToPdf,
+  ROLLUP_COLUMNS,
+  rollupSessionsToCsv,
+  rollupSessionsToPdf,
+  ROLLUP_SUMMARY_COLUMNS,
+  rollupClientTotals,
+  rollupSummaryToCsv,
+  rollupSummaryToPdf,
   type ReportSession,
 } from '@/lib/report';
 
@@ -160,5 +167,151 @@ describe('sessionsToPdf', () => {
     const text = new TextDecoder('latin1').decode(bytes);
     expect(text).toContain('/Count 1');
     expect(text).toContain('0 completed sessions');
+  });
+});
+
+describe('operator portfolio roll-up', () => {
+  const acme: ReportSession = { ...base, id: 'sess-a', organization: 'Acme Retail' };
+  const north: ReportSession = {
+    ...base,
+    id: 'sess-b',
+    organization: 'Northwind',
+    scores: [{ score: 10, criteria: { name: 'Empathy', weight: 1 } }],
+  };
+
+  it('ROLLUP_COLUMNS leads with Organization then the single-org columns', () => {
+    expect(ROLLUP_COLUMNS[0]).toBe('Organization');
+    expect(ROLLUP_COLUMNS).toEqual(['Organization', ...REPORT_COLUMNS]);
+  });
+
+  it('CSV prepends the owning org name to each row', () => {
+    const csv = rollupSessionsToCsv([acme, north]);
+    const lines = csv.trim().split('\r\n');
+    expect(lines[0]).toBe(ROLLUP_COLUMNS.join(','));
+    // Order preserved; org is the first cell, then the session id.
+    expect(lines[1].startsWith('Acme Retail,sess-a,')).toBe(true);
+    expect(lines[2].startsWith('Northwind,sess-b,')).toBe(true);
+  });
+
+  it('CSV labels a session with no org as (unassigned)', () => {
+    const orphan: ReportSession = { ...base, id: 'sess-o', organization: null };
+    const csv = rollupSessionsToCsv([orphan]);
+    expect(csv.split('\r\n')[1].startsWith('(unassigned),sess-o,')).toBe(true);
+  });
+
+  it('CSV escapes an org name containing a comma', () => {
+    const s: ReportSession = { ...base, id: 'sess-c', organization: 'Acme, Inc.' };
+    const csv = rollupSessionsToCsv([s]);
+    expect(csv).toContain('"Acme, Inc.",sess-c,');
+  });
+
+  it('PDF produces a valid Portfolio Report byte stream', () => {
+    const bytes = rollupSessionsToPdf([acme, north]);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(new TextDecoder('latin1').decode(bytes.slice(0, 8))).toBe('%PDF-1.4');
+    const text = new TextDecoder('latin1').decode(bytes);
+    expect(text).toContain('2 completed sessions across your client organisations');
+  });
+
+  it('PDF renders an empty portfolio (header-only page)', () => {
+    const bytes = rollupSessionsToPdf([]);
+    const text = new TextDecoder('latin1').decode(bytes);
+    expect(text).toContain('/Count 1');
+    expect(text).toContain('0 completed sessions');
+  });
+});
+
+describe('operator portfolio per-client totals', () => {
+  // base weights: Empathy 3, Upsell 1 → per-session weighted (8*3+4*1)/4 = 7.0
+  const acme1: ReportSession = { ...base, id: 'a1', organization: 'Acme Retail' };
+  const acme2: ReportSession = {
+    ...base,
+    id: 'a2',
+    organization: 'Acme Retail',
+    // (10*3 + 6*1)/4 = 9.0
+    scores: [
+      { score: 10, criteria: { name: 'Empathy', weight: 3 } },
+      { score: 6, criteria: { name: 'Upsell', weight: 1 } },
+    ],
+  };
+  const north: ReportSession = {
+    ...base,
+    id: 'n1',
+    organization: 'Northwind',
+    scores: [{ score: 10, criteria: { name: 'Empathy', weight: 1 } }],
+  };
+
+  it('SUMMARY columns are Organization/Sessions/Scored/Weighted Average', () => {
+    expect(ROLLUP_SUMMARY_COLUMNS).toEqual([
+      'Organization',
+      'Sessions',
+      'Scored',
+      'Weighted Average',
+    ]);
+  });
+
+  it('pools every score across a client, sorted by org name', () => {
+    const totals = rollupClientTotals([north, acme1, acme2]);
+    // sorted: Acme Retail before Northwind
+    expect(totals.map((t) => t.organization)).toEqual(['Acme Retail', 'Northwind']);
+    const acme = totals[0];
+    expect(acme.sessions).toBe(2);
+    expect(acme.scored).toBe(2);
+    // pooled: (8*3+4*1 + 10*3+6*1) / (4+4) = (28+36)/8 = 8.0 — NOT the mean of
+    // the two per-session numbers (7.0, 9.0) unless weights match, which they do
+    // here, but the pooling is over raw score*weight, proving the book number.
+    expect(acme.weightedAverage).toBe(8);
+    expect(totals[1].weightedAverage).toBe(10);
+  });
+
+  it('counts an unscored session but excludes it from `scored`', () => {
+    const unscored: ReportSession = { ...base, id: 'u1', organization: 'Acme Retail', scores: [] };
+    const totals = rollupClientTotals([acme1, unscored]);
+    expect(totals[0].sessions).toBe(2);
+    expect(totals[0].scored).toBe(1);
+    // pooled weighted average ignores the empty session (no weights)
+    expect(totals[0].weightedAverage).toBe(7);
+  });
+
+  it('folds a session with no org into (unassigned)', () => {
+    const orphan: ReportSession = { ...base, id: 'o1', organization: null };
+    const totals = rollupClientTotals([orphan]);
+    expect(totals[0].organization).toBe('(unassigned)');
+  });
+
+  it('CSV has the header, per-client rows, and a trailing portfolio total', () => {
+    const csv = rollupSummaryToCsv([north, acme1, acme2]);
+    const lines = csv.trim().split('\r\n');
+    expect(lines[0]).toBe(ROLLUP_SUMMARY_COLUMNS.join(','));
+    expect(lines[1]).toBe('Acme Retail,2,2,8');
+    expect(lines[2]).toBe('Northwind,1,1,10');
+    // grand total: 3 sessions, 3 scored, pooled (28+36+10)/(8+1)=74/9≈8.2
+    expect(lines[3]).toBe('TOTAL (all clients),3,3,8.2');
+  });
+
+  it('CSV of an empty portfolio is header-only (no total row)', () => {
+    const csv = rollupSummaryToCsv([]);
+    expect(csv).toBe(ROLLUP_SUMMARY_COLUMNS.join(',') + '\r\n');
+  });
+
+  it('CSV escapes a client org name containing a comma', () => {
+    const s: ReportSession = { ...base, id: 'c1', organization: 'Acme, Inc.' };
+    const csv = rollupSummaryToCsv([s]);
+    expect(csv).toContain('"Acme, Inc.",1,1,7');
+  });
+
+  it('PDF produces a valid Portfolio Summary byte stream', () => {
+    const bytes = rollupSummaryToPdf([acme1, acme2, north]);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(new TextDecoder('latin1').decode(bytes.slice(0, 8))).toBe('%PDF-1.4');
+    const text = new TextDecoder('latin1').decode(bytes);
+    expect(text).toContain('2 client organisations');
+  });
+
+  it('PDF renders an empty portfolio summary (header-only page)', () => {
+    const bytes = rollupSummaryToPdf([]);
+    const text = new TextDecoder('latin1').decode(bytes);
+    expect(text).toContain('/Count 1');
+    expect(text).toContain('0 client organisations');
   });
 });

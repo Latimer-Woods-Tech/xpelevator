@@ -49,6 +49,27 @@ interface AnalyticsData {
   byType: TypeBreakdown[];
 }
 
+interface LatencyGroup {
+  key: string;
+  turns: number;
+  avgTtftMs: number;
+  p95TtftMs: number;
+  avgTotalMs: number;
+  slowPct: number;
+}
+
+interface LatencyData {
+  measuredTurns: number;
+  avgTtftMs: number | null;
+  p95TtftMs: number | null;
+  avgTotalMs: number | null;
+  slowPct: number | null;
+  tierBreakdown: { realtime: number; acceptable: number; slow: number };
+  byModel: LatencyGroup[];
+  byRouteReason: LatencyGroup[];
+  byModality: LatencyGroup[];
+}
+
 function ScoreBar({ value, max = 10 }: { value: number | null; max?: number }) {
   if (value === null) return <span className="text-slate-500 text-sm">—</span>;
   const pct = (value / max) * 100;
@@ -114,12 +135,31 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
 export default function AnalyticsPage() {
   const { data: authSession } = useSession();
   const [data, setData] = useState<AnalyticsData | null>(null);
+  const [latency, setLatency] = useState<LatencyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Response-speed date window (R-068) — inclusive YYYY-MM-DD bounds, empty = all-time.
+  const [latSince, setLatSince] = useState('');
+  const [latUntil, setLatUntil] = useState('');
+
+  // Response-speed telemetry (R-067/R-068) loads alongside the score analytics
+  // but never blocks the page — a failure just hides the speed section. Accepts
+  // an optional `?since`/`?until` window so the operator can cut it to a period.
+  const loadLatency = (since = '', until = '') => {
+    const qs = new URLSearchParams();
+    if (since) qs.set('since', since);
+    if (until) qs.set('until', until);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    fetch(`/api/analytics/latency${suffix}`)
+      .then(res => (res.ok ? (res.json() as Promise<LatencyData>) : null))
+      .then(setLatency)
+      .catch(() => setLatency(null));
+  };
 
   const load = () => {
     setLoading(true);
     setError(null);
+    loadLatency(latSince, latUntil);
     fetch('/api/analytics')
       .then(res => {
         if (!res.ok) throw new Error(`Server error ${res.status}`);
@@ -204,6 +244,20 @@ export default function AnalyticsPage() {
             {/* ── Scoring health ──────────────────────────────────────────── */}
             {data.scoringHealth && (
               <ScoringHealthSection health={data.scoringHealth} />
+            )}
+
+            {/* ── Response speed (R-067) + date window & modality split (R-068) ── */}
+            {latency && typeof latency.measuredTurns === 'number' && (
+              <LatencySection
+                latency={latency}
+                since={latSince}
+                until={latUntil}
+                onWindowChange={(since, until) => {
+                  setLatSince(since);
+                  setLatUntil(until);
+                  loadLatency(since, until);
+                }}
+              />
             )}
 
             {/* ── Score trend ─────────────────────────────────────────────── */}
@@ -328,6 +382,176 @@ function ScoringHealthSection({ health }: { health: ScoringHealth }) {
         </p>
       )}
     </Section>
+  );
+}
+
+/** Format milliseconds as a compact seconds string, e.g. `0.8s`. */
+function secs(ms: number | null): string {
+  return ms == null ? '—' : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Response-speed summary (R-067) — surfaces the persisted per-turn latency
+ * telemetry (R-066) so a manager/operator can see how fast the simulated
+ * customer replies, which model is the slow leg, and whether the hard-scenario
+ * realism route is paying its speed cost. Headline numbers are time-to-first-
+ * token (the gap a trainee perceives before the customer starts replying).
+ */
+function LatencySection({
+  latency,
+  since,
+  until,
+  onWindowChange,
+}: {
+  latency: LatencyData;
+  since: string;
+  until: string;
+  onWindowChange: (since: string, until: string) => void;
+}) {
+  const { realtime, acceptable, slow } = latency.tierBreakdown;
+  const windowed = Boolean(since || until);
+  return (
+    <Section title="Response Speed">
+      {/* Date window (R-068) — the operator's "monthly cut" of felt speed. */}
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <label className="text-xs text-slate-400">
+          From
+          <input
+            type="date"
+            value={since}
+            max={until || undefined}
+            onChange={e => onWindowChange(e.target.value, until)}
+            className="block mt-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
+          />
+        </label>
+        <label className="text-xs text-slate-400">
+          To
+          <input
+            type="date"
+            value={until}
+            min={since || undefined}
+            onChange={e => onWindowChange(since, e.target.value)}
+            className="block mt-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
+          />
+        </label>
+        {windowed && (
+          <button
+            type="button"
+            onClick={() => onWindowChange('', '')}
+            className="text-xs text-slate-400 underline hover:text-slate-200 pb-1"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {latency.measuredTurns === 0 ? (
+        <p className="text-slate-400 text-sm">
+          No measured turns{windowed ? ' in this window' : ' yet'}.
+        </p>
+      ) : (
+        <>
+      <p className="text-slate-400 text-xs mb-4">
+        How quickly the simulated customer starts replying — time-to-first-token
+        across {latency.measuredTurns} measured turn
+        {latency.measuredTurns !== 1 ? 's' : ''}. Real-time &lt; 0.8s, responsive
+        &lt; 2s, otherwise slow. This is the benchmark faster models must beat.
+      </p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <StatCard label="Avg first reply" value={secs(latency.avgTtftMs)} />
+        <StatCard label="p95 first reply" value={secs(latency.p95TtftMs)} />
+        <StatCard label="Avg full reply" value={secs(latency.avgTotalMs)} />
+        <StatCard
+          label="Slow turns"
+          value={latency.slowPct == null ? '—' : `${latency.slowPct}%`}
+        />
+      </div>
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <HealthChip label="Real-time" value={realtime} tone="good" />
+        <HealthChip label="Responsive" value={acceptable} tone="muted" />
+        <HealthChip label="Slow" value={slow} tone={slow > 0 ? 'bad' : 'muted'} />
+      </div>
+      {latency.byModel.length > 0 && (
+        <div className="mb-2">
+          <h3 className="text-sm font-semibold mb-2 text-slate-200">By model</h3>
+          <LatencyGroupTable groups={latency.byModel} />
+        </div>
+      )}
+      {latency.byRouteReason.length > 0 && (
+        <div className="mt-5">
+          <h3 className="text-sm font-semibold mb-2 text-slate-200">
+            By routing reason
+          </h3>
+          <LatencyGroupTable groups={latency.byRouteReason} />
+        </div>
+      )}
+      {latency.byModality.length > 0 && (
+        <div className="mt-5">
+          <h3 className="text-sm font-semibold mb-2 text-slate-200">
+            By modality
+          </h3>
+          <LatencyGroupTable
+            groups={latency.byModality.map(g => ({
+              ...g,
+              key: modalityLabel(g.key),
+            }))}
+          />
+        </div>
+      )}
+        </>
+      )}
+    </Section>
+  );
+}
+
+/** Trainee-facing label for a conversation modality (R-068). */
+function modalityLabel(key: string): string {
+  switch (key) {
+    case 'CHAT':
+      return 'Chat';
+    case 'VOICE':
+      return 'Voice';
+    case 'PHONE':
+      return 'Phone';
+    default:
+      return key;
+  }
+}
+
+/** A compact table of per-group speed stats (model or routing reason). */
+function LatencyGroupTable({ groups }: { groups: LatencyGroup[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-slate-400 text-xs text-left border-b border-slate-700">
+            <th className="py-2 pr-3 font-medium">Group</th>
+            <th className="py-2 px-3 font-medium text-right">Turns</th>
+            <th className="py-2 px-3 font-medium text-right">Avg</th>
+            <th className="py-2 px-3 font-medium text-right">p95</th>
+            <th className="py-2 pl-3 font-medium text-right">Slow</th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map(g => (
+            <tr key={g.key} className="border-b border-slate-800/60">
+              <td className="py-2 pr-3 font-mono text-xs text-slate-200 break-all">
+                {g.key}
+              </td>
+              <td className="py-2 px-3 text-right text-slate-300">{g.turns}</td>
+              <td className="py-2 px-3 text-right text-slate-300">{secs(g.avgTtftMs)}</td>
+              <td className="py-2 px-3 text-right text-slate-300">{secs(g.p95TtftMs)}</td>
+              <td
+                className={`py-2 pl-3 text-right ${
+                  g.slowPct > 0 ? 'text-red-400' : 'text-slate-400'
+                }`}
+              >
+                {g.slowPct}%
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

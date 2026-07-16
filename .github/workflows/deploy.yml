@@ -25,6 +25,13 @@ env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+# checkout needs contents:read; the blocked-promotion alert step opens/comments a
+# GitHub issue, which needs issues:write. Declared explicitly (default token would
+# otherwise vary by repo setting). wrangler auth uses CF_API_TOKEN, not this token.
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   # CI gate — the same fast static + deterministic checks as ci.yml, run here so
   # a failing typecheck/lint/test can never migrate the live DB or ship. deploy.yml
@@ -74,6 +81,23 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
+
+      - name: Recover a previously-failed migration (idempotent)
+        # A migration that failed mid-apply leaves a "failed" row (finished=false,
+        # rolledBack=false) in _prisma_migrations. That both blocks `migrate
+        # deploy` (P3018) AND trips the backup guard below (which ABORTS on any
+        # unfinished, un-rolled-back migration). Postgres DDL is transactional, so
+        # a failed migration rolled back cleanly — mark it rolled-back so (a) the
+        # guard sees a resolved state and proceeds, and (b) `migrate deploy`
+        # re-applies the corrected SQL. Runs BEFORE the guard for exactly this
+        # reason. `|| true` makes it a no-op once the migration is applied
+        # (resolve then errors "already applied") or when there is nothing to
+        # recover — safe to leave in place permanently.
+        run: |
+          DIRECT="$(printf '%s' "$DATABASE_URL" | sed 's/-pooler//g')"
+          echo "::add-mask::$DIRECT"
+          DATABASE_URL="$DIRECT" \
+            npx prisma migrate resolve --rolled-back 20260712120000_add_pack_provenance || true
 
       - name: Backup DB + build migration baseline plan (dry-run evidence)
         run: node scripts/db-backup-and-guard.mjs
@@ -153,14 +177,152 @@ jobs:
             --production-branch=main \
             || echo "Project already exists — continuing."
 
-      - name: Set Pages project secrets
+      - name: Set Pages project secrets (production)
         # printf '%s' (NOT echo) avoids the trailing-newline trap on secret values.
+        # wrangler v3 `pages secret put` ALWAYS targets the production
+        # environment (it has no --environment flag — proven by run 29394010180:
+        # "Unknown argument: environment"). Production is exactly what the
+        # promoted `--branch=main` deploy reads, so this is correct as-is.
         run: |
           printf '%s' "$GROQ_API_KEY"  | npx wrangler pages secret put GROQ_API_KEY  --project-name="$CF_PROJECT"
           printf '%s' "$DATABASE_URL"  | npx wrangler pages secret put DATABASE_URL  --project-name="$CF_PROJECT"
           printf '%s' "$AUTH_SECRET"   | npx wrangler pages secret put AUTH_SECRET   --project-name="$CF_PROJECT"
 
-      - name: Deploy to Cloudflare Pages (production branch)
+      - name: Set Pages PREVIEW-environment secrets (Pages REST API)
+        # The pre-promotion smoke runs a `verify-preview` (preview-environment)
+        # deployment. Cloudflare Pages keeps preview secrets SEPARATE from
+        # production, and wrangler v3 `pages secret put` can't target preview
+        # (no --environment flag). So set them on the project's preview
+        # deployment_config via the Pages REST API — a partial PATCH that touches
+        # ONLY `deployment_configs.preview.env_vars`, never production. Without
+        # this the preview build boots with no DATABASE_URL/GROQ/AUTH_SECRET,
+        # env validation throws, and /api/health 503s — failing the smoke on a
+        # healthy build (run 29393604443). Values come from GitHub-masked env and
+        # are written to a 0600 temp file via jq (never echoed), so no secret
+        # reaches the log. The preview build only ever runs a read-only DB canary
+        # against the shared DB — no privilege production doesn't already have.
+        run: |
+          set -e
+          umask 077
+          jq -n \
+            --arg db "$DATABASE_URL" --arg groq "$GROQ_API_KEY" --arg auth "$AUTH_SECRET" \
+            '{deployment_configs:{preview:{env_vars:{
+               DATABASE_URL:{type:"secret_text",value:$db},
+               GROQ_API_KEY:{type:"secret_text",value:$groq},
+               AUTH_SECRET:{type:"secret_text",value:$auth}
+             }}}}' > /tmp/preview-cfg.json
+          code=$(curl -s -o /tmp/cf-resp.json -w '%{http_code}' -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CF_PROJECT}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data @/tmp/preview-cfg.json || echo 000)
+          rm -f /tmp/preview-cfg.json
+          echo "Pages REST PATCH (preview env_vars) -> HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::failed to set preview-environment secrets (HTTP $code)"
+            jq -r '.errors // .' /tmp/cf-resp.json 2>/dev/null | head -c 400 || true
+            exit 1
+          fi
+          echo "✅ preview-environment secrets set via Pages REST API"
+
+      # ── Preview-then-promote (fail-closed) ─────────────────────────────────
+      # Root problem this fixes: `wrangler pages deploy --branch=main` promotes
+      # to production (the branded domain) BEFORE any verify step runs, so a bad
+      # build — e.g. the #78 Neon-driver swap that 500'd every DB read — reaches
+      # live trainees before a gate can catch it. Cloudflare Pages treats any
+      # branch != the production branch (`main`) as a PREVIEW deploy that gets
+      # its own URL and NEVER touches the production alias or custom domain. So
+      # we deploy the exact build to a preview branch first, smoke it, and only
+      # promote to `--branch=main` if the smoke passes. If the build is broken
+      # the promote step never runs and prod stays on the last-good build.
+      - name: Deploy build to a PREVIEW deployment (no promotion) + capture URL
+        id: preview
+        run: |
+          set -e
+          npx wrangler pages deploy .open-next/assets \
+            --project-name="$CF_PROJECT" \
+            --branch=verify-preview 2>&1 | tee /tmp/preview-deploy.log
+          # wrangler prints the deployment-specific URL (https://<hash>.<proj>.pages.dev).
+          # The <hash> is lowercase alphanumerics with no hyphen, so it never
+          # matches the "verify-preview" branch alias — grab that; fall back to
+          # the deterministic branch alias if the output format ever changes.
+          url=$(grep -Eo "https://[a-z0-9]+\.${CF_PROJECT}\.pages\.dev" /tmp/preview-deploy.log | head -1)
+          if [ -z "$url" ]; then
+            url="https://verify-preview.${CF_PROJECT}.pages.dev"
+            echo "Could not parse a deployment URL; using branch alias $url"
+          fi
+          echo "preview_url=$url" >> "$GITHUB_OUTPUT"
+          echo "Preview deployment URL: $url"
+
+      - name: Smoke-gate the preview build BEFORE promoting (fail-closed)
+        id: smoke
+        run: |
+          set -e
+          BASE="${{ steps.preview.outputs.preview_url }}"
+          echo "Smoke-gating $BASE before promoting to production ..."
+          # 1) /api/health 200 — the build boots and serves.
+          code=000
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -s -o /tmp/preview-health.json -w '%{http_code}' "$BASE/api/health" || echo 000)
+            echo "health attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then break; fi
+            sleep 8
+          done
+          if [ "$code" != "200" ]; then
+            echo "::error::preview /api/health != 200 (last=$code) — NOT promoting to prod"
+            exit 1
+          fi
+          # 2) Public DB-read canary: a nonexistent branding slug hits a real
+          #    SELECT and returns 404 when the DB path is healthy; the handler's
+          #    catch returns 500 when the driver/connection fails at runtime —
+          #    the exact #78 signature. Underscores can't be produced by
+          #    slugify(), so this slug can never collide with a real org.
+          dbc=000
+          for i in 1 2 3 4 5 6 7 8; do
+            dbc=$(curl -s -o /dev/null -w '%{http_code}' \
+              "$BASE/api/branding/__deploy_smoke_canary_nonexistent__" || echo 000)
+            echo "db-read canary attempt $i: HTTP $dbc"
+            if [ "$dbc" = "404" ]; then break; fi
+            sleep 8
+          done
+          if [ "$dbc" != "404" ]; then
+            echo "::error::preview DB-read canary != 404 (got $dbc; 500 = DB driver down like #78) — NOT promoting to prod"
+            exit 1
+          fi
+          echo "✅ preview smoke passed (/api/health 200 + DB-read canary 404) — safe to promote"
+
+      # ── Alert on a blocked promotion ───────────────────────────────────────
+      # The preview→smoke→promote gate above is fail-closed: if the preview
+      # deploy or the smoke check fails, the "Promote" step below is skipped and
+      # prod stays on the last-good build (trainees are safe). But that block is
+      # otherwise SILENT — just a red-X job in the Actions tab — so a merged
+      # change can quietly fail to ship without anyone noticing. This mirrors the
+      # #82 uptime-monitor alerting: open (or comment on) a single GitHub alert
+      # issue whenever the gate blocks a promotion. Scoped to the pre-promotion
+      # steps only (`preview` / `smoke`); it sits BEFORE Promote so a
+      # post-promotion verify failure never trips this particular alert.
+      - name: Alert on a blocked promotion (pre-promotion gate failed)
+        if: ${{ failure() && (steps.preview.conclusion == 'failure' || steps.smoke.conclusion == 'failure') }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const blocker = '${{ steps.smoke.conclusion }}' === 'failure'
+              ? 'the pre-promotion **smoke check** (`/api/health` 200 + DB-read canary 404 on the preview URL)'
+              : 'the **preview deployment** step (the build never reached a smoke-able preview URL)';
+            const reason =
+              `The fail-closed preview→smoke→promote gate **blocked a promotion to production**: ${blocker} failed, ` +
+              `so the "Promote to production" step was skipped. ` +
+              `**xpelevator.com is unaffected — it stays on the last-good build** (this is the gate working as designed, #78 prevention). ` +
+              `But the merged change did **NOT** ship. Fix the build/DB issue the run log shows, then re-run this deploy to promote it.`;
+            await require('./scripts/monitor-alert.cjs')({
+              github, context, reason,
+              job: 'deploy / preview→smoke→promote',
+              title: '🔴 [deploy] xpelevator promotion blocked by the smoke gate',
+              intro: 'The fail-closed deploy gate blocked a promotion to production before a bad build could reach live trainees.',
+              source: '`.github/workflows/deploy.yml` (preview→smoke→promote gate, tracked on #16).',
+            });
+
+      - name: Promote the smoked build to production (--branch=main)
         run: |
           npx wrangler pages deploy .open-next/assets \
             --project-name="$CF_PROJECT" \
@@ -319,6 +481,367 @@ jobs:
           fi
           echo "✅ /pricing is publicly reachable, lists all seat tiers, and is copy-clean"
 
+      - name: Verify scenario-library catalog + /library surface (Phase 4)
+        # The starter scenario-library packs (Phase 4: operators need sellable
+        # day-one inventory) are served on the PUBLIC catalog GET /api/scenario-packs
+        # and browsed on the public /library surface. Two things must hold on both
+        # hosts:
+        #   1. anon reachability — both are public by design (in PUBLIC_ROUTES /
+        #      absent from the matcher); a 401/404 here means an operator can't
+        #      browse inventory before buying.
+        #   2. the hidden-mechanic boundary (R-021) — the public catalog must NEVER
+        #      carry a scenario's script (persona / objective / hints). A leak here
+        #      hands trainees the concealed mechanics.
+        # Plus the org copy rule (no standalone "AI") on the rendered /library HTML.
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            # --- public catalog: anon 200 + no hidden mechanics ---
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /tmp/packs.json -w '%{http_code}' "$BASE/api/scenario-packs" || echo 000)
+              if [ "$code" = "200" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/scenario-packs -> HTTP $code"
+            if [ "$code" != "200" ]; then
+              echo "::error::$BASE/api/scenario-packs must be public (got $code) — operator inventory browse would break"
+              fail=1
+            else
+              if ! grep -q '"packs"' /tmp/packs.json; then
+                echo "::error::$BASE/api/scenario-packs body missing expected catalog shape"
+                fail=1
+              fi
+              # Hidden-mechanic leak guard — none of these keys may appear.
+              if grep -Eq 'customerPersona|customerObjective|"hints"|"script"' /tmp/packs.json; then
+                echo "::error::$BASE/api/scenario-packs leaked a scenario script (hidden mechanics) to anonymous callers"
+                fail=1
+              fi
+            fi
+            # --- /library surface: anon 200 + copy-clean ---
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /tmp/library.html -w '%{http_code}' "$BASE/library" || echo 000)
+              if [ "$code" = "200" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/library -> HTTP $code"
+            if [ "$code" != "200" ]; then
+              echo "::error::$BASE/library must be public (got $code) — operator inventory surface would 404"
+              fail=1
+              continue
+            fi
+            if grep -Eq '\bAI\b' /tmp/library.html; then
+              echo "::error::$BASE/library uses the banned word 'AI' (org copy rule)"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::scenario-library catalog / surface verification failed"
+            exit 1
+          fi
+          echo "✅ /api/scenario-packs is public + hidden-mechanic-safe and /library is public + copy-clean"
+
+      - name: Verify pack import is admin-gated (Phase 4)
+        # The admin "import pack → org" action (POST /api/scenario-packs/import)
+        # WRITES org-scoped job_titles + scenarios rows carrying the hidden
+        # scenario scripts. It is ADMIN-only + strictly tenant-scoped. Unlike the
+        # public catalog GET at the parent path, this write subpath must NEVER be
+        # anonymous: the middleware now matches public routes EXACTLY (a public
+        # route no longer exposes its subpaths), and the handler double-checks
+        # ADMIN. Permanent regression gate: an anonymous POST must get 401 on both
+        # hosts (a 200/500 here would mean the write path or the DB is exposed).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                -H 'Content-Type: application/json' \
+                -d '{"packId":"saas-support-essentials"}' \
+                "$BASE/api/scenario-packs/import" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "POST $BASE/api/scenario-packs/import (anon) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/scenario-packs/import must require auth (got $code) — pack-import write path exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Pack-import admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ POST /api/scenario-packs/import rejects anonymous callers (401) on both hosts"
+
+      - name: Verify pack upgrade is admin-gated (Phase 4)
+        # The admin "upgrade pack → current catalog version" action
+        # (POST /api/scenario-packs/upgrade) OVERWRITES an org's already-imported,
+        # pack-provenanced scenarios with newer catalog content — the opt-in
+        # counterpart to the non-clobbering import. Like the import write subpath
+        # it is ADMIN-only + strictly tenant-scoped and must NEVER be anonymous
+        # (a public route no longer exposes its subpaths; the handler double-checks
+        # ADMIN). Permanent regression gate: an anonymous POST must get 401 on both
+        # hosts (a 200/500 here would mean the write path or the DB is exposed).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                -H 'Content-Type: application/json' \
+                -d '{"packId":"saas-support-essentials"}' \
+                "$BASE/api/scenario-packs/upgrade" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "POST $BASE/api/scenario-packs/upgrade (anon) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/scenario-packs/upgrade must require auth (got $code) — pack-upgrade write path exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Pack-upgrade admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ POST /api/scenario-packs/upgrade rejects anonymous callers (401) on both hosts"
+
+      - name: Verify pack status is admin-gated (Phase 4)
+        # The admin "Scenario Packs" surface reads GET /api/scenario-packs/status
+        # to know which packs this org has imported and where an upgrade is
+        # available. It reports per-pack import bookkeeping for the caller's org —
+        # tenant data — so it is ADMIN-only + org-scoped and must NEVER be
+        # anonymous (the public catalog `/api/scenario-packs` is an EXACT public
+        # route, so this `/status` subpath stays gated; the handler double-checks
+        # ADMIN). Permanent regression gate: an anonymous GET must get 401 on both
+        # hosts (a 200 here would leak an org's pack-import state).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' \
+                "$BASE/api/scenario-packs/status" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/scenario-packs/status (anon) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/scenario-packs/status must require auth (got $code) — an org's pack-import state is exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Pack-status admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ GET /api/scenario-packs/status rejects anonymous callers (401) on both hosts"
+
+      - name: Verify operator client-management is admin-gated (Phase 4)
+        # The operator→client hierarchy API (/api/orgs/[id]/clients) lets an
+        # OPERATOR admin LIST and CREATE the client orgs beneath them. Both verbs
+        # are ADMIN-only and strictly tenant-scoped (an operator admin may only
+        # manage their OWN operator's clients). Neither may ever be anonymous:
+        # the /api/* middleware matcher gates the path and the handler double-
+        # checks ADMIN + canManageOrgClients. Permanent regression gate: an
+        # anonymous GET and POST must both get 401 on both hosts (a 200/500 here
+        # would mean the client-management write path or tenant data is exposed).
+        run: |
+          set -e
+          fail=0
+          OP="11111111-1111-1111-1111-111111111111"
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            # GET (list clients) — anon must be 401
+            gcode=000
+            for i in 1 2 3 4 5; do
+              gcode=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/orgs/$OP/clients" || echo 000)
+              if [ "$gcode" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/orgs/$OP/clients (anon) -> HTTP $gcode"
+            if [ "$gcode" != "401" ]; then
+              echo "::error::$BASE/api/orgs/[id]/clients GET must require auth (got $gcode) — client-list tenant data exposed"
+              fail=1
+            fi
+            # POST (create client) — anon must be 401
+            pcode=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+              -H 'Content-Type: application/json' \
+              -d '{"name":"gate-probe"}' \
+              "$BASE/api/orgs/$OP/clients" || echo 000)
+            echo "POST $BASE/api/orgs/$OP/clients (anon) -> HTTP $pcode"
+            if [ "$pcode" != "401" ]; then
+              echo "::error::$BASE/api/orgs/[id]/clients POST must require auth (got $pcode) — client-create write path exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Operator client-management admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /api/orgs/[id]/clients rejects anonymous GET + POST (401) on both hosts"
+
+      - name: Verify operator branding is admin-gated (Phase 4)
+        # White-label branding (/api/orgs/[id]/branding) lets an ADMIN READ and
+        # UPDATE an org's brand (name/logo/colors) — strictly tenant-scoped by
+        # canManageOrgBranding (platform admin: any org; org admin: own org;
+        # operator admin: a client beneath them; else 403). Neither verb may
+        # ever be anonymous: the /api/* middleware matcher gates the path and the
+        # handler double-checks ADMIN + canManageOrgBranding. Permanent
+        # regression gate: an anonymous GET and PUT must both get 401 on both
+        # hosts (a 200/500 here would mean tenant branding is exposed or the
+        # write path is open).
+        run: |
+          set -e
+          fail=0
+          OP="11111111-1111-1111-1111-111111111111"
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            # GET (read branding) — anon must be 401
+            gcode=000
+            for i in 1 2 3 4 5; do
+              gcode=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/orgs/$OP/branding" || echo 000)
+              if [ "$gcode" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/orgs/$OP/branding (anon) -> HTTP $gcode"
+            if [ "$gcode" != "401" ]; then
+              echo "::error::$BASE/api/orgs/[id]/branding GET must require auth (got $gcode) — tenant branding exposed"
+              fail=1
+            fi
+            # PUT (update branding) — anon must be 401
+            pcode=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+              -H 'Content-Type: application/json' \
+              -d '{"displayName":"gate-probe"}' \
+              "$BASE/api/orgs/$OP/branding" || echo 000)
+            echo "PUT $BASE/api/orgs/$OP/branding (anon) -> HTTP $pcode"
+            if [ "$pcode" != "401" ]; then
+              echo "::error::$BASE/api/orgs/[id]/branding PUT must require auth (got $pcode) — branding write path exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Operator branding admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /api/orgs/[id]/branding rejects anonymous GET + PUT (401) on both hosts"
+
+      - name: Verify client-facing brand read is public + brand-safe (Phase 4)
+        # The client-facing render surface (R-050) reads an operator's brand via
+        # the PUBLIC, slug-keyed GET /api/branding/[slug] so the brand can show
+        # on the login shell before sign-in. Unlike the admin write path, this
+        # MUST be reachable anonymously — but it must expose ONLY brand-safe
+        # fields and never a tenant. Permanent regression gate: an anonymous GET
+        # for a slug that cannot exist returns 404 (proves the route is PUBLIC —
+        # a 401 would mean the middleware prefix regressed — and that an unknown
+        # slug yields a clean 404, not a 200/500). Checked on both hosts.
+        run: |
+          set -e
+          fail=0
+          # A slug that no org can hold (uppercase + underscores are not slug chars).
+          SLUG="__no_such_org__$$"
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/branding/$SLUG" || echo 000)
+              # 404 is the pass. 401 (auth wall regressed) or 200/500 are retried
+              # during propagation, then failed below.
+              if [ "$code" = "404" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/branding/$SLUG (anon) -> HTTP $code"
+            if [ "$code" = "401" ]; then
+              echo "::error::$BASE/api/branding/[slug] must be PUBLIC (got 401) — the render surface can't read the brand pre-sign-in"
+              fail=1
+            elif [ "$code" != "404" ]; then
+              echo "::error::$BASE/api/branding/[slug] should 404 for an unknown slug (got $code)"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Client-facing brand-read verification failed"
+            exit 1
+          fi
+          echo "✅ /api/branding/[slug] is public and 404s an unknown slug on both hosts"
+
+      - name: Verify self-context /api/me is auth-gated (Phase 4)
+        # GET /api/me returns the CALLER'S OWN identity + org context (id, slug,
+        # kind, plan, parentOrgId, canManageClients) — the bootstrap primitive
+        # the operator workspace reads before any other call (R-051). It is
+        # self-scoped (org looked up by the session's own orgId, never a request
+        # id) and MUST require auth: the /api/* middleware matcher gates the path
+        # and requireAuth double-checks in the handler. Permanent regression
+        # gate: an anonymous GET must be 401 on both hosts (a 200 here would mean
+        # a caller's identity/org is exposed pre-sign-in).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/me" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/me (anon) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/me must require auth (got $code) — caller identity/org exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Self-context /api/me auth-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /api/me rejects anonymous GET (401) on both hosts"
+
+      - name: Verify operator workspace page is auth-gated (Phase 4)
+        # /operator is the operator self-serve workspace (R-052): an admin lists +
+        # creates the client orgs beneath them. It renders only a shell (all data
+        # comes from the already-gated /api/me + /api/orgs/[id]/clients), but the
+        # page itself is in the middleware matcher so an anonymous visitor is
+        # redirected to /auth/signin rather than shown the workspace chrome.
+        # Permanent regression gate: an anonymous GET (no redirect follow) must be
+        # a 3xx to /auth/signin on both hosts — never a 200 (which would mean the
+        # matcher regressed and the operator chrome is served pre-sign-in).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000; loc=""
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/operator" || echo 000)
+              loc=$(curl -s -o /dev/null -w '%{redirect_url}' "$BASE/operator" || echo "")
+              case "$code" in 301|302|303|307|308) break;; esac
+              sleep 6
+            done
+            echo "GET $BASE/operator (anon) -> HTTP $code (Location: $loc)"
+            case "$code" in
+              301|302|303|307|308) ;;
+              *)
+                echo "::error::$BASE/operator must redirect anon to sign-in (got $code) — operator chrome exposed pre-sign-in"
+                fail=1
+                continue
+                ;;
+            esac
+            case "$loc" in
+              */auth/signin*) ;;
+              *)
+                echo "::error::$BASE/operator redirect target is not /auth/signin (got '$loc')"
+                fail=1
+                ;;
+            esac
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Operator workspace auth-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /operator redirects anonymous visitors to sign-in on both hosts"
+
       - name: Verify manager reporting export is auth-gated (Phase 4)
         # The manager CSV export (GET /api/reports/sessions) returns a tenant's
         # completed-session scores — it is ADMIN-only and org-scoped, and must
@@ -330,8 +853,14 @@ jobs:
         run: |
           set -e
           fail=0
-          # Both the CSV (default) and PDF (?format=pdf) variants must reject anon.
-          for PATH_Q in "/api/reports/sessions" "/api/reports/sessions?format=pdf"; do
+          # Every variant must reject anon: the CSV (default) + PDF detail export,
+          # AND the operator portfolio roll-up (?scope=clients) plus its per-client
+          # totals summary (?view=summary) — all read tenant-scoped session scores.
+          for PATH_Q in \
+            "/api/reports/sessions" \
+            "/api/reports/sessions?format=pdf" \
+            "/api/reports/sessions?scope=clients&view=summary" \
+            "/api/reports/sessions?scope=clients&view=summary&format=pdf"; do
             for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
               code=000
               for i in 1 2 3 4 5; do
@@ -352,7 +881,7 @@ jobs:
             echo "::error::Manager reporting export auth-gate verification failed"
             exit 1
           fi
-          echo "✅ /api/reports/sessions (CSV + PDF) rejects anonymous callers (401) on both hosts"
+          echo "✅ /api/reports/sessions (detail + portfolio summary, CSV + PDF) rejects anonymous callers (401) on both hosts"
 
       - name: Verify home page is copy-clean (org copy rule, Phase 4)
         # The public home page (`/`) previously described "AI-generated
@@ -396,6 +925,27 @@ jobs:
         env:
           BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
         run: node scripts/phase2-isolation-check.mjs
+
+      - name: Verify per-turn latency telemetry persists (R-066)
+        # Race-free proof (same job, post-promotion): drives ONE real authenticated
+        # chat turn on the freshly-promoted build and asserts the CUSTOMER reply row
+        # persisted non-null ttft_ms/total_ms/latency_tier/model/route_reason — the
+        # founder-speed metric is now a durable record, not just a live badge + log.
+        # Seeds a throwaway self-owned user/session and cleans up in a finally block.
+        env:
+          BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
+        run: node scripts/verify-turn-telemetry.mjs
+
+      - name: Verify response-speed read surface (R-067)
+        # Race-free proof (same job, post-promotion): anon GET /api/analytics/latency
+        # → 401 (Phase-2 read-auth holds on the new route), then drives ONE real
+        # authenticated chat turn and asserts the authenticated summary reads the
+        # persisted telemetry back — measuredTurns>=1 with numeric avg/p95 ttft and
+        # a non-empty byModel split. Makes the R-066 data a visible artifact; seeds a
+        # throwaway self-owned user/session and cleans up in a finally block.
+        env:
+          BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
+        run: node scripts/verify-latency-summary.mjs
 
       - name: Verify security headers (Phase 2 3/3)
         # Assert the security-header set is present on the freshly-deployed build.

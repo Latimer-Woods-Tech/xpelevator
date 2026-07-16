@@ -11,11 +11,27 @@ datasource db {
 // ── Organisation / multi-tenant models ──────────────────────────────────────────
 
 model Organization {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  plan      OrgPlan  @default(FREE)
-  createdAt DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  plan        OrgPlan  @default(FREE)
+  kind        OrgKind  @default(STANDALONE)
+  parentOrgId String?  @map("parent_org_id") // set when this org is a CLIENT owned by an OPERATOR
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // White-label operator branding (issue #16, Phase 4, R-044). All nullable —
+  // NULL means "fall back to the platform default". Colors are stored as
+  // normalized lowercase `#rrggbb`; logoUrl is https-only. Validated at the API
+  // layer (src/lib/branding.ts).
+  brandDisplayName  String? @map("brand_display_name")
+  brandLogoUrl      String? @map("brand_logo_url")
+  brandPrimaryColor String? @map("brand_primary_color")
+  brandAccentColor  String? @map("brand_accent_color")
+
+  // Operator→client hierarchy (issue #16, Phase 4). A CLIENT org points at the
+  // OPERATOR org that owns it; an OPERATOR org has many client children.
+  parent   Organization?  @relation("OrgHierarchy", fields: [parentOrgId], references: [id])
+  children Organization[] @relation("OrgHierarchy")
 
   users       User[]
   jobTitles   JobTitle[]
@@ -23,6 +39,7 @@ model Organization {
   criteria    Criteria[]
   sessions    SimulationSession[]
 
+  @@index([parentOrgId])
   @@map("organizations")
 }
 
@@ -43,8 +60,17 @@ model User {
 model JobTitle {
   id          String   @id @default(uuid())
   orgId       String?  @map("org_id")       // null = global (available to all orgs)
-  name        String   @unique
+  // NOTE: `name` uniqueness is org-scoped, not global — enforced by the partial
+  // indexes `job_titles_org_name_key` (org-scoped) + `job_titles_global_name_key`
+  // (legacy globals) in migration 20260712120000_add_pack_provenance. Prisma
+  // can't express partial-predicate uniqueness in the schema, so no `@unique`
+  // here; the DB is the source of truth for that constraint.
+  name        String
   description String?
+  // Pack-import provenance (migration 20260712120000): which starter pack this
+  // role came from and at what catalog version. NULL for hand-authored roles.
+  sourcePackId String? @map("source_pack_id")
+  packVersion  Int?    @map("pack_version")
   createdAt   DateTime @default(now()) @map("created_at")
 
   org          Organization?       @relation(fields: [orgId], references: [id])
@@ -63,6 +89,14 @@ model Scenario {
   description String?
   type        SimulationType
   script      Json         @default("{}")
+  // Pack-import provenance (migration 20260712120000). `sourcePackId` +
+  // `sourceScenarioKey` are the idempotency key for re-import — a partial unique
+  // index `scenarios_org_pack_scenario_key` on (org_id, source_pack_id,
+  // source_scenario_key) enforces one row per pack scenario per org. NULL for
+  // hand-authored scenarios. `packVersion` stamps the catalog version imported.
+  sourcePackId      String? @map("source_pack_id")
+  sourceScenarioKey String? @map("source_scenario_key")
+  packVersion       Int?    @map("pack_version")
   createdAt   DateTime     @default(now()) @map("created_at")
 
   org      Organization? @relation(fields: [orgId], references: [id])
@@ -139,6 +173,17 @@ model ChatMessage {
   content   String
   timestamp DateTime @default(now())
 
+  // Per-turn conversation-latency telemetry (R-066). Populated on the CUSTOMER
+  // reply turn from the same measurement R-057 logs + R-060 shows in-UI; NULL on
+  // AGENT rows and on pre-instrumentation history. Turns the ephemeral live badge
+  // into a durable, queryable record so felt speed can be tuned over time and any
+  // future model/voice change has a benchmark to beat.
+  ttftMs      Int?    @map("ttft_ms")       // time-to-first-token (perceived gap)
+  totalMs     Int?    @map("total_ms")      // full reply generation time
+  latencyTier String? @map("latency_tier")  // realtime | acceptable | slow
+  model       String? @map("model")         // model that generated the reply
+  routeReason String? @map("route_reason")  // why that model (difficulty->model, R-059)
+
   session   SimulationSession @relation(fields: [sessionId], references: [id])
 
   @@index([sessionId])
@@ -189,4 +234,10 @@ enum OrgPlan {
   FREE
   PRO
   ENTERPRISE
+}
+
+enum OrgKind {
+  STANDALONE // a plain tenant (today's default) — no parent, no children
+  OPERATOR   // owns CLIENT orgs beneath it (the channel buyer)
+  CLIENT     // owned by an OPERATOR
 }

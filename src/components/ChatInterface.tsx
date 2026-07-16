@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import MessageBubble from './MessageBubble';
 import { ChatIcon, UserIcon } from './ui/icons';
 import type { ChatSessionState } from '@/hooks/useChatSession';
+import { latencyBadge } from '@/lib/latency';
 
 export type ChatInterfaceProps = Pick<
   ChatSessionState,
@@ -12,9 +13,18 @@ export type ChatInterfaceProps = Pick<
   | 'streamingText'
   | 'sending'
   | 'error'
+  | 'lastTiming'
   | 'sendMessage'
   | 'endConversation'
 >;
+
+// Tailwind classes per felt-speed tier — a green dot for a real-time turn,
+// amber for responsive, red for the "half-speed" lag the founder flagged.
+const TIER_STYLES: Record<string, string> = {
+  realtime: 'bg-green-500/15 border-green-700 text-green-300',
+  acceptable: 'bg-amber-500/15 border-amber-700 text-amber-300',
+  slow: 'bg-red-500/15 border-red-700 text-red-300',
+};
 
 export default function ChatInterface({
   session,
@@ -22,6 +32,7 @@ export default function ChatInterface({
   streamingText,
   sending,
   error,
+  lastTiming,
   sendMessage,
   endConversation,
 }: ChatInterfaceProps) {
@@ -56,6 +67,20 @@ export default function ChatInterface({
             <p className="text-sm text-slate-400">{session?.jobTitle.name}</p>
           </div>
           <div className="flex items-center gap-3">
+            {lastTiming && !sending && (() => {
+              const badge = latencyBadge(lastTiming);
+              return (
+                <span
+                  className={`hidden sm:inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${
+                    TIER_STYLES[badge.tier] ?? TIER_STYLES.acceptable
+                  }`}
+                  title={`Last reply: ${badge.detail}`}
+                >
+                  <span aria-hidden="true">⚡</span>
+                  {badge.label}
+                </span>
+              );
+            })()}
             <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
             <span className="text-sm text-green-400">Live</span>
             <button
