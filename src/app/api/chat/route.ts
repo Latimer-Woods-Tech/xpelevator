@@ -10,7 +10,13 @@ import { classifyTurnLatency, routeReasonForDifficulty } from '@/lib/latency';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
-import { MAX_AGENT_MESSAGE_CHARS, exceedsTurnRate } from '@/lib/limits';
+import {
+  MAX_AGENT_MESSAGE_CHARS,
+  exceedsTurnRate,
+  isStartSignal,
+  isEndSignal,
+  isControlSignal,
+} from '@/lib/limits';
 import { finalizeAndScoreSession } from '@/lib/session-scoring';
 
 
@@ -92,17 +98,33 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Session is already closed' }, { status: 400 });
     }
 
+    // Session lifecycle control signals — [START] opens the conversation,
+    // [END]/"end conversation" terminates + scores it — are NOT billable
+    // trainee turns and must be exempt from the per-turn throttle. A trainee
+    // (or the Phase-1 scoring canary) who ends the session within
+    // MIN_TURN_INTERVAL_MS of their last reply would otherwise get a 429 and
+    // the session would never close or score — silently breaking the core-loop
+    // acceptance (a completed session must produce a non-null score). Neither
+    // signal can be used to hammer Groq: [START] only fires while the session
+    // is open, and [END] moves it to COMPLETED so any further POST returns 400.
+    const trimmed = content.trim();
+    const isStart = isStartSignal(content);
+    const isEnd = isEndSignal(content);
+
     // Turn throttle: a human can't reply in under MIN_TURN_INTERVAL_MS; a
     // script hammering the endpoint burns Groq tokens. Enforced against DB
-    // message timestamps so it holds across Worker isolates.
-    const lastAgentMessage = [...(session.messages as Array<{ role: string; timestamp?: string }>)]
-      .reverse()
-      .find(m => m.role === 'AGENT');
-    if (exceedsTurnRate(lastAgentMessage?.timestamp, Date.now())) {
-      return NextResponse.json(
-        { error: 'Too many messages — slow down' },
-        { status: 429 }
-      );
+    // message timestamps so it holds across Worker isolates. Control signals
+    // (see above) bypass it — they are lifecycle actions, not trainee replies.
+    if (!isControlSignal(content)) {
+      const lastAgentMessage = [...(session.messages as Array<{ role: string; timestamp?: string }>)]
+        .reverse()
+        .find(m => m.role === 'AGENT');
+      if (exceedsTurnRate(lastAgentMessage?.timestamp, Date.now())) {
+        return NextResponse.json(
+          { error: 'Too many messages — slow down' },
+          { status: 429 }
+        );
+      }
     }
 
     // ── 2. Save agent message ─────────────────────────────────────────────────
@@ -112,26 +134,21 @@ export async function POST(request: Request) {
     // a Neon round-trip off the pre-first-token path — the latency the trainee
     // actually feels. On terminal branches (end/maxTurns) we await before
     // scoring so the transcript read is durable.
-    const isStartSignal = content.trim() === '[START]';
-    const agentInsertPromise = isStartSignal
+    const agentInsertPromise = isStart
       ? null
       : sql`
         INSERT INTO chat_messages (id, session_id, role, content, timestamp)
-        VALUES (gen_random_uuid(), ${sessionId}, 'AGENT', ${content.trim()}, NOW())
+        VALUES (gen_random_uuid(), ${sessionId}, 'AGENT', ${trimmed}, NOW())
       `;
 
     // ── 3. Check for end signal ───────────────────────────────────────────────
-    const shouldEnd =
-      content.trim().toUpperCase() === '[END]' ||
-      content.trim().toLowerCase() === 'end conversation';
-
-    if (shouldEnd) {
+    if (isEnd) {
       if (agentInsertPromise) await agentInsertPromise;
       return await endSession(sessionId, session as any);
     }
 
     // ── 3.5. Enforce maxTurns ─────────────────────────────────────────────────
-    if (!isStartSignal) {
+    if (!isStart) {
       const script = session.scenario.script as Record<string, unknown> | null;
       const maxTurns = typeof script?.maxTurns === 'number' ? script.maxTurns : undefined;
       if (maxTurns && maxTurns > 0) {
@@ -169,7 +186,7 @@ export async function POST(request: Request) {
         role: m.role as 'CUSTOMER' | 'AGENT',
         content: m.content,
       })),
-      ...(isStartSignal ? [] : [{ role: 'AGENT' as const, content: content.trim() }]),
+      ...(isStart ? [] : [{ role: 'AGENT' as const, content: content.trim() }]),
     ];
 
     // ── 5. Stream AI response ─────────────────────────────────────────────────

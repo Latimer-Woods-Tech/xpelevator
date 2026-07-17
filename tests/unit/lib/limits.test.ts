@@ -16,6 +16,9 @@ import {
   DEFAULT_PAGE_SIZE,
   exceedsTurnRate,
   parsePagination,
+  isStartSignal,
+  isEndSignal,
+  isControlSignal,
 } from '@/lib/limits';
 
 describe('limits constants', () => {
@@ -52,6 +55,33 @@ describe('exceedsTurnRate', () => {
 
   it('fails open on an unparseable timestamp (never blocks a real trainee)', () => {
     expect(exceedsTurnRate('not-a-date', now)).toBe(false);
+  });
+});
+
+describe('lifecycle control signals', () => {
+  it('recognizes [START] (exact, whitespace-trimmed)', () => {
+    expect(isStartSignal('[START]')).toBe(true);
+    expect(isStartSignal('  [START]  ')).toBe(true);
+    expect(isStartSignal('start')).toBe(false);
+    expect(isStartSignal('[END]')).toBe(false);
+  });
+
+  it('recognizes [END] and the natural phrase, case-insensitively', () => {
+    expect(isEndSignal('[END]')).toBe(true);
+    expect(isEndSignal('[end]')).toBe(true);
+    expect(isEndSignal('  End Conversation ')).toBe(true);
+    expect(isEndSignal('[START]')).toBe(false);
+    expect(isEndSignal('I would like to end this now')).toBe(false);
+  });
+
+  it('treats both signals as control signals; a normal reply is not', () => {
+    expect(isControlSignal('[START]')).toBe(true);
+    expect(isControlSignal('[END]')).toBe(true);
+    expect(isControlSignal('end conversation')).toBe(true);
+    // A real trainee turn must NOT be treated as a control signal (it stays
+    // throttled) — this is the regression guard for the canary 429-on-END bug.
+    expect(isControlSignal('Thanks, that resolves my issue.')).toBe(false);
+    expect(isControlSignal('')).toBe(false);
   });
 });
 
