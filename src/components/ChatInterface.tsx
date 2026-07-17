@@ -55,7 +55,9 @@ export default function ChatInterface({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white flex flex-col">
+    // h-dvh (not min-h-screen): on mobile the dynamic viewport unit keeps the
+    // composer visible above the on-screen keyboard instead of being pushed off.
+    <div className="h-dvh bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white flex flex-col">
       {/* Header */}
       <div className="border-b border-slate-800 px-6 py-4 flex-shrink-0">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
@@ -94,8 +96,8 @@ export default function ChatInterface({
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      {/* Messages — announce new customer replies to assistive tech. */}
+      <div className="flex-1 overflow-y-auto px-6 py-6" aria-live="polite" aria-atomic="false">
         <div className="max-w-3xl mx-auto space-y-4">
           {messages.length === 0 && !streamingText && !sending && (
             <div className="text-center text-slate-500 py-8">

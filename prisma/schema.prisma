@@ -163,6 +163,12 @@ model SimulationSession {
   @@index([userId])
   @@index([jobTitleId])
   @@index([orgId])
+  // Query-shape indexes (P3b-3): analytics/reports filter completed sessions by
+  // org and order by ended_at; the reports export joins on db_user_id; list
+  // endpoints order by created_at. Without these these scans go sequential.
+  @@index([orgId, status, endedAt])
+  @@index([dbUserId])
+  @@index([createdAt])
   @@map("simulation_sessions")
 }
 
