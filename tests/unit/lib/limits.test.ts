@@ -12,7 +12,10 @@ import {
   MAX_AGENT_MESSAGE_CHARS,
   MAX_SESSIONS_PER_DAY,
   MIN_TURN_INTERVAL_MS,
+  MAX_PAGE_SIZE,
+  DEFAULT_PAGE_SIZE,
   exceedsTurnRate,
+  parsePagination,
 } from '@/lib/limits';
 
 describe('limits constants', () => {
@@ -49,5 +52,28 @@ describe('exceedsTurnRate', () => {
 
   it('fails open on an unparseable timestamp (never blocks a real trainee)', () => {
     expect(exceedsTurnRate('not-a-date', now)).toBe(false);
+  });
+});
+
+describe('parsePagination', () => {
+  const p = (qs: string) => parsePagination(new URLSearchParams(qs));
+
+  it('defaults when no params are given', () => {
+    expect(p('')).toEqual({ limit: DEFAULT_PAGE_SIZE, offset: 0 });
+  });
+
+  it('honors valid limit/offset', () => {
+    expect(p('limit=10&offset=20')).toEqual({ limit: 10, offset: 20 });
+  });
+
+  it('clamps limit to [1, MAX_PAGE_SIZE] — no unbounded scan', () => {
+    expect(p('limit=99999').limit).toBe(MAX_PAGE_SIZE);
+    expect(p('limit=0').limit).toBe(1);
+    expect(p('limit=-5').limit).toBe(1);
+  });
+
+  it('floors offset at 0 and falls back on garbage', () => {
+    expect(p('offset=-10').offset).toBe(0);
+    expect(p('limit=abc&offset=xyz')).toEqual({ limit: DEFAULT_PAGE_SIZE, offset: 0 });
   });
 });

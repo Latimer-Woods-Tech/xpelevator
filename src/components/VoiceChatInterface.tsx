@@ -366,7 +366,7 @@ export default function VoiceChatInterface({
   const waveColor = isMicActive ? 'bg-red-400' : 'bg-purple-400';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900 text-white flex flex-col">
+    <div className="h-dvh bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900 text-white flex flex-col">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="border-b border-slate-800 px-6 py-4 flex-shrink-0">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
@@ -520,9 +520,24 @@ export default function VoiceChatInterface({
                 onMouseUp={stopListening}
                 onTouchStart={e => { e.preventDefault(); startListening(); }}
                 onTouchEnd={e => { e.preventDefault(); stopListening(); }}
+                // Keyboard hold-to-talk (a11y): hold Space/Enter to speak,
+                // release to send. `!e.repeat` stops key auto-repeat from
+                // re-triggering start while the key is held.
+                onKeyDown={e => {
+                  if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+                    e.preventDefault();
+                    startListening();
+                  }
+                }}
+                onKeyUp={e => {
+                  if (e.key === ' ' || e.key === 'Enter') {
+                    e.preventDefault();
+                    stopListening();
+                  }
+                }}
                 disabled={phase !== 'idle' || sending}
                 aria-label={
-                  isMicActive ? 'Recording — release to send' : 'Hold to speak'
+                  isMicActive ? 'Recording — release to send' : 'Hold to speak (or hold Space)'
                 }
                 className={`
                   relative w-24 h-24 rounded-full flex items-center justify-center text-4xl

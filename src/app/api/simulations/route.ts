@@ -3,7 +3,7 @@ import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
 import { canReadResource } from '@/lib/tenant-guard';
-import { MAX_SESSIONS_PER_DAY } from '@/lib/limits';
+import { MAX_SESSIONS_PER_DAY, parsePagination } from '@/lib/limits';
 
 const SIMULATION_TYPES = ['CHAT', 'VOICE', 'PHONE'] as const;
 
@@ -150,6 +150,10 @@ export async function GET(request: Request) {
     const userRole = authResult.session.user.role;
     const orgId = authResult.session.user.orgId;
 
+    // Bounded pagination (P3b-2): this list was previously unbounded. `?limit=`
+    // (max 100) and `?offset=` cap the scan.
+    const { limit, offset } = parsePagination(new URL(request.url).searchParams);
+
     // Admins can see all sessions in their org; members see only their own
     const sessions = userRole === 'ADMIN' && orgId
       ? await sql`
@@ -202,6 +206,7 @@ export async function GET(request: Request) {
           WHERE ss.org_id = ${orgId}
           GROUP BY ss.id, s.id, jt.id
           ORDER BY ss.created_at DESC
+          LIMIT ${limit} OFFSET ${offset}
         `
       : await sql`
           SELECT 
@@ -253,6 +258,7 @@ export async function GET(request: Request) {
           WHERE ss.user_id = ${userId}
           GROUP BY ss.id, s.id, jt.id
           ORDER BY ss.created_at DESC
+          LIMIT ${limit} OFFSET ${offset}
         `;
 
     const isAdmin = userRole === 'ADMIN';

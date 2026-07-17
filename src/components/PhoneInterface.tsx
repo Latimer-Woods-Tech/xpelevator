@@ -150,7 +150,7 @@ export default function PhoneInterface({
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white flex flex-col">
+    <div className="h-dvh bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white flex flex-col">
       {/* Header */}
       <div className="border-b border-slate-800 px-6 py-4 flex-shrink-0">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
