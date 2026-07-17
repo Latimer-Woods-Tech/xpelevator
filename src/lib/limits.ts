@@ -63,3 +63,35 @@ export function exceedsTurnRate(
   if (Number.isNaN(last)) return false;
   return nowMs - last < MIN_TURN_INTERVAL_MS;
 }
+
+/**
+ * `[START]` opens a conversation (the customer's opener). It is a lifecycle
+ * signal, not a billable trainee reply. Trims surrounding whitespace; the
+ * marker is exact/case-sensitive as the client always emits it verbatim.
+ */
+export function isStartSignal(content: string): boolean {
+  return content.trim() === '[START]';
+}
+
+/**
+ * `[END]` (or the natural-language "end conversation") terminates a session and
+ * triggers scoring. Case-insensitive so a trainee typing the phrase is honored.
+ */
+export function isEndSignal(content: string): boolean {
+  const t = content.trim();
+  return t.toUpperCase() === '[END]' || t.toLowerCase() === 'end conversation';
+}
+
+/**
+ * A session lifecycle control signal (`[START]` or `[END]`), as opposed to a
+ * billable trainee turn. These MUST bypass the per-turn throttle
+ * (`exceedsTurnRate`): if a trainee — or the Phase-1 scoring canary — ends the
+ * session within `MIN_TURN_INTERVAL_MS` of their last reply, throttling `[END]`
+ * would 429 the request and the session would never close or score, silently
+ * breaking the core-loop acceptance. Neither signal enables abuse: `[START]`
+ * only fires while a session is open, and `[END]` moves it to COMPLETED so any
+ * further POST returns 400.
+ */
+export function isControlSignal(content: string): boolean {
+  return isStartSignal(content) || isEndSignal(content);
+}

@@ -177,10 +177,26 @@ async function main() {
   if (!autoEnded) {
     const endRes = await req('POST', '/api/chat', cookie, { sessionId, content: '[END]' });
     const endTxt = await drain(endRes);
-    // A 400 "already closed" here just means the turn ended it first — not a
-    // failure; the score assertion below is the real gate.
-    if (endRes.status === 200) console.log('✓ [END] processed (session scored server-side)');
-    else console.log(`ℹ [END] -> ${endRes.status} (session likely already closed): ${endTxt.slice(0, 120)}`);
+    if (endRes.status === 200) {
+      console.log('✓ [END] processed (session scored server-side)');
+    } else if (endRes.status === 400) {
+      // "already closed" — the turn ended the session first (auto-resolve /
+      // maxTurns). Benign; the score assertion below is the real gate.
+      console.log(`ℹ [END] -> 400 (session already closed by the turn): ${endTxt.slice(0, 120)}`);
+    } else {
+      // Any OTHER status means [END] was REJECTED, so endSession/scoring never
+      // fired and the session can never produce a score. A 429 here is exactly
+      // the regression fixed in PR #109 — control signals ([START]/[END]) must
+      // bypass the per-turn throttle; a trainee (or this canary) ending within
+      // MIN_TURN_INTERVAL_MS of their last reply was 429'd, nulling the score
+      // (alert #107). Fail fast with the cause instead of masking it as the
+      // generic "no scores" failure the poll loop would otherwise report.
+      fail(
+        `[END] rejected with ${endRes.status} — session could not close or score ` +
+          `(control-signal throttle regression? see PR #109)`,
+        endTxt.slice(0, 200)
+      );
+    }
   }
 
   // ── 5. Verify a NON-NULL score persisted ───────────────────────────────────

@@ -37,6 +37,7 @@ on:
     paths:
       - '.github/workflows/uptime-monitor.yml'
       - 'scripts/uptime-check.mjs'
+      - 'scripts/phase1-canary.mjs'
       - 'scripts/prune-canary-sessions.mjs'
       - 'scripts/monitor-alert.cjs'
 
