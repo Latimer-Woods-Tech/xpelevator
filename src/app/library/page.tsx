@@ -88,6 +88,17 @@ export default function LibraryPage() {
             Load a pack into a client workspace and their team can start
             practising against realistic simulated customers immediately.
           </p>
+          {/* ICP wedge line — the decided go-to-market focus (E1 decision, issue #16):
+              built first for sales-floor enablement and personal-development coaching
+              operators; points at the Sales & Motivational Coaching demo line below. */}
+          <p className="mt-5 text-sm text-blue-200/90 max-w-2xl mx-auto">
+            Built first for{' '}
+            <strong className="text-white">sales-floor enablement</strong> and{' '}
+            <strong className="text-white">personal-development coaching</strong>{' '}
+            operators — start from the{' '}
+            <strong className="text-white">Sales &amp; Motivational Coaching</strong>{' '}
+            demo line below.
+          </p>
         </div>
 
         {/* Pack cards */}
