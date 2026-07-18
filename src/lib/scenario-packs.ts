@@ -362,6 +362,92 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
       },
     ],
   },
+  {
+    id: 'sales-motivation-mastery',
+    vertical: 'Sales & motivational coaching',
+    name: 'Sales & Motivational Coaching',
+    description:
+      'The day-one demo line for operators selling into sales floors and personal-development coaching practices (the Jim-Rohn tradition — conviction, personal responsibility, moving people to decide). A hesitant first-call prospect, a burned "I have tried programs before" skeptic, a price-and-commitment stall, and a coachee who has lost momentum. Trains leading with belief, reframing an objection as a hidden doubt, and taking someone to an honest decision without pressure.',
+    jobTitle: {
+      name: 'Sales & Motivation Coach',
+      description:
+        'A sales professional in the motivational-coaching tradition — sells high-performance and personal-development programs and re-motivates their own team; leads conversations with conviction over chat, browser voice, and the phone.',
+    },
+    scenarios: [
+      {
+        key: 'hesitant-first-call',
+        name: 'Just exploring for now',
+        summary:
+          'A warm prospect who booked a discovery call after a free workshop, but hedges that they are only looking. A friendly first conversation about building belief and earning one small next step.',
+        type: 'CHAT',
+        script: {
+          customerPersona:
+            'Renee, a mid-career professional who booked a discovery call after a free workshop. Genuinely interested but hedges — "I am just exploring right now." Warm and a little self-doubting; responds to belief and a clear next step, and freezes the moment she feels pushed.',
+          customerObjective:
+            'Move from "just exploring" to committing to one concrete, small next step. Success = she feels understood and takes the small action herself, never a hard close she agrees to just to end the call.',
+          difficulty: 'easy',
+          hints: [
+            'She has wanted to change direction for two years but keeps postponing the first step.',
+            'A high-pressure close makes her retreat to "let me think about it" and go quiet.',
+          ],
+        },
+      },
+      {
+        key: 'tried-programs-before',
+        name: 'I have tried programs like this before',
+        summary:
+          'A guarded prospect who has bought coaching before and "got nothing out of it." Trains handling a reflexive dismissal by getting them to define, in their own words, what would actually make it worth it.',
+        type: 'CHAT',
+        script: {
+          customerPersona:
+            'Marcus, a small-business owner who has paid for two coaching programs before and feels he got nothing out of them. Direct and guarded; he is testing whether this one is different. Respects candor, shuts down instantly at hype or a scripted pitch.',
+          customerObjective:
+            'Get him to separate the past programs from this decision and name what would make it worth it. Success = he states his own success criteria out loud instead of dismissing on reflex.',
+          difficulty: 'medium',
+          hints: [
+            'His last program was all motivation and no accountability — that gap is the real objection under the words.',
+            'He will disengage the moment he hears anything that sounds rehearsed.',
+          ],
+        },
+      },
+      {
+        key: 'lost-momentum-coachee',
+        name: 'Ready to quit at week twelve',
+        summary:
+          'A team member three months into a program who has stopped doing the work and is ready to walk. Trains re-motivating over voice — reconnecting someone to their own reason and winning back one small commitment, without a guilt trip.',
+        type: 'VOICE',
+        script: {
+          customerPersona:
+            'Theo, three months into a program, has quietly stopped doing the work and is ready to quit. Discouraged, offering "life got busy" excuses that mask a missed early win. Loyal underneath; re-engages when reminded of why he started in his own words.',
+          customerObjective:
+            'Reconnect him to why he started and get one small commitment back on the board. Success = he re-owns the goal and names the next action himself, not because he was shamed into it.',
+          difficulty: 'medium',
+          hints: [
+            'He hit one setback in week three and privately decided he "is not the type who follows through."',
+            'Telling him to just try harder confirms that story and loses him.',
+          ],
+        },
+      },
+      {
+        key: 'price-commitment-stall',
+        name: 'It is a lot of money and I have no time',
+        summary:
+          'A prospect who is ready in principle but stalls at the investment on the decision call. Trains surfacing the doubt hiding behind a money objection and taking them to an honest decision over the phone.',
+        type: 'PHONE',
+        script: {
+          customerPersona:
+            'Dana, ready in principle but stalling at the investment — "it is a lot of money and I do not have the time." Warm but anxious; the money is standing in for a fear of committing and not following through.',
+          customerObjective:
+            'Surface that the real objection is belief in herself, not the price, and help her decide from there. Success = an honest decision either way — a genuine yes or a real not-now — never a pressured yes she cancels the next day.',
+          difficulty: 'hard',
+          hints: [
+            'She can afford it; the fear is committing publicly and then failing.',
+            'Dropping the price validates the wrong objection and quietly lowers her belief that it will work.',
+          ],
+        },
+      },
+    ],
+  },
 ];
 
 /** Look up a single pack by its stable id. Returns `undefined` if unknown. */
