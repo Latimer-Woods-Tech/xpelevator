@@ -1,0 +1,39 @@
+name: Dependabot auto-merge
+
+# Clears the recurring dependabot backlog without human toil: auto-merges only
+# LOW-RISK bumps — minor/patch updates to DIRECT DEV dependencies — and only
+# once every required check passes (gh pr merge --auto waits for green CI).
+# Production-dependency bumps and any major version stay human-gated.
+#
+# Self-contained: uses the public dependabot/fetch-metadata action + the repo's
+# own GITHUB_TOKEN. No dependency on a private reusable workflow (the trap that
+# broke docs-health org-wide when Factory went private, 2026-07-12).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@d7267f607e9d3fb96fc2fbe83e0af444713e90b7 # v2.3.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for minor/patch dev-dependency bumps
+        if: >-
+          (steps.meta.outputs.update-type == 'version-update:semver-minor' ||
+           steps.meta.outputs.update-type == 'version-update:semver-patch') &&
+          steps.meta.outputs.dependency-type == 'direct:development'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
