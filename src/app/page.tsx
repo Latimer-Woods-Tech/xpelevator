@@ -80,6 +80,37 @@ export default async function Home() {
               </a>
             ))}
           </div>
+
+          {/* ICP wedge band — the decided go-to-market focus (E1 decision, issue #16).
+              Names who the platform is built for first: operators serving sales
+              floors and personal-development / motivational-coaching practices.
+              Mirrors the /pricing + /library wedge bands. Operator framing only
+              (they resell) — no retail marketing, no hard-coded money, no "AI". */}
+          <section className="mt-16 rounded-xl border border-blue-800/60 bg-blue-950/30 p-8 text-center">
+            <p className="mb-3 text-xs uppercase tracking-widest text-blue-400">
+              Who we built this for
+            </p>
+            <h2 className="mb-3 text-2xl font-semibold">
+              Sales floors and coaching practices
+            </h2>
+            <p className="mx-auto max-w-2xl text-sm text-slate-300">
+              Built first for the operator who owns the client relationship —
+              enablement and L&amp;D shops serving{' '}
+              <strong className="text-white">sales teams</strong> and{' '}
+              <strong className="text-white">personal-development coaching practices</strong>{' '}
+              in the conviction-led, move-people-to-decide tradition. Buy seats
+              wholesale, brand the workspace as your own, and set your own retail.
+              See the{' '}
+              <a href="/pricing" className="text-blue-400 hover:underline">
+                wholesale seat plans
+              </a>{' '}
+              or start from the{' '}
+              <a href="/library" className="text-blue-400 hover:underline">
+                Sales &amp; Motivational Coaching demo line
+              </a>
+              .
+            </p>
+          </section>
         </Container>
       </main>
     </PageShell>

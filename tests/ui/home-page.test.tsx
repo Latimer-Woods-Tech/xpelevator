@@ -111,6 +111,32 @@ describe('Home page — unauthenticated state', () => {
     const { container } = await renderHome();
     expect(container.textContent ?? '').not.toMatch(/\bAI\b/);
   });
+
+  // E1 wedge (issue #16): the home surface must carry the decided-ICP
+  // positioning (sales floors + coaching practices), not generic framing —
+  // and point at the operator shop windows. Locked so the copy can't silently
+  // regress to generic. Operator-first framing only (no retail marketing).
+  it('renders the ICP wedge band naming sales floors + coaching practices', async () => {
+    await renderHome();
+    const main = within(screen.getByRole('main'));
+    expect(main.getByText(/who we built this for/i)).toBeInTheDocument();
+    expect(main.getByText(/sales floors and coaching practices/i)).toBeInTheDocument();
+    expect(
+      main.getByText(/personal-development coaching practices/i)
+    ).toBeInTheDocument();
+  });
+
+  it('wedge band links to the /pricing and /library operator surfaces', async () => {
+    await renderHome();
+    const main = within(screen.getByRole('main'));
+    expect(main.getByRole('link', { name: /wholesale seat plans/i })).toHaveAttribute(
+      'href',
+      '/pricing'
+    );
+    expect(
+      main.getByRole('link', { name: /sales & motivational coaching demo line/i })
+    ).toHaveAttribute('href', '/library');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
