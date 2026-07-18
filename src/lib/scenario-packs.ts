@@ -98,7 +98,7 @@ export interface ScenarioPack {
 export const PACK_CATALOG_VERSION = 1 as const;
 
 /**
- * The starter library. Three per-vertical packs, each a role plus four
+ * The starter library — a set of per-vertical packs, each a role plus four
  * scenarios spanning `easy → hard` and `CHAT / VOICE / PHONE`. Copy follows the
  * org rule — the word "AI" never appears (these strings reach operator + trainee
  * surfaces). Verticals are deliberately distinct, high-training-value SKUs.
@@ -443,6 +443,92 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           hints: [
             'She can afford it; the fear is committing publicly and then failing.',
             'Dropping the price validates the wrong objection and quietly lowers her belief that it will work.',
+          ],
+        },
+      },
+    ],
+  },
+  {
+    id: 'sales-floor-coaching',
+    vertical: 'Sales-floor performance coaching',
+    name: 'Sales Floor Coaching',
+    description:
+      'The second demo line for the sales-and-motivation wedge — but pointed inward. Here the trainee is the sales-floor coach or team lead, and the simulated person is one of their own reps: a new hire frozen on the phones, a rep blaming the leads for a missed number, a top seller gutted by a lost deal, and a veteran coasting on last quarter. Trains the Jim-Rohn tradition applied to a team — leading with belief, turning an excuse into a decision, and holding a rep accountable to their own goal without shaming them off the floor. Operators serving sales teams sell this beside the outward-facing coaching pack as a distinct SKU.',
+    jobTitle: {
+      name: 'Sales Floor Coach',
+      description:
+        'A sales manager or team lead in the motivational-coaching tradition — coaches and re-energises their own reps rather than selling to prospects; runs one-to-one performance conversations over chat, browser voice, and the phone.',
+    },
+    scenarios: [
+      {
+        key: 'call-reluctant-new-rep',
+        name: 'Frozen on the phones in week one',
+        summary:
+          'A new hire who has found every reason not to dial all morning. A first coaching conversation about naming the fear underneath the busywork and winning one dial, not a lecture about activity.',
+        type: 'CHAT',
+        script: {
+          customerPersona:
+            'Priya, a bright new rep in her first week who keeps "getting ready" — cleaning her list, re-reading the script — instead of dialling. Eager to do well and quietly terrified of the first rejection; opens up when the coach treats the fear as normal, clams up when handed a quota lecture.',
+          customerObjective:
+            'Get her to name what she is afraid of and commit to one real dial while still on the call. Success = she makes the first call herself because she wants to, not because she was ordered to hit an activity number.',
+          difficulty: 'easy',
+          hints: [
+            'She is convinced the first "no" will prove she was a bad hire.',
+            'Being told to "just pick up the phone, it is easy" makes her feel more alone, not braver.',
+          ],
+        },
+      },
+      {
+        key: 'blames-the-leads',
+        name: 'It is the leads, not me',
+        summary:
+          'A rep who missed quota and has a ready explanation — the leads are junk and the territory is picked over. Trains separating what is real from what is a shield, and moving them back onto the one thing they control.',
+        type: 'CHAT',
+        script: {
+          customerPersona:
+            'Devon, a capable rep who missed the number two months running and has settled into blaming the lead quality and the territory. Sharp and a little defensive; some of his complaint is even true, which is why he hides behind it. Respects a coach who agrees where he is right, then refuses to let him stop there.',
+          customerObjective:
+            'Get him to own the part of the outcome that is his and pick one action he controls this week. Success = he names his own next move instead of re-litigating the leads.',
+          difficulty: 'medium',
+          hints: [
+            'His real fear is that if he tries his hardest and still misses, the excuse is gone.',
+            'Arguing that the leads are fine hands him the fight he wants and dodges the real work.',
+          ],
+        },
+      },
+      {
+        key: 'gutted-by-lost-deal',
+        name: 'I am done after that one',
+        summary:
+          'A strong rep who just lost the biggest deal of the quarter and is talking about walking away. Trains re-motivating over voice — reconnecting them to why they are good at this and getting one commitment back, without a pep-talk that rings hollow.',
+        type: 'VOICE',
+        script: {
+          customerPersona:
+            'Sam, a rep who nurtured a marquee deal for months and lost it at the finish line. Flattened and raw, half-serious about quitting, reading the loss as proof they are not cut out for it. Loyal and talented underneath; steadies when reminded, in their own words, of deals they have won.',
+          customerObjective:
+            'Reconnect them to their own track record and get one small commitment for tomorrow back on the board. Success = they re-own the goal and name the next step, not a hollow "I am fine" to end the call.',
+          difficulty: 'medium',
+          hints: [
+            'One brutal loss has overwritten a year of wins in their head.',
+            'A generic "shake it off, next one is yours" confirms the coach does not get how much it hurt.',
+          ],
+        },
+      },
+      {
+        key: 'coasting-top-performer',
+        name: 'I already hit my number',
+        summary:
+          'A veteran who cleared quota early and has quietly downshifted for the rest of the quarter, waving off feedback. Trains holding a high performer accountable over the phone — raising the bar they set for themselves without picking a fight or threatening.',
+        type: 'PHONE',
+        script: {
+          customerPersona:
+            'Marcus, a top closer who hit his number three weeks early and has coasted since, treating any coaching as beneath him. Confident and a touch complacent; deflects with "I already delivered." Moves only when the standard comes from his own ambition rather than a manager pulling rank.',
+          customerObjective:
+            'Get him to raise his own bar for the rest of the quarter instead of coasting, from pride not pressure. Success = he sets a stretch he chose himself and commits to it out loud.',
+          difficulty: 'hard',
+          hints: [
+            'He is bored, not lazy — coasting is what boredom looks like on a strong rep.',
+            'Threatening or invoking the quota makes him do the minimum out of spite.',
           ],
         },
       },
