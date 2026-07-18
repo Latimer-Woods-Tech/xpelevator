@@ -49,7 +49,21 @@ describe('Pricing page — operator-facing seat catalog', () => {
     const headings = screen
       .getAllByRole('heading', { level: 2 })
       .map((h) => h.textContent?.trim());
-    expect(headings).toEqual(['Chat', 'Voice', 'Phone']);
+    // The three seat tiers render first, in catalog order (chat → voice → phone);
+    // the ICP wedge band's heading follows.
+    expect(headings.slice(0, 3)).toEqual(['Chat', 'Voice', 'Phone']);
+  });
+
+  it('carries the E1 ICP wedge band (sales floors + coaching practices)', async () => {
+    await renderPricing();
+    expect(screen.getByText(/Who we built this for/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: /Sales floors and coaching practices/i }),
+    ).toBeInTheDocument();
+    // names the decided ICP and links to the demo-line pack in the library
+    expect(
+      screen.getByRole('link', { name: /Sales & Motivational Coaching demo line/i }),
+    ).toBeInTheDocument();
   });
 
   it('shows cumulative modalities as trainee-facing labels', async () => {

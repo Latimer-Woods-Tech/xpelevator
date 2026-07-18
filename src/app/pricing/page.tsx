@@ -118,6 +118,33 @@ export default function PricingPage() {
           })}
         </div>
 
+        {/* ICP wedge band — the decided go-to-market focus (E1 decision, issue #16).
+            Names who the wholesale line is built for first: operators serving sales
+            floors and personal-development / motivational-coaching practices. Operator
+            framing only (they resell) — no retail marketing, no hard-coded money. */}
+        <section className="mt-16 rounded-xl border border-blue-800/60 bg-blue-950/30 p-8 text-center">
+          <p className="text-xs uppercase tracking-widest text-blue-400 mb-3">
+            Who we built this for
+          </p>
+          <h2 className="text-2xl font-semibold mb-3">
+            Sales floors and coaching practices
+          </h2>
+          <p className="text-sm text-slate-300 max-w-2xl mx-auto">
+            The wholesale line is built first for one kind of operator — enablement
+            and L&amp;D shops serving{' '}
+            <strong className="text-white">sales teams</strong> and{' '}
+            <strong className="text-white">personal-development coaching practices</strong>{' '}
+            in the conviction-led, move-people-to-decide tradition. Your trainees
+            rehearse the hesitant prospect, the burned skeptic, and the
+            price-and-commitment stall against realistic simulated customers, then
+            get scored on how they led. Start from the{' '}
+            <Link href="/library" className="text-blue-400 hover:underline">
+              Sales &amp; Motivational Coaching demo line
+            </Link>
+            .
+          </p>
+        </section>
+
         {/* Billing note — sourced from the catalog, no hard-coded money */}
         <p className="text-center text-xs text-slate-500 mt-10 max-w-2xl mx-auto">
           {catalog.billing.note} Seats are billed monthly per active trainee.

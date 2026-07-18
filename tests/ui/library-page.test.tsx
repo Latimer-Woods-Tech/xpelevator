@@ -89,6 +89,15 @@ describe('Library page — operator-facing scenario inventory', () => {
     ).toBeInTheDocument();
   });
 
+  it('carries the E1 ICP wedge line (sales-floor enablement + coaching)', async () => {
+    const { container } = await renderLibrary();
+    const text = container.textContent ?? '';
+    // the decided go-to-market focus (E1) is named on the shop window
+    expect(text).toMatch(/sales-floor enablement/i);
+    expect(text).toMatch(/personal-development coaching/i);
+    expect(text).toMatch(/Sales & Motivational Coaching/i);
+  });
+
   it('never says the banned word "AI" (org copy rule)', async () => {
     const { container } = await renderLibrary();
     expect(container.textContent ?? '').not.toMatch(/\bAI\b/);
