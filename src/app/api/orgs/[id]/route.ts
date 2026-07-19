@@ -7,6 +7,8 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { canAccessOrg } from '@/lib/org-hierarchy';
+import { getOrgGovernanceTarget } from '@/lib/org-guard';
 
 
 export async function GET(
@@ -15,9 +17,21 @@ export async function GET(
 ) {
   try {
     // Require admin role for viewing org details
-    await requireAuth(request, 'ADMIN');
+    const { session } = await requireAuth(request, 'ADMIN');
 
     const { id } = await params;
+
+    // Tenant isolation (R-043): the org must exist and the caller must govern
+    // it — their own org, a client org they own, or platform admin. Otherwise a
+    // tenant admin could read another tenant's member roster (emails, roles).
+    const target = await getOrgGovernanceTarget(id);
+    if (!target) {
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    }
+    if (!canAccessOrg(target, session.user)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
     const orgRows = await sql`
       SELECT 
         o.id,
@@ -84,9 +98,20 @@ export async function PUT(
 ) {
   try {
     // Require admin role for updating orgs
-    await requireAuth(request, 'ADMIN');
+    const { session } = await requireAuth(request, 'ADMIN');
 
     const { id } = await params;
+
+    // Tenant isolation (R-043): only govern an org you own — else a tenant
+    // admin could rename or re-plan another tenant's org.
+    const target = await getOrgGovernanceTarget(id);
+    if (!target) {
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    }
+    if (!canAccessOrg(target, session.user)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
     const body = (await request.json()) as { name?: string; plan?: string };
 
     await sql`
@@ -125,9 +150,19 @@ export async function DELETE(
 ) {
   try {
     // Require admin role for deleting orgs
-    await requireAuth(request, 'ADMIN');
+    const { session } = await requireAuth(request, 'ADMIN');
 
     const { id } = await params;
+
+    // Tenant isolation (R-043): only delete an org you own — else a tenant
+    // admin could delete another tenant's (session-free) org outright.
+    const target = await getOrgGovernanceTarget(id);
+    if (!target) {
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    }
+    if (!canAccessOrg(target, session.user)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
 
     // Safety check — refuse if org has sessions
     const countResult = await sql`

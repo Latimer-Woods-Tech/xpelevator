@@ -926,6 +926,19 @@ jobs:
           BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
         run: node scripts/phase2-isolation-check.mjs
 
+      - name: Verify /api/orgs cross-org governance isolation (R-043)
+        # Race-free proof (same job, post-promotion): seeds a TENANT admin in
+        # org A and an unrelated org B, then asserts the platform-super-admin vs
+        # tenant-admin split holds on the freshly-promoted build — anon list=401,
+        # tenant list excludes org B, cross-tenant GET/PUT/[id]=403 with org B's
+        # plan unchanged, top-level POST=403, own-org GET=200. Closes the IDOR
+        # where /api/orgs/* gated on the ADMIN role alone (any tenant admin could
+        # read another tenant's roster, re-plan, or delete their org). Seeds and
+        # cleans up its own throwaway orgs/user.
+        env:
+          BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
+        run: node scripts/verify-orgs-isolation.mjs
+
       - name: Verify per-turn latency telemetry persists (R-066)
         # Race-free proof (same job, post-promotion): drives ONE real authenticated
         # chat turn on the freshly-promoted build and asserts the CUSTOMER reply row

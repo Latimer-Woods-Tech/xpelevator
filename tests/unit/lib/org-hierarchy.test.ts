@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   canManageOrgClients,
   canAccessOrgReport,
+  canAccessOrg,
+  isPlatformAdmin,
   resolveOperatorRollup,
   slugify,
   suffixSlug,
@@ -25,6 +27,53 @@ describe('canManageOrgClients', () => {
     expect(canManageOrgClients(OP, { role: 'MEMBER', orgId: OP })).toBe(false);
     expect(canManageOrgClients(OP, { role: 'MEMBER', orgId: null })).toBe(false);
     expect(canManageOrgClients(OP, {})).toBe(false); // no role → not admin
+  });
+});
+
+describe('isPlatformAdmin', () => {
+  it('is true only for an ADMIN with no org', () => {
+    expect(isPlatformAdmin({ role: 'ADMIN', orgId: null })).toBe(true);
+    expect(isPlatformAdmin({ role: 'ADMIN' })).toBe(true); // undefined org == null
+  });
+
+  it('is false for a tenant/operator admin (ADMIN with an org)', () => {
+    expect(isPlatformAdmin({ role: 'ADMIN', orgId: 'operator-1' })).toBe(false);
+  });
+
+  it('is false for any MEMBER', () => {
+    expect(isPlatformAdmin({ role: 'MEMBER', orgId: null })).toBe(false);
+    expect(isPlatformAdmin({ role: 'MEMBER', orgId: 'operator-1' })).toBe(false);
+    expect(isPlatformAdmin({})).toBe(false);
+  });
+});
+
+describe('canAccessOrg', () => {
+  const OP = 'operator-1';
+  const OWN = { id: OP, parentOrgId: null };
+  const CLIENT = { id: 'client-1', parentOrgId: OP };
+  const OTHER_CLIENT = { id: 'client-9', parentOrgId: 'operator-2' };
+  const OTHER_STANDALONE = { id: 'solo-9', parentOrgId: null };
+
+  it('a platform admin (ADMIN, no org) may govern any org', () => {
+    expect(canAccessOrg(OWN, { role: 'ADMIN', orgId: null })).toBe(true);
+    expect(canAccessOrg(OTHER_CLIENT, { role: 'ADMIN', orgId: null })).toBe(true);
+    expect(canAccessOrg(OTHER_STANDALONE, { role: 'ADMIN' })).toBe(true);
+  });
+
+  it('an operator admin may govern their own org and clients they own', () => {
+    expect(canAccessOrg(OWN, { role: 'ADMIN', orgId: OP })).toBe(true);
+    expect(canAccessOrg(CLIENT, { role: 'ADMIN', orgId: OP })).toBe(true);
+  });
+
+  it('an operator admin may NOT govern another tenant (the closed IDOR)', () => {
+    expect(canAccessOrg(OTHER_CLIENT, { role: 'ADMIN', orgId: OP })).toBe(false);
+    expect(canAccessOrg(OTHER_STANDALONE, { role: 'ADMIN', orgId: OP })).toBe(false);
+  });
+
+  it('a MEMBER never governs an org, even their own', () => {
+    expect(canAccessOrg(OWN, { role: 'MEMBER', orgId: OP })).toBe(false);
+    expect(canAccessOrg(CLIENT, { role: 'MEMBER', orgId: OP })).toBe(false);
+    expect(canAccessOrg(OWN, {})).toBe(false);
   });
 });
 

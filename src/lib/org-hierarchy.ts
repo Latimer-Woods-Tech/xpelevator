@@ -38,6 +38,56 @@ export function canManageOrgClients(
   return viewerOrg === operatorOrgId; // operator admin, own operator only
 }
 
+/** Minimal shape of the org a governance action (read/update/delete) targets. */
+export interface OrgGovernanceTarget {
+  /** The org record being read or mutated via `/api/orgs/[id]`. */
+  id: string;
+  /** The operator that owns this org when it is a CLIENT, else `null`. */
+  parentOrgId: string | null;
+}
+
+/**
+ * Whether `viewer` is a PLATFORM admin — an ADMIN with no org of their own.
+ *
+ * This is the ratified super-admin marker already relied on by
+ * {@link canManageOrgClients}, {@link canAccessOrgReport}, and
+ * {@link resolveOperatorRollup}: a null org means "belongs to no single tenant,
+ * governs the platform". A tenant/operator admin always carries an org id.
+ */
+export function isPlatformAdmin(viewer: OrgManager): boolean {
+  return viewer.role === 'ADMIN' && (viewer.orgId ?? null) === null;
+}
+
+/**
+ * Whether `viewer` may read or mutate the organization record `target` through
+ * the `/api/orgs/[id]` governance surface (GET details / PUT name+plan / DELETE).
+ *
+ * Closes the cross-tenant IDOR where those verbs gated on the ADMIN role ALONE
+ * and never on org identity — so any tenant admin could read another tenant's
+ * member roster (emails, roles), retitle or re-plan their org, or delete it.
+ * Mirrors the split the operator hierarchy already enforces
+ * ({@link canManageOrgClients} / {@link canAccessOrgReport}):
+ *
+ *   - Must be an ADMIN. A MEMBER never governs an org record.
+ *   - A PLATFORM admin (ADMIN with no org) may govern any org.
+ *   - A tenant/operator admin may govern their OWN org (`viewerOrg === target.id`)
+ *     or a CLIENT org they own (`viewerOrg === target.parentOrgId`) — never
+ *     another tenant's org.
+ *
+ * `null`/`undefined` orgIds normalise so a DB `null` and an absent field compare
+ * equal.
+ */
+export function canAccessOrg(
+  target: OrgGovernanceTarget,
+  viewer: OrgManager
+): boolean {
+  if (viewer.role !== 'ADMIN') return false;
+  const viewerOrg = viewer.orgId ?? null;
+  if (viewerOrg === null) return true; // platform admin — any org
+  if (viewerOrg === target.id) return true; // own org
+  return viewerOrg === (target.parentOrgId ?? null); // operator owns this client
+}
+
 /** Minimal shape of the org a report is being requested for. */
 export interface OrgReportTarget {
   /** The org whose sessions the report would cover. */
