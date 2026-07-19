@@ -303,7 +303,7 @@ jobs:
       # post-promotion verify failure never trips this particular alert.
       - name: Alert on a blocked promotion (pre-promotion gate failed)
         if: ${{ failure() && (steps.preview.conclusion == 'failure' || steps.smoke.conclusion == 'failure') }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const blocker = '${{ steps.smoke.conclusion }}' === 'failure'
