@@ -13,6 +13,7 @@
 import { auth } from '@/auth';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
+import { getTelnyxPublicKey } from '@/lib/telnyx';
 
 export type UserRole = 'ADMIN' | 'MEMBER';
 
@@ -164,7 +165,11 @@ export async function verifyTelnyxWebhook(
   headers: Headers,
   body: string
 ): Promise<boolean> {
-  const publicKey = process.env.TELNYX_PUBLIC_KEY;
+  // Resolve the signing key via the Cloudflare runtime binding (with a
+  // process.env fallback for local dev) — reading it from process.env alone
+  // returned undefined in the deployed Worker, which fails closed below and
+  // silently rejected every Telnyx webhook (phone modality dark).
+  const publicKey = getTelnyxPublicKey();
 
   // No public key configured: skip verification only outside production.
   // In production a missing key must reject (fail closed) — otherwise a
