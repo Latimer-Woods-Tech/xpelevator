@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGroqClient } from '@/lib/groq-fetch';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 
 // Test endpoint to diagnose Groq API issues
 // GET /api/debug/groq — admin only
@@ -14,10 +15,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
   }
 
+  // Resolve via the CF runtime binding (the source of truth in the deployed
+  // Worker) — process.env is empty for binding-only secrets there (#125), which
+  // would make this scoring-outage diagnostic falsely report the key missing.
+  const groqKey = getRuntimeEnv('GROQ_API_KEY');
   const result: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
-    apiKeyPresent: !!process.env.GROQ_API_KEY,
-    apiKeyLength: process.env.GROQ_API_KEY?.length || 0,
+    apiKeyPresent: !!groqKey,
+    apiKeyLength: groqKey?.length || 0,
   };
   
   try {

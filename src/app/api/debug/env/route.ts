@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 
 // Diagnostic endpoint to check environment variables in production
 // Access at: /api/debug/env — admin only
@@ -13,17 +14,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
   }
 
+  // Resolve via the CF runtime binding (binding-first, process.env fallback) —
+  // reading process.env directly reports a binding-only secret as ABSENT in the
+  // deployed Worker (see #125), which is exactly how this diagnostic would lie.
+  const groqKey = getRuntimeEnv('GROQ_API_KEY');
+  const dbUrl = getRuntimeEnv('DATABASE_URL');
+
   const envCheck = {
     runtime: typeof process !== 'undefined' ? 'node' : 'edge',
     hasProcess: typeof process !== 'undefined',
     hasProcessEnv: typeof process?.env !== 'undefined',
 
-    // Check for GROQ_API_KEY (existence and length only — no value or preview)
-    groqKeyExists: !!process?.env?.GROQ_API_KEY,
-    groqKeyLength: process?.env?.GROQ_API_KEY?.length || 0,
+    // Existence and length only — never the value or a preview
+    groqKeyExists: !!groqKey,
+    groqKeyLength: groqKey?.length || 0,
 
-    // Check for DATABASE_URL (existence only — no value or preview)
-    dbUrlExists: !!process?.env?.DATABASE_URL,
+    // Existence only — never the value
+    dbUrlExists: !!dbUrl,
 
     timestamp: new Date().toISOString(),
   };
