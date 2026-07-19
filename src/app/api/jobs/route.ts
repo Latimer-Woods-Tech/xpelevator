@@ -10,7 +10,17 @@ export async function GET() {
     const userOrgId = session.user.orgId;
 
     // Multi-tenancy: show user's org job titles + global ones (orgId is null)
-    // If not authenticated, only show global job titles
+    // If not authenticated, only show global job titles.
+    //
+    // Tenant isolation on the EMBEDDED relations: a globally-visible (null-org)
+    // job title is returned to every tenant, but its `scenarios` and
+    // `jobCriteria` must still be scoped — the joins below match only rows the
+    // caller may see (own-org OR global). Without that scope, ANY authenticated
+    // user (even a MEMBER) reading /api/jobs would see other tenants' private
+    // scenario names/descriptions and criteria attached to a shared job title —
+    // a cross-tenant read IDOR (sibling of the /api/jobs/[id]/criteria and
+    // /api/orgs/* cases). The `AND c.id IS NOT NULL` in the jobCriteria FILTER
+    // drops a link whose criterion was scoped out (no null-criteria phantom).
     const jobTitles = userOrgId
       ? await sql`
           SELECT 
@@ -45,13 +55,13 @@ export async function GET() {
                     'category', c.category
                   )
                 )
-              ) FILTER (WHERE jc.id IS NOT NULL),
+              ) FILTER (WHERE jc.id IS NOT NULL AND c.id IS NOT NULL),
               '[]'
             ) as "jobCriteria"
           FROM job_titles jt
-          LEFT JOIN scenarios s ON s.job_title_id = jt.id
+          LEFT JOIN scenarios s ON s.job_title_id = jt.id AND (s.org_id = ${userOrgId} OR s.org_id IS NULL)
           LEFT JOIN job_criteria jc ON jc.job_title_id = jt.id
-          LEFT JOIN criteria c ON c.id = jc.criteria_id
+          LEFT JOIN criteria c ON c.id = jc.criteria_id AND (c.org_id = ${userOrgId} OR c.org_id IS NULL)
           WHERE jt.org_id = ${userOrgId} OR jt.org_id IS NULL
           GROUP BY jt.id
           ORDER BY jt.name ASC
@@ -89,13 +99,13 @@ export async function GET() {
                     'category', c.category
                   )
                 )
-              ) FILTER (WHERE jc.id IS NOT NULL),
+              ) FILTER (WHERE jc.id IS NOT NULL AND c.id IS NOT NULL),
               '[]'
             ) as "jobCriteria"
           FROM job_titles jt
-          LEFT JOIN scenarios s ON s.job_title_id = jt.id
+          LEFT JOIN scenarios s ON s.job_title_id = jt.id AND s.org_id IS NULL
           LEFT JOIN job_criteria jc ON jc.job_title_id = jt.id
-          LEFT JOIN criteria c ON c.id = jc.criteria_id
+          LEFT JOIN criteria c ON c.id = jc.criteria_id AND c.org_id IS NULL
           WHERE jt.org_id IS NULL
           GROUP BY jt.id
           ORDER BY jt.name ASC

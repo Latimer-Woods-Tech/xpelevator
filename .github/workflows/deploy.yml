@@ -952,6 +952,24 @@ jobs:
           BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
         run: node scripts/verify-jobs-criteria-isolation.mjs
 
+      - name: Verify job-title ↔ scenario cross-org isolation
+        # Race-free proof (same job, post-promotion): seeds two orgs, a MEMBER +
+        # ADMIN in org A, a GLOBAL job title carrying an org-A and an org-B
+        # scenario, and a private job title in each org, then asserts on the
+        # freshly-promoted build:
+        #   READ  GET /api/jobs — anon=401; member A sees the shared job with its
+        #         OWN scenario but NOT org B's (the read-IDOR fix), and never sees
+        #         org B's private job title.
+        #   WRITE POST /api/scenarios — attaching to org B's private job=403,
+        #         unknown job=404, own job=201 (authoring still works).
+        # Closes the cross-tenant scenario read leak on /api/jobs (unfiltered
+        # relation join) + the unguarded foreign-key write on POST /api/scenarios
+        # — the job↔scenario sibling of the R-043 /api/orgs and job-criteria
+        # classes. Seeds and cleans up its own throwaway data.
+        env:
+          BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
+        run: node scripts/verify-jobs-scenarios-isolation.mjs
+
       - name: Verify per-turn latency telemetry persists (R-066)
         # Race-free proof (same job, post-promotion): drives ONE real authenticated
         # chat turn on the freshly-promoted build and asserts the CUSTOMER reply row
