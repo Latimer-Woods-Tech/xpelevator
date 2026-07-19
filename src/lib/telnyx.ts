@@ -50,6 +50,39 @@ function getTelnyxEnv(): { apiKey: string; connectionId: string; webhookUrl: str
   };
 }
 
+/**
+ * Resolve the Telnyx ED25519 webhook-signing public key.
+ *
+ * Same resolution rule as {@link getTelnyxEnv}: the real secret lives on the
+ * Cloudflare runtime binding (`getCloudflareContext().env`), NOT on
+ * `process.env` (webpack inlines `process.env.*` at build time, so a
+ * wrangler-secret set at deploy time is absent there). `process.env` is kept
+ * only as a local-dev fallback. Reading this key via `process.env` alone made
+ * the webhook verifier fail closed in production — silently rejecting every
+ * Telnyx webhook and taking the whole phone modality dark.
+ *
+ * Returns `undefined` when unset so the caller can apply its fail-closed rule.
+ * The value is trimmed because a stray trailing newline/CR (the GCP-SM secret
+ * trap) would corrupt the base64 decode.
+ */
+export function getTelnyxPublicKey(): string | undefined {
+  let publicKey: string | undefined;
+
+  // 1. Cloudflare runtime binding (production)
+  try {
+    const { env } = getCloudflareContext();
+    publicKey = (env as Record<string, string | undefined>).TELNYX_PUBLIC_KEY;
+  } catch {
+    // Not in a CF Worker context (local dev) — fall through
+  }
+
+  // 2. process.env fallback for local development
+  publicKey ??= process.env.TELNYX_PUBLIC_KEY;
+
+  const trimmed = publicKey?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function telnyxHeaders() {
   const { apiKey } = getTelnyxEnv();
   if (!apiKey) throw new Error('TELNYX_API_KEY is not set');

@@ -25,6 +25,7 @@ import {
   startTranscription,
   stopTranscription,
   callHangup,
+  getTelnyxPublicKey,
 } from '@/lib/telnyx';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -208,5 +209,32 @@ describe('lib/telnyx — callHangup', () => {
     await callHangup('cc-202');
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toContain('cc-202/actions/hangup');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('lib/telnyx — getTelnyxPublicKey', () => {
+  const original = process.env.TELNYX_PUBLIC_KEY;
+  afterEach(() => {
+    if (original === undefined) delete process.env.TELNYX_PUBLIC_KEY;
+    else process.env.TELNYX_PUBLIC_KEY = original;
+  });
+
+  it('returns undefined when the key is unset everywhere', () => {
+    // getCloudflareContext() throws outside a Worker → process.env fallback,
+    // which is also unset here.
+    delete process.env.TELNYX_PUBLIC_KEY;
+    expect(getTelnyxPublicKey()).toBeUndefined();
+  });
+
+  it('reads the process.env fallback and trims a trailing newline (GCP-SM trap)', () => {
+    process.env.TELNYX_PUBLIC_KEY = 'cHVia2V5\n';
+    expect(getTelnyxPublicKey()).toBe('cHVia2V5');
+  });
+
+  it('treats a whitespace-only value as unset', () => {
+    process.env.TELNYX_PUBLIC_KEY = '  \n';
+    expect(getTelnyxPublicKey()).toBeUndefined();
   });
 });
