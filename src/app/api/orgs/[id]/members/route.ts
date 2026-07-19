@@ -7,6 +7,8 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { canAccessOrg } from '@/lib/org-hierarchy';
+import { getOrgGovernanceTarget } from '@/lib/org-guard';
 
 
 export async function GET(
@@ -15,9 +17,20 @@ export async function GET(
 ) {
   try {
     // Require admin role for listing org members
-    await requireAuth(request, 'ADMIN');
+    const { session } = await requireAuth(request, 'ADMIN');
 
     const { id } = await params;
+
+    // Tenant isolation (R-043): only an admin who governs this org may see its
+    // roster — else a tenant admin could read another tenant's member emails.
+    const target = await getOrgGovernanceTarget(id);
+    if (!target) {
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    }
+    if (!canAccessOrg(target, session.user)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
     const members = await sql`
       SELECT 
         id,
@@ -45,9 +58,21 @@ export async function POST(
 ) {
   try {
     // Require admin role for adding org members
-    await requireAuth(request, 'ADMIN');
+    const { session } = await requireAuth(request, 'ADMIN');
 
     const { id: orgId } = await params;
+
+    // Tenant isolation (R-043): only govern an org you own — else a tenant admin
+    // could plant or reassign a user into another tenant's org (this upsert sets
+    // org_id = the target org).
+    const target = await getOrgGovernanceTarget(orgId);
+    if (!target) {
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    }
+    if (!canAccessOrg(target, session.user)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
     const body = (await request.json()) as { email: string; name?: string; role?: string };
 
     if (!body.email?.trim()) {
@@ -85,9 +110,20 @@ export async function DELETE(
 ) {
   try {
     // Require admin role for removing org members
-    await requireAuth(request, 'ADMIN');
+    const { session } = await requireAuth(request, 'ADMIN');
 
     const { id: orgId } = await params;
+
+    // Tenant isolation (R-043): only govern an org you own — else a tenant admin
+    // could evict another tenant's members.
+    const target = await getOrgGovernanceTarget(orgId);
+    if (!target) {
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    }
+    if (!canAccessOrg(target, session.user)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
     const { userId } = (await request.json()) as { userId: string };
 
     if (!userId) {

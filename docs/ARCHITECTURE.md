@@ -1,5 +1,5 @@
 ---
-verified: 2026-07-09
+verified: 2026-07-19
 verified_by: build-loop (grep of repo @ 6a885f8 + live CI evidence)
 verified_against:
   - repo tree at commit 6a885f8 (this file's facts grep-checked against src/, prisma/, .github/, wrangler.toml)
@@ -83,7 +83,7 @@ C4 L2 — the deployable/runtime units, with real names. Verified against
 | `/api/simulations` | authed | create/list sessions |
 | `/api/scoring` | authed | produce the /10 score for a session |
 | `/api/analytics` | authed | session analytics |
-| `/api/orgs` · `/api/orgs/[id]` · `/api/orgs/[id]/members` | authed | tenant admin (cross-org governance deferred to Phase 4) |
+| `/api/orgs` · `/api/orgs/[id]` · `/api/orgs/[id]/members` | authed (ADMIN) | platform-super-admin vs tenant-admin split enforced (R-043): list scoped to own org + owned clients, cross-tenant `[id]`/top-level-POST → 403 |
 | `/api/telnyx/call` · `/api/telnyx/webhook` | call: authed / webhook: signature | phone modality |
 | `/api/debug/env` · `/api/debug/groq` | authed | operational probes (leak-stripped, tip 1eb7977a) |
 
@@ -170,7 +170,6 @@ appears in the Gap table.
 | Seat catalog exists (`plans.ts`) but no Stripe products/metering/gating | R-041, R-042 | Phase 4 — wholesale seat billing (test-mode → 🔒 live) |
 | LLM calls Groq directly, no AI Gateway | R-120 | Phase 5 — LLM onto `@latimer-woods-tech/llm` chain |
 | Browser voice via Web Speech; no Deepgram/ElevenLabs | R-121 | Phase 5 — voice upgrade behind provider seam |
-| Cross-org `/api/orgs/*` governance ignores platform-super-admin split | R-043 | Phase 4 — operator hierarchy |
 | UI copy still says "AI" (org §16 banned in user-facing) | R-130 | Phase 4 — copy pass |
 
 ---
