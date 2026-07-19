@@ -9,8 +9,9 @@ name: Uptime + scoring monitor
 #
 #   health  (every 15 min) — /api/health 200 on xpelevator.com + the pages.dev
 #     alias, a PUBLIC DB-read canary (GET /api/branding/<nonexistent-slug> -> 404
-#     on both hosts), AND a direct Groq /v1/models credential probe. Two silent
-#     failure modes health alone can't see:
+#     on both hosts), a PHONE-webhook reachability canary (POST an unsigned body
+#     to /api/telnyx/webhook -> 401 on both hosts), AND a direct Groq /v1/models
+#     credential probe. Silent failure modes health alone can't see:
 #       - expired GROQ_API_KEY nulls every score while /api/health stays 200 (it
 #         only checks the var is present, not that it authenticates) — the Groq
 #         probe catches it (live-issue #1);
@@ -18,7 +19,16 @@ name: Uptime + scoring monitor
 #         stays 200 (health touches no DB) — the branding canary catches it. On
 #         2026-07-14 #78 shipped exactly that and this monitor stayed green, so
 #         the outage was silent until the 6-hourly scoring canary. The canary
-#         closes that gap: a 500 (not 404) opens an alert issue within 15 min.
+#         closes that gap: a 500 (not 404) opens an alert issue within 15 min;
+#       - the phone modality is invisible to the chat-only scoring canary. On
+#         2026-07-19 #125 the Telnyx signature verifier read its signing key from
+#         process.env (undefined in the deployed Worker) and fail-closed EVERY
+#         webhook — phone went dark, unmonitored. The webhook canary asserts the
+#         route is reachable + fail-CLOSED (401 to an unsigned probe): 404 (route
+#         dropped), 500 (import crash), or 200 (fail-OPEN — unsigned webhook
+#         accepted) each open an alert. A valid signature needs Telnyx's private
+#         key we don't hold, so the exact #125 always-401 key bug stays covered by
+#         the auth-api unit tests, not this black-box probe.
 #
 #   scoring-canary (every 6h) — drives one full authenticated session against the
 #     live branded domain and asserts a NON-NULL score, then prunes old canary
