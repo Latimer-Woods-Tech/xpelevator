@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { sanitizeScenarioScript } from '@/lib/scenario-safety';
+import { canReadResource } from '@/lib/tenant-guard';
 
 
 // GET /api/scenarios?jobTitleId=...
@@ -119,6 +120,24 @@ export async function POST(request: Request) {
         { error: 'jobTitleId, name, and type are required' },
         { status: 400 }
       );
+    }
+
+    // Tenant scope on the foreign key: the job title this scenario attaches to
+    // must be visible to the caller (their own org or the global catalog).
+    // Without this an org-A admin could attach a scenario to another tenant's
+    // PRIVATE job title (a cross-tenant write that injects content into org B's
+    // /api/jobs view). Mirrors the guard on POST /api/jobs/[id]/criteria and
+    // POST /api/simulations. `canReadResource` (own-org OR global) — attaching
+    // an org-scoped scenario under a shared/global job title is legitimate
+    // authoring; the read side (/api/jobs) scopes what each tenant sees back.
+    const jobRows = await sql`
+      SELECT org_id as "orgId" FROM job_titles WHERE id = ${body.jobTitleId}
+    `;
+    if (jobRows.length === 0) {
+      return NextResponse.json({ error: 'Job title not found' }, { status: 404 });
+    }
+    if (!canReadResource(jobRows[0].orgId as string | null, userOrgId)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     const [scenario] = await sql`
