@@ -970,6 +970,21 @@ jobs:
           BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
         run: node scripts/verify-jobs-scenarios-isolation.mjs
 
+      - name: Verify scoring-criteria cross-tenant isolation
+        # Runtime-path sibling of the /api/* isolation gates: proves the
+        # end-of-session scoring selection (loadScoringCriteria) is tenant-scoped
+        # on the LIVE Postgres. Seeds two tenants + a global criterion and a
+        # link-less org-A job/session, then asserts the OLD unscoped fallback
+        # WOULD have leaked org B's criterion into org A's session (seed is
+        # exploitable), the FIXED fallback + linked queries return org A's + the
+        # global criterion but EXCLUDE org B's (leak closed), and an ORG-LESS
+        # session still keeps every criterion (the live scoring canary is
+        # org-less and must not regress). DB-only (no HTTP/LLM) → deterministic.
+        # The companion unit tests assert the deployed handler issues exactly
+        # these scoped queries, so handler + gate cannot drift. Seeds and cleans
+        # up its own throwaway data. DATABASE_URL comes from job-level env.
+        run: node scripts/verify-scoring-criteria-isolation.mjs
+
       - name: Verify per-turn latency telemetry persists (R-066)
         # Race-free proof (same job, post-promotion): drives ONE real authenticated
         # chat turn on the freshly-promoted build and asserts the CUSTOMER reply row
