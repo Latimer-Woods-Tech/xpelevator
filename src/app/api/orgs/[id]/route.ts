@@ -10,6 +10,10 @@ import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessOrg } from '@/lib/org-hierarchy';
 import { getOrgGovernanceTarget } from '@/lib/org-guard';
 
+// Per-caller, tenant-scoped governance surface — never cache a response.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 
 export async function GET(
   request: Request,
