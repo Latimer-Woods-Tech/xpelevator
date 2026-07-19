@@ -939,6 +939,19 @@ jobs:
           BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
         run: node scripts/verify-orgs-isolation.mjs
 
+      - name: Verify job-criteria cross-org read isolation
+        # Race-free proof (same job, post-promotion): seeds two orgs each with a
+        # job title + linked criterion and a TENANT MEMBER in org A, then asserts
+        # GET /api/jobs/[id]/criteria is tenant-scoped on the freshly-promoted
+        # build — anon=401, cross-tenant read=403 (org B's rubric NOT leaked),
+        # unknown job=404, own-org read=200 (linked criterion still returned).
+        # Closes the read-IDOR where the GET gated on auth alone with no org scope
+        # (the sibling of the R-043 /api/orgs class). Seeds and cleans up its own
+        # throwaway orgs/user/rubric.
+        env:
+          BASE_URL: https://${{ env.CF_PROJECT }}.pages.dev
+        run: node scripts/verify-jobs-criteria-isolation.mjs
+
       - name: Verify per-turn latency telemetry persists (R-066)
         # Race-free proof (same job, post-promotion): drives ONE real authenticated
         # chat turn on the freshly-promoted build and asserts the CUSTOMER reply row

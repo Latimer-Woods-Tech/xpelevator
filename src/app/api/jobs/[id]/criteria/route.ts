@@ -32,10 +32,27 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    // Require authentication for reading job criteria
-    await requireAuth();
+    // Authenticated read, scoped to the caller's org.
+    const { session } = await requireAuth();
+    const userOrgId = session.user.orgId;
 
     const { id } = await params;
+
+    // Tenant isolation: the job title must be visible to the caller (their own
+    // org or the global catalog). Without this an authenticated user in org A
+    // (even a trainee/MEMBER) could enumerate org B's scoring rubric — the
+    // linked criteria names/descriptions — by supplying another tenant's job
+    // title id (a cross-tenant read IDOR).
+    const jobRows = await sql`
+      SELECT org_id as "orgId" FROM job_titles WHERE id = ${id}
+    `;
+    if (jobRows.length === 0) {
+      return NextResponse.json({ error: 'Job title not found' }, { status: 404 });
+    }
+    if (!canReadResource(jobRows[0].orgId as string | null, userOrgId)) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
     const criteriaRows = await sql`
       SELECT 
         c.id,

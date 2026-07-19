@@ -23,7 +23,7 @@ const { requireAuthMock, sqlMock, FakeAuthError } = vi.hoisted(() => {
 vi.mock('@/lib/auth-api', () => ({ requireAuth: requireAuthMock, AuthError: FakeAuthError }));
 vi.mock('@/lib/db', () => ({ sql: sqlMock, default: sqlMock }));
 
-import { POST } from '@/app/api/jobs/[id]/criteria/route';
+import { GET, POST } from '@/app/api/jobs/[id]/criteria/route';
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const req = (criteriaId = 'c1') =>
@@ -143,5 +143,78 @@ describe('POST /api/jobs/[id]/criteria — cross-org IDOR guard (P1-2)', () => {
     wireLinkHappy(null); // global criterion
     const res = await POST(req(), params('j1'));
     expect(res.status).toBe(201);
+  });
+});
+
+describe('GET /api/jobs/[id]/criteria — cross-org read IDOR guard', () => {
+  const getReq = () => new Request('http://localhost/api/jobs/j1/criteria');
+
+  function asMember(orgId: string | null) {
+    requireAuthMock.mockResolvedValue({ session: { user: { id: 'u', role: 'MEMBER', orgId } } });
+  }
+
+  /**
+   * Wire the GET path: the org-scope check reads `FROM job_titles`, then the
+   * list query reads `FROM job_criteria` (INNER JOIN criteria).
+   * jobOrg = owning org of the job title (undefined → not found).
+   */
+  function wireGet({ jobOrg }: { jobOrg?: string | null }) {
+    sqlMock.mockImplementation((strings?: TemplateStringsArray) => {
+      const text = Array.isArray(strings) ? strings.join(' ') : String(strings);
+      if (text.includes('FROM job_titles')) {
+        return Promise.resolve(jobOrg === undefined ? [] : [{ orgId: jobOrg }]);
+      }
+      if (text.includes('FROM job_criteria')) {
+        return Promise.resolve([{ id: 'c1', name: 'Empathy', description: 'secret rubric', orgId: jobOrg }]);
+      }
+      return Promise.resolve([]);
+    });
+  }
+
+  function listQueryRan() {
+    return sqlMock.mock.calls.some((c) =>
+      (Array.isArray(c[0]) ? c[0].join(' ') : '').includes('FROM job_criteria')
+    );
+  }
+
+  it("DENIES a member in org A reading org B's job-title criteria", async () => {
+    asMember('orgA');
+    wireGet({ jobOrg: 'orgB' });
+    const res = await GET(getReq(), params('j1'));
+    expect(res.status).toBe(403);
+    // Never reaches the rubric-leaking list query.
+    expect(listQueryRan()).toBe(false);
+  });
+
+  it("DENIES a null-org user reading a tenant's job-title criteria", async () => {
+    asMember(null);
+    wireGet({ jobOrg: 'orgB' });
+    const res = await GET(getReq(), params('j1'));
+    expect(res.status).toBe(403);
+    expect(listQueryRan()).toBe(false);
+  });
+
+  it('404 when the job title does not exist', async () => {
+    asMember('orgA');
+    wireGet({ jobOrg: undefined });
+    const res = await GET(getReq(), params('nope'));
+    expect(res.status).toBe(404);
+    expect(listQueryRan()).toBe(false);
+  });
+
+  it("allows reading an own-org job title's criteria", async () => {
+    asMember('orgA');
+    wireGet({ jobOrg: 'orgA' });
+    const res = await GET(getReq(), params('j1'));
+    expect(res.status).toBe(200);
+    expect(listQueryRan()).toBe(true);
+  });
+
+  it('allows reading a GLOBAL job title’s criteria (shared catalog)', async () => {
+    asMember('orgA');
+    wireGet({ jobOrg: null });
+    const res = await GET(getReq(), params('j1'));
+    expect(res.status).toBe(200);
+    expect(listQueryRan()).toBe(true);
   });
 });
