@@ -46,7 +46,22 @@ export function resolveScoringStatus(scorable: boolean, scoreCount: number): Sco
 /**
  * Resolve the active scoring criteria for a session: the criteria linked to its
  * job title, falling back to all active criteria when the job has no explicit
- * links. Matches the previous per-path behavior exactly.
+ * links.
+ *
+ * Tenant isolation (mirrors `canReadResource`): a criterion is eligible only if
+ * it is GLOBAL (`org_id IS NULL`) or belongs to the SESSION'S org. Without this,
+ * the fallback branch — `SELECT … FROM criteria WHERE active = true`, with no org
+ * filter — scored a real tenant's session against EVERY other tenant's private
+ * criteria: their names/descriptions were sent to the judge and their
+ * `criteria_id`s were written as this session's scores, which then surfaced in
+ * the wrong tenant's analytics `byCriteria` breakdown (the R-043/R-072 IDOR
+ * class, in the runtime scoring path).
+ *
+ * An ORG-LESS session (`ss.org_id IS NULL`, e.g. a self-registered user or the
+ * scoring canary) keeps its prior behavior — every active criterion stays
+ * eligible — because there is no tenant to leak BETWEEN; the `ss.org_id IS NULL`
+ * disjunct makes the change a provable no-op for those sessions. Only a session
+ * that actually belongs to a tenant is now scoped to that tenant + global.
  */
 export async function loadScoringCriteria(sessionId: string): Promise<ScoringCriterion[]> {
   const linked = await sql`
@@ -55,9 +70,16 @@ export async function loadScoringCriteria(sessionId: string): Promise<ScoringCri
     JOIN job_criteria jc ON jc.job_title_id = ss.job_title_id
     JOIN criteria c ON c.id = jc.criteria_id
     WHERE ss.id = ${sessionId} AND c.active = true
+      AND (ss.org_id IS NULL OR c.org_id IS NULL OR c.org_id = ss.org_id)
   `;
   if (linked.length > 0) return linked as ScoringCriterion[];
-  const all = await sql`SELECT id, name, description, weight FROM criteria WHERE active = true`;
+  const all = await sql`
+    SELECT c.id, c.name, c.description, c.weight
+    FROM criteria c
+    JOIN simulation_sessions ss ON ss.id = ${sessionId}
+    WHERE c.active = true
+      AND (ss.org_id IS NULL OR c.org_id IS NULL OR c.org_id = ss.org_id)
+  `;
   return all as ScoringCriterion[];
 }
 

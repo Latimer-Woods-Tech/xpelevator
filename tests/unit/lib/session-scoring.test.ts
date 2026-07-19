@@ -84,6 +84,38 @@ describe('loadScoringCriteria', () => {
     expect(out).toEqual([{ id: 'g1', name: 'G', description: null, weight: 3 }]);
     expect(sqlMock).toHaveBeenCalledTimes(2);
   });
+
+  // Tenant isolation: both the linked and the fallback selection must be scoped
+  // to the session's org (+ global), or a real tenant's session gets scored
+  // against another tenant's private criteria (the runtime-path IDOR).
+  const queryText = (call: unknown[]) => {
+    const strings = call[0];
+    return Array.isArray(strings) ? strings.join(' ') : '';
+  };
+
+  it('scopes the LINKED query to the session org (org_id predicate present)', async () => {
+    sqlMock.mockResolvedValueOnce([{ id: 'c1', name: 'A', description: null, weight: 5 }]);
+    await loadScoringCriteria('s1');
+    const linkedText = queryText(sqlMock.mock.calls[0]);
+    expect(linkedText).toMatch(/c\.org_id\s*=\s*ss\.org_id/);
+    expect(linkedText).toMatch(/c\.org_id\s+IS\s+NULL/i);
+    expect(linkedText).toMatch(/ss\.org_id\s+IS\s+NULL/i);
+  });
+
+  it('scopes the FALLBACK query to the session org (session-joined, not a global SELECT *)', async () => {
+    sqlMock
+      .mockResolvedValueOnce([]) // linked → none, triggers fallback
+      .mockResolvedValueOnce([{ id: 'g1', name: 'G', description: null, weight: 3 }]);
+    await loadScoringCriteria('s1');
+    const fallbackText = queryText(sqlMock.mock.calls[1]);
+    // The fallback must join the session to learn its org, and carry the same
+    // org predicate — never the old unscoped `FROM criteria WHERE active = true`.
+    expect(fallbackText).toMatch(/simulation_sessions/);
+    expect(fallbackText).toMatch(/c\.org_id\s*=\s*ss\.org_id/);
+    expect(fallbackText).toMatch(/ss\.org_id\s+IS\s+NULL/i);
+    // The session id is bound as a parameter (org context, not a literal).
+    expect(sqlMock.mock.calls[1][1]).toBe('s1');
+  });
 });
 
 describe('finalizeAndScoreSession', () => {
