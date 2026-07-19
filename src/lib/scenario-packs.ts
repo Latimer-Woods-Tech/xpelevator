@@ -534,6 +534,92 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
       },
     ],
   },
+  {
+    id: 'personal-development-coaching',
+    vertical: 'Personal-development coaching',
+    name: 'Personal-Development Coaching',
+    description:
+      'A ready-to-sell pack for personal-development and life-coaching practices in the conviction-led tradition: a vague newcomer, a serial restarter, a mid-program motivation dip, and a client hiding behind a busy life. Trains naming a real goal, building follow-through, and holding a client accountable without shaming them.',
+    jobTitle: {
+      name: 'Personal-Development Coach',
+      description:
+        'A life / personal-development coach who works one-to-one with clients on habits, discipline, and follow-through — over chat, voice, and phone sessions.',
+    },
+    scenarios: [
+      {
+        key: 'vague-first-session',
+        name: 'I just want to be better',
+        summary:
+          'A first-session client who knows they want their life to change but cannot say into what. A gentle opener that trains turning a wish into one concrete, chosen goal.',
+        type: 'CHAT',
+        script: {
+          customerPersona:
+            'Priya, a bright, well-meaning newcomer who signed up on a burst of motivation. Earnest and a little embarrassed that she cannot name what she actually wants — she talks in wishes ("be more disciplined", "feel less stuck") rather than goals. Warms up fast when a coach helps her get specific instead of nodding along.',
+          customerObjective:
+            'Leave the session with one concrete goal in her own words and a first tiny step she chose. Success = she names something measurable ("walk before work three days") instead of another vague wish.',
+          difficulty: 'easy',
+          hints: [
+            'Every time she is vague she is testing whether the coach will do the naming for her — they should not.',
+            'She has a real, specific goal underneath; she is afraid it sounds too small to say out loud.',
+          ],
+        },
+      },
+      {
+        key: 'serial-restarter',
+        name: 'I will start again on Monday',
+        summary:
+          'A client who launches a new plan every Monday and has quit by Wednesday, for the fourth time. Trains breaking the restart cycle — a smaller commitment they actually keep beats a grand plan they abandon.',
+        type: 'CHAT',
+        script: {
+          customerPersona:
+            'Marcus, enthusiastic and genuinely sincere each time he recommits, which is exactly the trap — the fresh-start high feels like progress, so he keeps buying it. Slightly ashamed of the pattern but frames it as "just needing the right system". Respects a coach who names the cycle kindly and refuses to hand him another grand plan.',
+          customerObjective:
+            'Get him to commit to one small thing he will do the very next day, not next Monday, and small enough that quitting is not worth it. Success = he trades the grand restart for one action he starts now and can repeat.',
+          difficulty: 'medium',
+          hints: [
+            'The clean-slate Monday is the addiction — planning feels like doing, so he never has to risk actually doing.',
+            'Another ambitious multi-step plan is what he wants; it lets him fail big and restart again.',
+          ],
+        },
+      },
+      {
+        key: 'motivation-dip-midprogram',
+        name: 'I do not think this is working',
+        summary:
+          'Six weeks in, a client who did the work but has hit the flat stretch where the early excitement is gone and results are quiet. Trains re-anchoring them to why they started over voice — before the dip talks them out of it.',
+        type: 'VOICE',
+        script: {
+          customerPersona:
+            'Elena, a disciplined client who followed the plan honestly for six weeks and has now hit the plateau where the novelty is gone and the scale barely moves. Not lazy — discouraged and quietly building a case to quit while it still feels reasonable. Steadies when reminded, in her own words, of why she began and how far she has already come.',
+          customerObjective:
+            'Reconnect her to the reason she started and the ground she has already gained, and get one commitment to stay the course through the flat stretch. Success = she re-owns the goal for herself instead of a hollow "maybe you are right" to end the call.',
+          difficulty: 'medium',
+          hints: [
+            'The plateau is normal and expected here, but to her it reads as proof the effort is wasted.',
+            'A cheerful "just push through, it gets easier" rings hollow and confirms the coach is not really listening.',
+          ],
+        },
+      },
+      {
+        key: 'life-got-busy-excuse',
+        name: 'Life just got in the way',
+        summary:
+          'A client who has quietly dropped the plan for three weeks and opens the call deflecting with how busy life got. Trains holding a client accountable over the phone — turning the excuse into an honest decision — without shaming them into leaving.',
+        type: 'PHONE',
+        script: {
+          customerPersona:
+            'Devon, a likeable, capable client who has ghosted the plan for three weeks and leads with a genuinely full calendar as cover. The busyness is partly real, which is what makes it such a good hiding place. Defensive if cornered, but responds to a coach who neither swallows the excuse nor scolds — one who names the choice underneath it and asks him to own it.',
+          customerObjective:
+            'Get him past the busy-life story to the honest fact that he chose other things over the goal, and to one commitment he actually controls this week. Success = he stops defending the excuse and names his own next move.',
+          difficulty: 'hard',
+          hints: [
+            'He is not too busy — he deprioritised the goal and "busy" is the socially acceptable way to say so.',
+            'Accepting the excuse lets him off the hook; shaming him for it gives him a reason to disappear for good.',
+          ],
+        },
+      },
+    ],
+  },
 ];
 
 /** Look up a single pack by its stable id. Returns `undefined` if unknown. */
