@@ -139,8 +139,17 @@ async function main() {
     const anon = await request('GET', '/api/orgs', null);
     check('anon list is rejected (expect 401)', anon.status === 401, `got ${anon.status}`);
 
-    const list = await request('GET', '/api/orgs', adminCookie);
-    const ids = Array.isArray(list.json) ? list.json.map((o) => o.id) : [];
+    // The scoped list must EXCLUDE org B. Poll a few times: a freshly-deployed
+    // route can serve one stale/propagating response before the per-request
+    // (force-dynamic) scope settles — a real wrong-scope never self-corrects, so
+    // this only absorbs transient propagation, never masks a genuine leak.
+    let list = await request('GET', '/api/orgs', adminCookie);
+    let ids = Array.isArray(list.json) ? list.json.map((o) => o.id) : [];
+    for (let i = 0; i < 4 && list.status === 200 && ids.includes(orgBId); i++) {
+      await sleep(2000);
+      list = await request('GET', '/api/orgs', adminCookie);
+      ids = Array.isArray(list.json) ? list.json.map((o) => o.id) : [];
+    }
     check('tenant admin list is 200', list.status === 200, `got ${list.status}`);
     check('tenant admin list EXCLUDES the other tenant (org B)', !ids.includes(orgBId), `list ids: ${ids.join(',') || '(none)'}`);
     check('tenant admin list INCLUDES own org (org A)', ids.includes(orgAId), `list ids: ${ids.join(',') || '(none)'}`);

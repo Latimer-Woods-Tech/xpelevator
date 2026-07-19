@@ -16,6 +16,14 @@ import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { isPlatformAdmin } from '@/lib/org-hierarchy';
 
+// This surface returns PER-CALLER data (the list is scoped to the caller's own
+// org + owned clients; a platform admin sees all). A parameterless GET route
+// handler can otherwise be statically optimized / response-cached — which was
+// observed live serving a stale all-orgs body to a tenant admin (bypassing the
+// R-043 scope). Force per-request, uncached execution so the scope always runs.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 
 export async function GET() {
   try {
