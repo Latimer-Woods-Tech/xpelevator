@@ -29,9 +29,10 @@
  * 403). `scope=clients` takes precedence over `clientOrgId`.
  *
  * `?view=summary` (only meaningful with `scope=clients`) collapses that roll-up
- * to one totals row PER CLIENT org — session count, scored count, and the
- * weighted average pooled across the client's sessions — plus a trailing
- * portfolio grand-total row. It reads the same authorized/windowed session set
+ * to one totals row PER CLIENT org — distinct trainee count, session count,
+ * scored count, and the weighted average pooled across the client's sessions —
+ * plus a trailing portfolio grand-total row (with a book-wide distinct trainee
+ * headcount). It reads the same authorized/windowed session set
  * as the detail roll-up (identical tenant scope), so it can never widen access.
  * Without it, the roll-up returns the per-session detail (unchanged).
  *

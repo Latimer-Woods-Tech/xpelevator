@@ -241,13 +241,25 @@ describe('operator portfolio per-client totals', () => {
     scores: [{ score: 10, criteria: { name: 'Empathy', weight: 1 } }],
   };
 
-  it('SUMMARY columns are Organization/Sessions/Scored/Weighted Average', () => {
+  it('SUMMARY columns are Organization/Trainees/Sessions/Scored/Weighted Average', () => {
     expect(ROLLUP_SUMMARY_COLUMNS).toEqual([
       'Organization',
+      'Trainees',
       'Sessions',
       'Scored',
       'Weighted Average',
     ]);
+  });
+
+  it('counts DISTINCT trainees per client and ignores null-email sessions', () => {
+    const d1: ReportSession = { ...base, id: 'd1', organization: 'Delta', traineeEmail: 'a@delta.test' };
+    const d2: ReportSession = { ...base, id: 'd2', organization: 'Delta', traineeEmail: 'b@delta.test' };
+    const d3: ReportSession = { ...base, id: 'd3', organization: 'Delta', traineeEmail: 'a@delta.test' }; // dup
+    const d4: ReportSession = { ...base, id: 'd4', organization: 'Delta', traineeEmail: null }; // ignored
+    const [delta] = rollupClientTotals([d1, d2, d3, d4]);
+    expect(delta.sessions).toBe(4);
+    // two distinct people (a@ + b@); the repeat collapses, the null-email seat is not counted
+    expect(delta.trainees).toBe(2);
   });
 
   it('pools every score across a client, sorted by org name', () => {
@@ -255,6 +267,8 @@ describe('operator portfolio per-client totals', () => {
     // sorted: Acme Retail before Northwind
     expect(totals.map((t) => t.organization)).toEqual(['Acme Retail', 'Northwind']);
     const acme = totals[0];
+    // acme1 + acme2 are the same trainee (shared base email) → 1 distinct seat
+    expect(acme.trainees).toBe(1);
     expect(acme.sessions).toBe(2);
     expect(acme.scored).toBe(2);
     // pooled: (8*3+4*1 + 10*3+6*1) / (4+4) = (28+36)/8 = 8.0 — NOT the mean of
@@ -283,10 +297,24 @@ describe('operator portfolio per-client totals', () => {
     const csv = rollupSummaryToCsv([north, acme1, acme2]);
     const lines = csv.trim().split('\r\n');
     expect(lines[0]).toBe(ROLLUP_SUMMARY_COLUMNS.join(','));
-    expect(lines[1]).toBe('Acme Retail,2,2,8');
-    expect(lines[2]).toBe('Northwind,1,1,10');
-    // grand total: 3 sessions, 3 scored, pooled (28+36+10)/(8+1)=74/9≈8.2
-    expect(lines[3]).toBe('TOTAL (all clients),3,3,8.2');
+    // Trainees column inserted after Organization: all three sessions are the
+    // same base trainee, so each org shows 1 distinct seat.
+    expect(lines[1]).toBe('Acme Retail,1,2,2,8');
+    expect(lines[2]).toBe('Northwind,1,1,1,10');
+    // grand total: 1 distinct trainee book-wide, 3 sessions, 3 scored,
+    // pooled (28+36+10)/(8+1)=74/9≈8.2
+    expect(lines[3]).toBe('TOTAL (all clients),1,3,3,8.2');
+  });
+
+  it('grand-total trainees de-duplicates a trainee shared across clients', () => {
+    const one: ReportSession = { ...base, id: 'x1', organization: 'One', traineeEmail: 'shared@x.test' };
+    const two: ReportSession = { ...base, id: 'x2', organization: 'Two', traineeEmail: 'shared@x.test' };
+    const lines = rollupSummaryToCsv([one, two]).trim().split('\r\n');
+    // one seat under each client…
+    expect(lines[1]).toBe('One,1,1,1,7');
+    expect(lines[2]).toBe('Two,1,1,1,7');
+    // …but the book-wide headcount is ONE distinct person, not the sum (2).
+    expect(lines[3]).toBe('TOTAL (all clients),1,2,2,7');
   });
 
   it('CSV of an empty portfolio is header-only (no total row)', () => {
@@ -297,7 +325,7 @@ describe('operator portfolio per-client totals', () => {
   it('CSV escapes a client org name containing a comma', () => {
     const s: ReportSession = { ...base, id: 'c1', organization: 'Acme, Inc.' };
     const csv = rollupSummaryToCsv([s]);
-    expect(csv).toContain('"Acme, Inc.",1,1,7');
+    expect(csv).toContain('"Acme, Inc.",1,1,1,7');
   });
 
   it('PDF produces a valid Portfolio Summary byte stream', () => {

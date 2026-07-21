@@ -235,7 +235,7 @@ describe('GET /api/reports/sessions — ?scope=clients portfolio roll-up', () =>
     expect(operatorScope).toBe(OPERATOR);
   });
 
-  it('?view=summary → 200 per-client totals CSV (Organization,Sessions,…), same operator scope', async () => {
+  it('?view=summary → 200 per-client totals CSV (Organization,Trainees,Sessions,…), same operator scope', async () => {
     asAdmin(OPERATOR);
     routeRollupSql([
       {
@@ -259,10 +259,10 @@ describe('GET /api/reports/sessions — ?scope=clients portfolio roll-up', () =>
     // Same operator-owned tenant scope as the detail roll-up (no widening).
     expect(operatorScope).toBe(OPERATOR);
     const body = await res.text();
-    expect(body.split('\r\n')[0]).toBe('Organization,Sessions,Scored,Weighted Average');
-    // One totals row for the client, then the portfolio grand total.
-    expect(body).toContain('Acme Retail,1,1,8');
-    expect(body).toContain('TOTAL (all clients),1,1,8');
+    expect(body.split('\r\n')[0]).toBe('Organization,Trainees,Sessions,Scored,Weighted Average');
+    // One totals row for the client (1 distinct trainee), then the grand total.
+    expect(body).toContain('Acme Retail,1,1,1,8');
+    expect(body).toContain('TOTAL (all clients),1,1,1,8');
   });
 
   it('?view=summary&format=pdf → 200 summary PDF, operator-scoped', async () => {
