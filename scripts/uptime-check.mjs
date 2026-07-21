@@ -23,6 +23,26 @@
  *      an EXPIRED Groq key that made every session score null. /api/health only
  *      checks that the env var is PRESENT, not that it still authenticates — so
  *      we probe the credential directly here every cycle.
+ *   5. POST /api/telnyx/webhook (valid JSON, NO signature) -> 401 on both hosts
+ *      The PHONE-modality reachability + fail-closed canary. The scoring canary
+ *      (check above) only drives the CHAT path, so the entire phone webhook was
+ *      unmonitored — on 2026-07-19 (#125) the signature verifier read the signing
+ *      key from `process.env` (undefined in the deployed Worker) and fail-closed
+ *      EVERY Telnyx webhook, taking phone dark, and nothing caught it. This probe
+ *      closes part of that blind spot from the outside:
+ *        401 → the route is deployed + reachable and its own signature verifier
+ *              ran and rejected an unsigned body (fail-closed working). HEALTHY.
+ *        200 → a fail-OPEN regression: the verifier accepted an UNSIGNED webhook.
+ *              Anyone could then forge call events — a security alert, not a warn.
+ *        404 → the webhook route was dropped from the deploy (routing regression).
+ *        500 → the route threw before verifying (a module-import/init crash).
+ *        000 → the host was unreachable / timed out.
+ *      Limit (honest): a valid Telnyx signature needs Telnyx's PRIVATE key, which
+ *      we don't hold, so no black-box probe can positively prove a signed webhook
+ *      still verifies (the exact #125 always-401 key bug is indistinguishable from
+ *      a healthy fail-closed here). That runtime-binding key resolution is covered
+ *      by the auth-api unit tests instead; this probe guards reachability + the
+ *      fail-open direction, both of which were previously unmonitored.
  *
  * On any failure it writes a human-readable reason to ./monitor-failure.md (the
  * workflow's alert step reads it) and exits non-zero.
@@ -108,6 +128,44 @@ async function checkDbRead(base) {
   }
 }
 
+// Phone-modality webhook reachability + fail-closed canary. POSTs a well-formed
+// JSON body with NO Telnyx signature headers. The route parses JSON first (400
+// only on malformed JSON), then runs its own Ed25519 signature verification and
+// returns 401 when the signature is absent — BEFORE any event processing, so this
+// probe triggers no DB writes, no Groq calls, and no Telnyx API calls. The
+// webhook is a middleware-public route (PUBLIC_EXACT_ROUTES), so the 401 comes
+// from the route's OWN verifier, not from NextAuth — which is what makes 200 a
+// meaningful fail-open signal rather than a middleware artifact.
+async function checkWebhookReachability(base) {
+  const url = `${base}/api/telnyx/webhook`;
+  const { status, body } = await probe(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // Valid JSON so we pass the route's 400 (bad-JSON) gate and reach the
+    // signature verifier; no telnyx-signature-ed25519 / telnyx-timestamp headers.
+    body: JSON.stringify({ data: { event_type: '__uptime_reachability_canary__' } }),
+  });
+  const ok = status === 401;
+  log(`${ok ? '✓' : '✗'} POST ${url} -> HTTP ${status} (phone webhook ${ok ? 'REACHABLE + fail-closed' : 'UNHEALTHY'})`);
+  if (!ok) {
+    const hint =
+      status === 200
+        ? ' A 200 means the verifier ACCEPTED an unsigned webhook — a fail-OPEN regression. Forged Telnyx call events would be processed. Treat as a security incident.'
+        : status === 404
+          ? ' A 404 means the /api/telnyx/webhook route was dropped from the deploy — the phone modality is dark (no webhook to drive calls).'
+          : status === 500
+            ? ' A 500 means the route threw before verifying — a module-import/init crash in the webhook path (the phone modality is dark).'
+            : status === 0
+              ? ' The host was unreachable or the request timed out.'
+              : ` Expected 401 (fail-closed rejection of the unsigned probe); got ${status}.`;
+    failures.push(
+      `**Phone webhook UNHEALTHY** — \`POST ${url}\` (unsigned) returned HTTP ${status} (expected 401).` +
+        hint +
+        `\n\n\`\`\`\n${body.slice(0, 300)}\n\`\`\``,
+    );
+  }
+}
+
 async function checkGroqCredential() {
   if (!GROQ_KEY) {
     log('✗ GROQ_API_KEY not present in env — cannot probe scoring credential');
@@ -136,6 +194,8 @@ async function main() {
   await checkHealth(ALIAS, { requireOk: false });
   await checkDbRead(BRANDED);
   await checkDbRead(ALIAS);
+  await checkWebhookReachability(BRANDED);
+  await checkWebhookReachability(ALIAS);
   await checkGroqCredential();
 
   if (failures.length > 0) {

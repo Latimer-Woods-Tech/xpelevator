@@ -37,8 +37,10 @@ type SqlRows = Array<Record<string, unknown>>;
  * `authUser` is what `auth()` resolves to; `sqlRows` is what the tagged-template
  * `sql` query resolves to (the users lookup).
  */
-async function loadAuthApi(opts: { authUser?: AuthUser; sqlRows?: SqlRows } = {}) {
-  const { authUser = null, sqlRows = [] } = opts;
+async function loadAuthApi(
+  opts: { authUser?: AuthUser; sqlRows?: SqlRows; cfEnv?: Record<string, string> } = {}
+) {
+  const { authUser = null, sqlRows = [], cfEnv } = opts;
   vi.resetModules();
   const authFn = vi.fn().mockResolvedValue(authUser ? { user: authUser } : null);
   const sqlFn = vi.fn(() => Promise.resolve(sqlRows));
@@ -49,6 +51,15 @@ async function loadAuthApi(opts: { authUser?: AuthUser; sqlRows?: SqlRows } = {}
     signOut: vi.fn(),
   }));
   vi.doMock('@/lib/db', () => ({ sql: sqlFn, default: sqlFn }));
+  // When cfEnv is provided, stand in for the Cloudflare runtime binding so the
+  // Telnyx secret resolver (getTelnyxPublicKey) reads the key from env, not
+  // process.env — the production path. Without it, getCloudflareContext throws
+  // (as it does in a non-Worker test) and the resolver falls back to process.env.
+  if (cfEnv) {
+    vi.doMock('@opennextjs/cloudflare', () => ({
+      getCloudflareContext: () => ({ env: cfEnv }),
+    }));
+  }
   const mod = await import('@/lib/auth-api');
   return { mod, authFn, sqlFn };
 }
@@ -299,5 +310,45 @@ describe('verifyTelnyxWebhook', () => {
     await expect(
       mod.verifyTelnyxWebhook(goodHeaders, body + ' ')
     ).resolves.toBe(false);
+  });
+
+  // Regression: the verifier used to read TELNYX_PUBLIC_KEY from process.env
+  // ONLY. In the deployed Worker that returns undefined (secrets live on the
+  // CF runtime binding, not process.env — webpack inlines process.env at build
+  // time), so in production it fell through to the fail-closed branch and
+  // silently rejected EVERY Telnyx webhook — taking the phone modality dark.
+  // With the key supplied only via the runtime binding and process.env unset,
+  // a correctly-signed webhook must now verify (not fail closed) in production.
+  it('sources the signing key from the CF runtime binding when process.env is unset (prod)', async () => {
+    (process.env as Record<string, string>).NODE_ENV = 'production';
+    delete process.env.TELNYX_PUBLIC_KEY;
+
+    const keyPair = (await crypto.subtle.generateKey(
+      { name: 'Ed25519' },
+      true,
+      ['sign', 'verify']
+    )) as CryptoKeyPair;
+    const rawPub = new Uint8Array(
+      await crypto.subtle.exportKey('raw', keyPair.publicKey)
+    );
+
+    // Key present ONLY on the runtime binding (with a stray newline the resolver
+    // must trim), never on process.env.
+    const { mod } = await loadAuthApi({
+      cfEnv: { TELNYX_PUBLIC_KEY: `${bytesToBase64(rawPub)}\n` },
+    });
+
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const body = JSON.stringify({ event_type: 'call.answered' });
+    const signed = new TextEncoder().encode(`${timestamp}|${body}`);
+    const sig = new Uint8Array(
+      await crypto.subtle.sign('Ed25519', keyPair.privateKey, signed)
+    );
+    const goodHeaders = new Headers({
+      'telnyx-signature-ed25519': bytesToBase64(sig),
+      'telnyx-timestamp': timestamp,
+    });
+
+    await expect(mod.verifyTelnyxWebhook(goodHeaders, body)).resolves.toBe(true);
   });
 });
