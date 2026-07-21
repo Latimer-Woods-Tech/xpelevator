@@ -287,6 +287,8 @@ const ROLLUP_PDF_COLUMNS: readonly PdfColumn[] = [
 export interface ClientTotal {
   /** Owning client-org name (`(unassigned)` when a session has no org). */
   organization: string;
+  /** Distinct trainees (by email) seen across the client's sessions. */
+  trainees: number;
   /** How many completed sessions this client has in the report window. */
   sessions: number;
   /** How many of those sessions produced a weighted score. */
@@ -298,6 +300,7 @@ export interface ClientTotal {
 /** Summary column order — one totals row per client, then a portfolio total. */
 export const ROLLUP_SUMMARY_COLUMNS: readonly string[] = [
   'Organization',
+  'Trainees',
   'Sessions',
   'Scored',
   'Weighted Average',
@@ -305,6 +308,21 @@ export const ROLLUP_SUMMARY_COLUMNS: readonly string[] = [
 
 /** Label for the trailing portfolio grand-total row (distinct from any org). */
 const PORTFOLIO_TOTAL_LABEL = 'TOTAL (all clients)';
+
+/**
+ * Count distinct trainees (by email) across a session set — how many people the
+ * operator has actively in training, the seat metric a channel seller scans
+ * first. Sessions with no trainee email are ignored (never counted as a seat).
+ * At the portfolio grand total this de-duplicates a trainee who appears under
+ * more than one client, so the book-wide count is a true headcount, not a sum.
+ */
+function distinctTrainees(sessions: readonly ReportSession[]): number {
+  const seen = new Set<string>();
+  for (const s of sessions) {
+    if (s.traineeEmail) seen.add(s.traineeEmail);
+  }
+  return seen.size;
+}
 
 /**
  * Pool every score across a set of sessions into one weighted average
@@ -346,6 +364,7 @@ export function rollupClientTotals(
   return [...byOrg.entries()]
     .map(([organization, group]) => ({
       organization,
+      trainees: distinctTrainees(group),
       sessions: group.length,
       scored: group.filter(isScored).length,
       weightedAverage: pooledWeightedAverage(group),
@@ -358,6 +377,7 @@ export function rollupSummaryToCsv(sessions: readonly ReportSession[]): string {
   const totals = rollupClientTotals(sessions);
   const rows: CsvCell[][] = totals.map((t) => [
     t.organization,
+    t.trainees,
     t.sessions,
     t.scored,
     t.weightedAverage,
@@ -365,6 +385,7 @@ export function rollupSummaryToCsv(sessions: readonly ReportSession[]): string {
   if (sessions.length > 0) {
     rows.push([
       PORTFOLIO_TOTAL_LABEL,
+      distinctTrainees(sessions),
       sessions.length,
       totals.reduce((n, t) => n + t.scored, 0),
       pooledWeightedAverage(sessions),
@@ -378,10 +399,11 @@ export function rollupSummaryToCsv(sessions: readonly ReportSession[]): string {
  * inside the 532pt printable width of a US-Letter page at a 40pt margin.
  */
 const ROLLUP_SUMMARY_PDF_COLUMNS: readonly PdfColumn[] = [
-  { header: 'Organization', width: 240 },
-  { header: 'Sessions', width: 90 },
-  { header: 'Scored', width: 90 },
-  { header: 'Weighted Avg', width: 102 },
+  { header: 'Organization', width: 210 },
+  { header: 'Trainees', width: 78 },
+  { header: 'Sessions', width: 78 },
+  { header: 'Scored', width: 78 },
+  { header: 'Weighted Avg', width: 78 },
 ];
 
 /** Serialise the per-client totals + portfolio grand total to a PDF (bytes). */
@@ -389,6 +411,7 @@ export function rollupSummaryToPdf(sessions: readonly ReportSession[]): Uint8Arr
   const totals = rollupClientTotals(sessions);
   const rows: (string | number)[][] = totals.map((t) => [
     t.organization,
+    t.trainees,
     t.sessions,
     t.scored,
     pdfScore(t.weightedAverage),
@@ -396,6 +419,7 @@ export function rollupSummaryToPdf(sessions: readonly ReportSession[]): Uint8Arr
   if (sessions.length > 0) {
     rows.push([
       PORTFOLIO_TOTAL_LABEL,
+      distinctTrainees(sessions),
       sessions.length,
       totals.reduce((n, t) => n + t.scored, 0),
       pdfScore(pooledWeightedAverage(sessions)),
