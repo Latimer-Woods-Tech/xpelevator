@@ -4,6 +4,7 @@ import {
   canAccessOrgReport,
   canAccessOrg,
   canSetOrgPlan,
+  canDeleteOrg,
   isPlatformAdmin,
   resolveOperatorRollup,
   slugify,
@@ -113,6 +114,44 @@ describe('canSetOrgPlan', () => {
     expect(canSetOrgPlan(CLIENT, { role: 'MEMBER', orgId: null })).toBe(false);
     expect(canSetOrgPlan(OPERATOR, { role: 'MEMBER', orgId: OP })).toBe(false);
     expect(canSetOrgPlan(OPERATOR, {})).toBe(false);
+  });
+});
+
+describe('canDeleteOrg', () => {
+  const OP = 'operator-1';
+  const OPERATOR = { id: OP, parentOrgId: null };
+  const CLIENT = { id: 'client-1', parentOrgId: OP };
+  const OTHER_CLIENT = { id: 'client-9', parentOrgId: 'operator-2' };
+  const STANDALONE = { id: 'solo-1', parentOrgId: null };
+
+  it('a platform admin (ADMIN, no org) may delete any org', () => {
+    expect(canDeleteOrg(OPERATOR, { role: 'ADMIN', orgId: null })).toBe(true);
+    expect(canDeleteOrg(CLIENT, { role: 'ADMIN', orgId: null })).toBe(true);
+    expect(canDeleteOrg(STANDALONE, { role: 'ADMIN' })).toBe(true);
+  });
+
+  it('an operator admin may delete a CLIENT they own', () => {
+    expect(canDeleteOrg(CLIENT, { role: 'ADMIN', orgId: OP })).toBe(true);
+  });
+
+  it('an org’s OWN admin may NOT self-delete their org (the closed hole)', () => {
+    // client admin deleting their own (operator-provisioned) client workspace
+    expect(canDeleteOrg(CLIENT, { role: 'ADMIN', orgId: 'client-1' })).toBe(false);
+    // operator admin deleting their own top-level org
+    expect(canDeleteOrg(OPERATOR, { role: 'ADMIN', orgId: OP })).toBe(false);
+    // standalone admin deleting their own org
+    expect(canDeleteOrg(STANDALONE, { role: 'ADMIN', orgId: 'solo-1' })).toBe(false);
+  });
+
+  it('an operator admin may NOT delete another tenant’s org', () => {
+    expect(canDeleteOrg(OTHER_CLIENT, { role: 'ADMIN', orgId: OP })).toBe(false);
+    expect(canDeleteOrg(STANDALONE, { role: 'ADMIN', orgId: OP })).toBe(false);
+  });
+
+  it('a MEMBER never deletes an org', () => {
+    expect(canDeleteOrg(CLIENT, { role: 'MEMBER', orgId: null })).toBe(false);
+    expect(canDeleteOrg(OPERATOR, { role: 'MEMBER', orgId: OP })).toBe(false);
+    expect(canDeleteOrg(OPERATOR, {})).toBe(false);
   });
 });
 

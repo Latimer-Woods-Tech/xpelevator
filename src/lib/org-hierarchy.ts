@@ -122,6 +122,42 @@ export function canSetOrgPlan(
   return viewerOrg === (target.parentOrgId ?? null);
 }
 
+/**
+ * Whether `viewer` may DELETE the organization record `target` outright.
+ *
+ * Deleting an org is an irreversible, destructive governance action — strictly
+ * more consequential than the rename {@link canAccessOrg} allows. In the
+ * operator→client channel model a CLIENT org is the workspace an OPERATOR
+ * provisions, brands, and pays wholesale seats for; letting the client's OWN
+ * admin delete it would let a downstream party destroy the upstream operator's
+ * provisioned asset (seats, branding, scenario inventory). So — exactly like
+ * {@link canSetOrgPlan} — delete authority is deliberately NARROWER than a
+ * rename:
+ *
+ *   - A PLATFORM admin (ADMIN, no org) may delete any org — platform governance.
+ *   - An OPERATOR admin may delete a CLIENT beneath them
+ *     (`viewerOrg === target.parentOrgId`) — tearing down a workspace they own.
+ *   - An org's OWN admin (`viewerOrg === target.id`) may NOT delete their own
+ *     org — self-deletion of a provisioned tenant is a platform/operator action,
+ *     mirroring how an org's own plan comes from billing, not a self-serve PUT.
+ *     (Both a CLIENT and a STANDALONE org fall through to `false` here.)
+ *   - A MEMBER never deletes an org.
+ *
+ * `null`/`undefined` orgIds normalise so a DB `null` and an absent field compare
+ * equal.
+ */
+export function canDeleteOrg(
+  target: OrgGovernanceTarget,
+  viewer: OrgManager
+): boolean {
+  if (viewer.role !== 'ADMIN') return false;
+  const viewerOrg = viewer.orgId ?? null;
+  if (viewerOrg === null) return true; // platform admin — governance authority
+  // Operator admin may delete a CLIENT they own; an org's own admin may NOT
+  // self-delete (own-org and standalone both fall through to false here).
+  return viewerOrg === (target.parentOrgId ?? null);
+}
+
 /** Minimal shape of the org a report is being requested for. */
 export interface OrgReportTarget {
   /** The org whose sessions the report would cover. */

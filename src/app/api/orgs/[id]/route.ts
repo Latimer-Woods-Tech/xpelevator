@@ -7,7 +7,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
-import { canAccessOrg, canSetOrgPlan } from '@/lib/org-hierarchy';
+import { canAccessOrg, canSetOrgPlan, canDeleteOrg } from '@/lib/org-hierarchy';
 import { getOrgGovernanceTarget } from '@/lib/org-guard';
 import { isOrgPlan } from '@/lib/plans';
 
@@ -188,6 +188,19 @@ export async function DELETE(
     }
     if (!canAccessOrg(target, session.user)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
+    // Deletion is authorized more narrowly than the rename `canAccessOrg` allows
+    // (same split as `plan`, R-043): only a platform admin or the parent
+    // operator may delete an org. An org's OWN admin — including a CLIENT org's
+    // admin — may NOT self-delete the workspace an operator provisioned and pays
+    // wholesale seats for. Without this a downstream client could destroy the
+    // upstream operator's provisioned asset (seats, branding, scenario library).
+    if (!canDeleteOrg(target, session.user)) {
+      return NextResponse.json(
+        { error: 'You may not delete this org', code: 'ORG_DELETE_FORBIDDEN' },
+        { status: 403 }
+      );
     }
 
     // Safety check — refuse if org has sessions
