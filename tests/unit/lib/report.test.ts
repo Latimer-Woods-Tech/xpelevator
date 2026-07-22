@@ -343,3 +343,33 @@ describe('operator portfolio per-client totals', () => {
     expect(text).toContain('0 client organisations');
   });
 });
+
+// Branch coverage for the count-dependent subtitle wording (singular vs plural)
+// and the set-level null weighted average — paths the multi-item fixtures above
+// never exercise.
+describe('operator roll-up — singular counts & unscored sets', () => {
+  const acme: ReportSession = { ...base, id: 'one-org', organization: 'Acme Retail' };
+
+  it('summary PDF says "1 client organisation" (singular) for a single client', () => {
+    const text = new TextDecoder('latin1').decode(rollupSummaryToPdf([acme]));
+    expect(text).toContain('1 client organisation ');
+    expect(text).not.toContain('1 client organisations');
+  });
+
+  it('portfolio PDF says "1 completed session" (singular) for a single session', () => {
+    const text = new TextDecoder('latin1').decode(rollupSessionsToPdf([acme]));
+    expect(text).toContain('1 completed session across');
+    expect(text).not.toContain('1 completed sessions');
+  });
+
+  it('summary CSV leaves the weighted-average cell empty when NO session is scored', () => {
+    // Every session carries empty scores → the pooled weight total is 0, so the
+    // per-client AND the portfolio-total weighted average are both null (blank).
+    const u1: ReportSession = { ...base, id: 'u1', organization: 'Acme Retail', scores: [] };
+    const u2: ReportSession = { ...base, id: 'u2', organization: 'Acme Retail', scores: [] };
+    const lines = rollupSummaryToCsv([u1, u2]).trim().split('\r\n');
+    // Organization,Trainees,Sessions,Scored,WeightedAvg → 2 sessions, 0 scored, blank avg
+    expect(lines[1]).toBe('Acme Retail,1,2,0,');
+    expect(lines[2]).toBe('TOTAL (all clients),1,2,0,');
+  });
+});
