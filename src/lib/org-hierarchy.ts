@@ -88,6 +88,40 @@ export function canAccessOrg(
   return viewerOrg === (target.parentOrgId ?? null); // operator owns this client
 }
 
+/**
+ * Whether `viewer` may change the persisted `plan` (seat tier) of org `target`.
+ *
+ * `plan` is the single source of truth every seat-entitlement gate reads — the
+ * `POST /api/simulations` create gate, the billable PHONE-call gate, and the
+ * `/api/me` entitlement read. A free write to it is a full billing bypass: a
+ * FREE org's own admin could self-upgrade to ENTERPRISE and unlock VOICE +
+ * PHONE without paying. So plan authority is deliberately NARROWER than
+ * {@link canAccessOrg} (which also lets an org's own admin rename it):
+ *
+ *   - A PLATFORM admin (ADMIN, no org) may set any org's plan — they carry the
+ *     billing authority (admin panel / Stripe webhooks).
+ *   - An OPERATOR admin may set the plan of a CLIENT beneath them
+ *     (`viewerOrg === target.parentOrgId`) — the wholesale seat tier the
+ *     operator allocates in the channel model.
+ *   - An org's OWN admin (`viewerOrg === target.id`) may NOT — self-upgrade is
+ *     exactly the hole this closes. Their own plan comes from billing.
+ *   - A MEMBER never sets a plan.
+ *
+ * `null`/`undefined` orgIds normalise so a DB `null` and an absent field
+ * compare equal.
+ */
+export function canSetOrgPlan(
+  target: OrgGovernanceTarget,
+  viewer: OrgManager
+): boolean {
+  if (viewer.role !== 'ADMIN') return false;
+  const viewerOrg = viewer.orgId ?? null;
+  if (viewerOrg === null) return true; // platform admin — billing authority
+  // Operator admin may set a CLIENT's plan; an org's own admin may NOT
+  // self-upgrade (own-org and standalone both fall through to false here).
+  return viewerOrg === (target.parentOrgId ?? null);
+}
+
 /** Minimal shape of the org a report is being requested for. */
 export interface OrgReportTarget {
   /** The org whose sessions the report would cover. */

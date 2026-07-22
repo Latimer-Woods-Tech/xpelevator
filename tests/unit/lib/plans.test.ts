@@ -10,6 +10,8 @@ import {
   modalitiesForPlan,
   planUnlocksModality,
   getPublicPlanCatalog,
+  ORG_PLANS,
+  isOrgPlan,
   ALL_MODALITIES as EXPORTED_ALL_MODALITIES,
   type SimulationType,
 } from '@/lib/plans';
@@ -18,6 +20,19 @@ import {
 // Prisma `SimulationType` enum values (prisma/schema.prisma). If the enum grows,
 // this array and the catalog coverage assertion below must grow with it.
 const ALL_MODALITIES: SimulationType[] = ['PHONE', 'CHAT', 'VOICE'];
+
+describe('isOrgPlan', () => {
+  it('accepts every persisted OrgPlan value', () => {
+    for (const p of ORG_PLANS) expect(isOrgPlan(p)).toBe(true);
+    expect(ORG_PLANS).toEqual(['FREE', 'PRO', 'ENTERPRISE']);
+  });
+
+  it('rejects unknown, malformed, or non-string values', () => {
+    for (const v of ['free', 'enterprise', 'PREMIUM', '', ' FREE', null, undefined, 1, {}]) {
+      expect(isOrgPlan(v)).toBe(false);
+    }
+  });
+});
 
 describe('SEAT_TIERS catalog', () => {
   it('defines exactly the three founder-decided tiers, ranked chat < voice < phone', () => {

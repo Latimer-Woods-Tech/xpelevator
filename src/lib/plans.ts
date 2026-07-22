@@ -145,6 +145,19 @@ export function minimumTierForModality(modality: SimulationType): SeatTier {
  */
 export type OrgPlan = 'FREE' | 'PRO' | 'ENTERPRISE';
 
+/** Every persisted {@link OrgPlan} value, for runtime validation of input. */
+export const ORG_PLANS: readonly OrgPlan[] = ['FREE', 'PRO', 'ENTERPRISE'];
+
+/**
+ * Runtime guard: whether `value` is a valid persisted {@link OrgPlan}. Used to
+ * reject an untrusted `plan` before it is written to `organizations.plan` — an
+ * unvalidated write could persist a garbage tier that every entitlement gate
+ * then silently reads as the restrictive `chat` floor.
+ */
+export function isOrgPlan(value: unknown): value is OrgPlan {
+  return value === 'FREE' || value === 'PRO' || value === 'ENTERPRISE';
+}
+
 /**
  * The single documented bridge between the persisted billing plan and the seat
  * catalog. The founder-decided monetization is a cumulative three-tier seat

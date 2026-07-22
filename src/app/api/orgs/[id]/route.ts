@@ -7,8 +7,9 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
-import { canAccessOrg } from '@/lib/org-hierarchy';
+import { canAccessOrg, canSetOrgPlan } from '@/lib/org-hierarchy';
 import { getOrgGovernanceTarget } from '@/lib/org-guard';
+import { isOrgPlan } from '@/lib/plans';
 
 // Per-caller, tenant-scoped governance surface — never cache a response.
 export const dynamic = 'force-dynamic';
@@ -118,9 +119,30 @@ export async function PUT(
 
     const body = (await request.json()) as { name?: string; plan?: string };
 
+    // `plan` is the seat-tier source of truth every entitlement gate reads, so
+    // changing it is authorized more narrowly than a rename: `canAccessOrg`
+    // (above) lets an org's own admin edit `name`, but only a platform admin or
+    // the parent operator may set `plan`. Without this an org's own admin could
+    // self-upgrade (FREE → ENTERPRISE) and unlock paid VOICE/PHONE seats for
+    // free. Validate the value too, so a garbage tier never lands in the column.
+    if (body.plan != null) {
+      if (!isOrgPlan(body.plan)) {
+        return NextResponse.json(
+          { error: 'Invalid plan', code: 'INVALID_PLAN' },
+          { status: 400 }
+        );
+      }
+      if (!canSetOrgPlan(target, session.user)) {
+        return NextResponse.json(
+          { error: 'You may not change this org’s plan', code: 'PLAN_CHANGE_FORBIDDEN' },
+          { status: 403 }
+        );
+      }
+    }
+
     await sql`
       UPDATE organizations
-      SET 
+      SET
         name = COALESCE(${body.name ?? null}, name),
         plan = COALESCE(${body.plan ?? null}, plan)
       WHERE id = ${id}

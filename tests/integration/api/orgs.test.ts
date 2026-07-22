@@ -126,6 +126,22 @@ describe('PUT /api/orgs/[id]', () => {
     const res = await PUT(r, { params: Promise.resolve({ id: 'bogus-id' }) });
     expect(res.status).toBe(500);
   });
+
+  it('a platform admin (test mode) may set a valid plan → 200', async () => {
+    const r = req('PUT', `/api/orgs/${seedOrgId}`, { plan: 'ENTERPRISE' });
+    const res = await PUT(r, { params: Promise.resolve({ id: seedOrgId }) });
+    expect(res.status).toBe(200);
+    const data: { plan: string } = await res.json();
+    expect(data.plan).toBe('ENTERPRISE');
+  });
+
+  it('rejects an unknown plan value with 400 INVALID_PLAN', async () => {
+    const r = req('PUT', `/api/orgs/${seedOrgId}`, { plan: 'PREMIUM' });
+    const res = await PUT(r, { params: Promise.resolve({ id: seedOrgId }) });
+    expect(res.status).toBe(400);
+    const data: { code?: string } = await res.json();
+    expect(data.code).toBe('INVALID_PLAN');
+  });
 });
 
 // ─── DELETE /api/orgs/[id] ────────────────────────────────────────────────────
