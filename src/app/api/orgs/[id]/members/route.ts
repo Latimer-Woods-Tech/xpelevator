@@ -85,7 +85,36 @@ export async function POST(
 
     const email = body.email.trim().toLowerCase();
     const role = (body.role as 'ADMIN' | 'MEMBER') ?? 'MEMBER';
-    
+
+    // Cross-tenant member-hijack guard (R-043): the email-keyed upsert below sets
+    // `org_id = <destination>`, so an EXISTING user is silently RELOCATED out of
+    // whatever org they belong to. Governance was checked on the DESTINATION org
+    // only — so without this, an operator/tenant admin could POST a user's email
+    // and yank that user out of ANOTHER tenant's org (one the caller does not
+    // govern) into their own: stealing the account and evicting the victim's
+    // membership. Refuse to move a user whose CURRENT org the caller cannot
+    // govern. Creating a new user, re-inviting a same-org user, adopting an
+    // org-less user, or moving a user between orgs the caller DOES govern
+    // (platform admin, or an operator among their own clients) all still pass.
+    const existingRows = await sql`
+      SELECT org_id as "orgId" FROM users WHERE email = ${email} LIMIT 1
+    `;
+    if (existingRows.length > 0) {
+      const currentOrgId = (existingRows[0].orgId as string | null) ?? null;
+      if (currentOrgId !== null && currentOrgId !== orgId) {
+        const sourceOrg = await getOrgGovernanceTarget(currentOrgId);
+        if (sourceOrg && !canAccessOrg(sourceOrg, session.user)) {
+          return NextResponse.json(
+            {
+              error: 'That user already belongs to another organization',
+              code: 'USER_IN_ANOTHER_ORG',
+            },
+            { status: 409 }
+          );
+        }
+      }
+    }
+
     // Upsert user — create if new, update orgId if existing
     const userRows = await sql`
       INSERT INTO users (id, email, name, org_id, role, created_at)
@@ -96,7 +125,14 @@ export async function POST(
         role = COALESCE(${body.role ?? null}, users.role)
       RETURNING id, email, name, org_id as "orgId", role, created_at as "createdAt"
     `;
-    const user: any = userRows[0];
+    const user = userRows[0] as {
+      id: string;
+      email: string;
+      name: string | null;
+      orgId: string;
+      role: string;
+      createdAt: string;
+    };
 
     return NextResponse.json(user, { status: 201 });
   } catch (error) {
