@@ -17,13 +17,44 @@ export default function SimulatePage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  // The modalities the caller's org plan unlocks, read from /api/me. `null`
+  // means unknown (still loading, or the call failed) — the UI stays optimistic
+  // in that case, since POST /api/simulations is the real seat gate; this only
+  // hides clicks that would 403.
+  const [unlockedModalities, setUnlockedModalities] = useState<
+    readonly ('CHAT' | 'VOICE' | 'PHONE')[] | null
+  >(null);
 
   const userId = sessionData?.user?.id ?? 'anonymous';
 
   useEffect(() => {
     loadJobs();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadEntitlements();
   }, []);
+
+  const loadEntitlements = () => {
+    fetch('/api/me')
+      .then(res => (res.ok ? res.json() : null))
+      .then((data: { entitlements?: { modalities?: unknown } } | null) => {
+        const mods = data?.entitlements?.modalities;
+        if (Array.isArray(mods)) {
+          setUnlockedModalities(
+            mods.filter(
+              (m): m is 'CHAT' | 'VOICE' | 'PHONE' =>
+                m === 'CHAT' || m === 'VOICE' || m === 'PHONE'
+            )
+          );
+        }
+      })
+      .catch(() => {
+        /* leave null → optimistic; the server gate still enforces the plan */
+      });
+  };
+
+  // A modality is shown locked only once we KNOW the entitlements and it is
+  // absent — never while still loading (unlockedModalities === null).
+  const isLocked = (modality: 'CHAT' | 'VOICE' | 'PHONE') =>
+    unlockedModalities !== null && !unlockedModalities.includes(modality);
 
   const loadJobs = () => {
     setLoading(true);
@@ -153,7 +184,12 @@ export default function SimulatePage() {
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {(selectedJob.scenarios ?? []).map(scenario => (
+                    {(selectedJob.scenarios ?? []).map(scenario => {
+                      const voiceLocked = isLocked('VOICE');
+                      const phoneLocked = isLocked('PHONE');
+                      const scenarioLocked =
+                        scenario.type === 'PHONE' ? phoneLocked : false;
+                      return (
                       <div
                         key={scenario.id}
                         className="p-6 rounded-xl bg-slate-800/50 border border-slate-700"
@@ -180,25 +216,55 @@ export default function SimulatePage() {
                               {starting === `${scenario.id}-CHAT` ? 'Starting…' : '💬 Chat'}
                             </button>
                             <button
-                              disabled={starting !== null}
+                              disabled={starting !== null || voiceLocked}
                               onClick={() => startSimulation(scenario, 'VOICE')}
                               className="flex-1 py-2 px-3 rounded-lg bg-purple-700 hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors"
-                              title="Voice mode — uses browser microphone, no phone required"
+                              title={
+                                voiceLocked
+                                  ? 'Voice practice is on a higher seat tier — see Pricing to unlock'
+                                  : 'Voice mode — uses browser microphone, no phone required'
+                              }
                             >
-                              {starting === `${scenario.id}-VOICE` ? 'Starting…' : '🎙️ Voice'}
+                              {voiceLocked
+                                ? '🔒 Voice'
+                                : starting === `${scenario.id}-VOICE`
+                                ? 'Starting…'
+                                : '🎙️ Voice'}
                             </button>
                           </div>
                         ) : (
                           <button
-                            disabled={starting !== null}
+                            disabled={starting !== null || scenarioLocked}
                             onClick={() => startSimulation(scenario)}
                             className="w-full mt-2 py-2 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors"
+                            title={
+                              scenarioLocked
+                                ? 'Phone practice is on the top seat tier — see Pricing to unlock'
+                                : undefined
+                            }
                           >
-                            {starting === `${scenario.id}-${scenario.type}` ? 'Starting…' : 'Start'}
+                            {scenarioLocked
+                              ? '🔒 Locked'
+                              : starting === `${scenario.id}-${scenario.type}`
+                              ? 'Starting…'
+                              : 'Start'}
                           </button>
                         )}
+                        {(scenario.type === 'PHONE' ? phoneLocked : voiceLocked) && (
+                          <p className="mt-3 text-xs text-slate-400">
+                            {scenario.type === 'PHONE' ? 'Phone' : 'Voice'} practice
+                            isn&apos;t on your current seat.{' '}
+                            <Link
+                              href="/pricing"
+                              className="text-blue-400 hover:text-blue-300 underline"
+                            >
+                              See seat tiers
+                            </Link>
+                          </p>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

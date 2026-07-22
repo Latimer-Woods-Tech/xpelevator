@@ -19,6 +19,12 @@
  * same discipline as `toPublicBranding`.
  */
 
+import {
+  ALL_MODALITIES,
+  modalitiesForPlan,
+  type SimulationType,
+} from '@/lib/plans';
+
 /** The two-level channel taxonomy an org can occupy. */
 export type OrgKind = 'STANDALONE' | 'OPERATOR' | 'CLIENT';
 
@@ -41,6 +47,24 @@ export interface SelfOrg {
   parentOrgId: string | null;
 }
 
+/**
+ * The caller's practice-modality entitlements — a read-only mirror of the
+ * `POST /api/simulations` seat gate (issue #16 Phase 4). The trainee UI reads
+ * this to grey out modalities the org's plan does not unlock, so a trainee sees
+ * *why* a modality is locked before hitting the server 403 (`MODALITY_LOCKED`).
+ * Derived from the plan via `modalitiesForPlan`, so the UI never re-encodes the
+ * plan→modality mapping and can never drift from the server gate.
+ */
+export interface SelfEntitlements {
+  /**
+   * The practice modalities this caller may START (cumulative: CHAT ⊆ VOICE ⊆
+   * PHONE). A caller with no org (platform staff / test mode) is ungated and
+   * gets every modality — matching the server gate, which only engages when an
+   * `orgId` is present. Advisory only: the server remains the enforcement point.
+   */
+  modalities: readonly SimulationType[];
+}
+
 /** The `GET /api/me` response shape. `org` is null for a platform admin. */
 export interface SelfContext {
   user: SelfUser;
@@ -54,6 +78,11 @@ export interface SelfContext {
    * creating its first client — R-048 — at which point this flips true).
    */
   canManageClients: boolean;
+  /**
+   * The caller's practice-modality entitlements, derived from the org plan so
+   * the trainee UI can grey out locked modalities before the server 403.
+   */
+  entitlements: SelfEntitlements;
 }
 
 /** The minimal caller shape carried by the authenticated session. */
@@ -111,6 +140,12 @@ export function toSelfContext(
   const canManageClients =
     role === 'ADMIN' && (org === null || org.kind === 'OPERATOR');
 
+  // Seat entitlements: an org's plan decides its unlocked modalities; a caller
+  // with no org (platform staff / test) is ungated → every modality. Mirrors the
+  // `POST /api/simulations` gate, which only engages when an `orgId` is present.
+  const modalities: readonly SimulationType[] =
+    org === null ? ALL_MODALITIES : modalitiesForPlan(org.plan);
+
   return {
     user: {
       id: user.id,
@@ -120,5 +155,6 @@ export function toSelfContext(
     },
     org,
     canManageClients,
+    entitlements: { modalities },
   };
 }

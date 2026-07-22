@@ -97,6 +97,16 @@ export const SEAT_TIERS: readonly SeatTier[] = [
   },
 ] as const;
 
+/**
+ * Every practice modality the platform supports — the highest tier's set (the
+ * catalog is cumulative, so the top tier is the union of all tiers). This is the
+ * "ungated" set: a caller with no org (platform staff / test mode) is not seat-
+ * gated, so `GET /api/me` reports every modality for them, mirroring the
+ * `POST /api/simulations` gate that only engages when an `orgId` is present.
+ */
+export const ALL_MODALITIES: readonly SimulationType[] =
+  SEAT_TIERS[SEAT_TIERS.length - 1].modalities;
+
 /** Look up a tier by id. Returns `undefined` for an unknown id. */
 export function getSeatTier(id: string): SeatTier | undefined {
   return SEAT_TIERS.find((t) => t.id === id);
