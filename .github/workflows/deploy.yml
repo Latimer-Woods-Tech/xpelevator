@@ -577,6 +577,42 @@ jobs:
           fi
           echo "✅ POST /api/scenario-packs/import rejects anonymous callers (401) on both hosts"
 
+      - name: Verify simulation-start is auth-gated (Phase 4 modality gating)
+        # POST /api/simulations creates a session and drives billable LLM traffic.
+        # It now also enforces per-seat modality gating (issue #16 Phase 4): a
+        # tenant trainee may only START a modality their org's plan unlocks
+        # (FREE=chat, PRO=+voice, ENTERPRISE=+phone), returning 403
+        # MODALITY_LOCKED otherwise. The gating branch itself needs an
+        # authenticated multi-plan session (covered by unit tests); this
+        # permanent post-deploy gate confirms the route stays auth-first — an
+        # anonymous POST must get 401 on both hosts BEFORE any gating runs. A
+        # 200/500 here would mean the create path (or the new plan lookup) is
+        # exposed or crashing on the live build.
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                -H 'Content-Type: application/json' \
+                -d '{"jobTitleId":"__deploy_smoke__","scenarioId":"__deploy_smoke__","type":"PHONE"}' \
+                "$BASE/api/simulations" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "POST $BASE/api/simulations (anon, type=PHONE) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/simulations must require auth (got $code) — session-create path exposed or the plan-gate crashed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Simulation-start auth-gate verification failed"
+            exit 1
+          fi
+          echo "✅ POST /api/simulations rejects anonymous callers (401) on both hosts — modality gating sits behind auth"
+
       - name: Verify pack upgrade is admin-gated (Phase 4)
         # The admin "upgrade pack → current catalog version" action
         # (POST /api/scenario-packs/upgrade) OVERWRITES an org's already-imported,

@@ -2,9 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   SEAT_TIERS,
   PLAN_CATALOG_VERSION,
+  PLAN_TO_TIER,
   getSeatTier,
   tierUnlocksModality,
   minimumTierForModality,
+  tierForPlan,
+  modalitiesForPlan,
+  planUnlocksModality,
   getPublicPlanCatalog,
   type SimulationType,
 } from '@/lib/plans';
@@ -97,5 +101,69 @@ describe('getPublicPlanCatalog', () => {
   it('is JSON-serialisable and stable', () => {
     expect(() => JSON.parse(JSON.stringify(pub))).not.toThrow();
     expect(JSON.parse(JSON.stringify(pub)).tiers[0].id).toBe('chat');
+  });
+});
+
+describe('plan → seat-tier → modality gating (per-seat entitlement)', () => {
+  it('PLAN_TO_TIER maps every OrgPlan onto a real catalog tier, cumulatively ranked', () => {
+    expect(PLAN_TO_TIER).toEqual({ FREE: 'chat', PRO: 'voice', ENTERPRISE: 'phone' });
+    // Each mapped tier must exist in the catalog and rank monotonically with plan strength.
+    const ranks = (['FREE', 'PRO', 'ENTERPRISE'] as const).map((p) => {
+      const tier = getSeatTier(PLAN_TO_TIER[p]);
+      expect(tier).toBeDefined();
+      return tier?.rank;
+    });
+    expect(ranks).toEqual([1, 2, 3]);
+  });
+
+  it('tierForPlan resolves known plans and floors anything unknown/absent to chat', () => {
+    expect(tierForPlan('FREE')).toBe('chat');
+    expect(tierForPlan('PRO')).toBe('voice');
+    expect(tierForPlan('ENTERPRISE')).toBe('phone');
+    // Never over-grant on a bad value.
+    expect(tierForPlan(null)).toBe('chat');
+    expect(tierForPlan(undefined)).toBe('chat');
+    expect(tierForPlan('')).toBe('chat');
+    expect(tierForPlan('LEGENDARY')).toBe('chat');
+    expect(tierForPlan('free')).toBe('chat'); // case-sensitive; lowercase is not the enum
+  });
+
+  it('modalitiesForPlan returns the cumulative modality set for each plan', () => {
+    expect([...modalitiesForPlan('FREE')].sort()).toEqual(['CHAT']);
+    expect([...modalitiesForPlan('PRO')].sort()).toEqual(['CHAT', 'VOICE']);
+    expect([...modalitiesForPlan('ENTERPRISE')].sort()).toEqual(['CHAT', 'PHONE', 'VOICE']);
+    expect([...modalitiesForPlan(null)].sort()).toEqual(['CHAT']);
+  });
+
+  it('planUnlocksModality enforces the founder chat → +voice → +phone ladder', () => {
+    // CHAT is the floor — every plan (and an unknown one) may run it.
+    for (const p of ['FREE', 'PRO', 'ENTERPRISE', null, 'nonsense']) {
+      expect(planUnlocksModality(p, 'CHAT')).toBe(true);
+    }
+    // VOICE needs PRO+.
+    expect(planUnlocksModality('FREE', 'VOICE')).toBe(false);
+    expect(planUnlocksModality('PRO', 'VOICE')).toBe(true);
+    expect(planUnlocksModality('ENTERPRISE', 'VOICE')).toBe(true);
+    // PHONE needs ENTERPRISE.
+    expect(planUnlocksModality('FREE', 'PHONE')).toBe(false);
+    expect(planUnlocksModality('PRO', 'PHONE')).toBe(false);
+    expect(planUnlocksModality('ENTERPRISE', 'PHONE')).toBe(true);
+    // An unknown plan can never unlock a paid modality.
+    expect(planUnlocksModality(null, 'VOICE')).toBe(false);
+    expect(planUnlocksModality(undefined, 'PHONE')).toBe(false);
+  });
+
+  it('the required-tier upgrade hint points a locked trainee at the cheapest tier that unlocks', () => {
+    const all: SimulationType[] = ['CHAT', 'VOICE', 'PHONE'];
+    for (const m of all) {
+      const tier = minimumTierForModality(m);
+      // The hinted tier really does unlock the modality, and no lower-ranked tier does.
+      expect(tier.modalities.includes(m)).toBe(true);
+      for (const lower of SEAT_TIERS.filter((t) => t.rank < tier.rank)) {
+        expect(lower.modalities.includes(m)).toBe(false);
+      }
+    }
+    expect(minimumTierForModality('VOICE').id).toBe('voice');
+    expect(minimumTierForModality('PHONE').id).toBe('phone');
   });
 });
