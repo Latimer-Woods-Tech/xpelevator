@@ -4,6 +4,11 @@ import { requireAuth, AuthError } from '@/lib/auth-api';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
 import { canReadResource } from '@/lib/tenant-guard';
 import { MAX_SESSIONS_PER_DAY, parsePagination } from '@/lib/limits';
+import {
+  planUnlocksModality,
+  minimumTierForModality,
+  type SimulationType,
+} from '@/lib/plans';
 
 const SIMULATION_TYPES = ['CHAT', 'VOICE', 'PHONE'] as const;
 
@@ -39,9 +44,16 @@ export async function POST(request: Request) {
         (SELECT org_id FROM scenarios WHERE id = ${scenarioId}) as "scenarioOrgId",
         (SELECT id FROM scenarios WHERE id = ${scenarioId}) as "scenarioExists",
         (SELECT org_id FROM job_titles WHERE id = ${jobTitleId}) as "jobOrgId",
-        (SELECT id FROM job_titles WHERE id = ${jobTitleId}) as "jobExists"
+        (SELECT id FROM job_titles WHERE id = ${jobTitleId}) as "jobExists",
+        (SELECT plan FROM organizations WHERE id = ${orgId}) as "orgPlan"
     `;
-    const refs: any = refRows[0];
+    const refs = refRows[0] as {
+      scenarioOrgId: string | null;
+      scenarioExists: string | null;
+      jobOrgId: string | null;
+      jobExists: string | null;
+      orgPlan: string | null;
+    };
     if (!refs.scenarioExists || !refs.jobExists) {
       return NextResponse.json({ error: 'Scenario or job title not found' }, { status: 404 });
     }
@@ -50,6 +62,25 @@ export async function POST(request: Request) {
       !canReadResource(refs.jobOrgId, orgId)
     ) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
+    // Per-seat modality gating (issue #16, Phase 4). A tenant trainee may only
+    // run the practice modalities their org's plan unlocks — the founder's
+    // cumulative seat model (chat → +voice → +phone). CHAT is the floor of
+    // every tier, so the core loop and the scoring canary are never blocked;
+    // VOICE needs PRO+, PHONE needs ENTERPRISE. Platform staff (no org / test
+    // mode) are ungated — gating applies to billed tenant trainees only.
+    if (orgId && !planUnlocksModality(refs.orgPlan, type as SimulationType)) {
+      const requiredTier = minimumTierForModality(type as SimulationType);
+      return NextResponse.json(
+        {
+          error: `Your plan does not include ${type} practice`,
+          code: 'MODALITY_LOCKED',
+          modality: type,
+          requiredTier: requiredTier.id,
+        },
+        { status: 403 }
+      );
     }
 
     // Abuse guard: cap sessions per user per rolling 24h (each session drives

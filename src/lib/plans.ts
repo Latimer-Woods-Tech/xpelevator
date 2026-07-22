@@ -128,6 +128,60 @@ export function minimumTierForModality(modality: SimulationType): SeatTier {
   return tier;
 }
 
+/**
+ * The persisted `OrgPlan` enum values (`prisma/schema.prisma`). Kept as a local
+ * union so this pure module never imports the generated Prisma client — the
+ * unit test asserts it stays in lock-step with the schema enum.
+ */
+export type OrgPlan = 'FREE' | 'PRO' | 'ENTERPRISE';
+
+/**
+ * The single documented bridge between the persisted billing plan and the seat
+ * catalog. The founder-decided monetization is a cumulative three-tier seat
+ * model (chat → +voice → +phone, issue #16 2026-07-08); the `OrgPlan` enum
+ * predates that catalog, so this maps each plan to the tier its trainees are
+ * entitled to:
+ *
+ *     FREE       → chat  (text practice only — the floor every org gets)
+ *     PRO        → voice (text + in-browser voice)
+ *     ENTERPRISE → phone (text + voice + live phone)
+ *
+ * An unknown / absent plan resolves to the most-restrictive `chat` tier, so a
+ * missing or malformed value can never over-grant a modality.
+ */
+export const PLAN_TO_TIER: Record<OrgPlan, SeatTierId> = {
+  FREE: 'chat',
+  PRO: 'voice',
+  ENTERPRISE: 'phone',
+};
+
+/** The seat tier a stored plan string entitles trainees to; unknown → `chat`. */
+export function tierForPlan(plan: string | null | undefined): SeatTierId {
+  if (plan === 'PRO' || plan === 'ENTERPRISE') return PLAN_TO_TIER[plan];
+  return 'chat';
+}
+
+/**
+ * The practice modalities an org on `plan` may run (cumulative). Falls back to
+ * the `chat` floor for an unknown/absent plan, so gating can never over-grant.
+ */
+export function modalitiesForPlan(
+  plan: string | null | undefined
+): readonly SimulationType[] {
+  const tier = getSeatTier(tierForPlan(plan));
+  // `tierForPlan` always returns a valid catalog id, so `tier` is defined; the
+  // guard keeps the type honest without a non-null assertion.
+  return tier ? tier.modalities : SEAT_TIERS[0].modalities;
+}
+
+/** Whether an org on `plan` may run a given practice `modality`. */
+export function planUnlocksModality(
+  plan: string | null | undefined,
+  modality: SimulationType
+): boolean {
+  return tierUnlocksModality(tierForPlan(plan), modality);
+}
+
 /** The public, serialisable catalog shape returned by `GET /api/plans`. */
 export interface PublicPlanCatalog {
   version: number;
