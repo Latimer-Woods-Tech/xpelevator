@@ -316,7 +316,7 @@ Log all actions → update ticket every 30 min until resolved
 |--------|---------------|--------------|
 | **CompTIA MSP Standards** | [comptia.org/msp](https://www.comptia.org/msp) | Role definitions, skills frameworks |
 | **HDI (Help Desk Institute)** | [thinkhdi.com](https://www.thinkhdi.com) | L1/L2 call scripts, quality forms, SLA templates |
-| **ConnectWise University** | [university.connectwise.com](https://university.connectwise.com) | MSP workflow guides, POD model, escalation playbooks |
+| **ConnectWise University** | [university.connectwise.com](http://web.archive.org/web/20120616032452/http://university.connectwise.com:80/) | MSP workflow guides, POD model, escalation playbooks |
 | **Kaseya Academy** | Training portal (requires account) | MSP onboarding flows, technician runbooks |
 | **HubSpot Service Hub Blog** | [blog.hubspot.com/service](https://blog.hubspot.com/service) | Call script templates, QBR templates, objection handling |
 | **ITIL 4 Foundation** | AXELOS — itilhome.com | Incident/change/problem management process flows |
