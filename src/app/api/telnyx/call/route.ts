@@ -23,6 +23,7 @@ import { sql } from '@/lib/db';
 import { initiateCall, encodeClientState } from '@/lib/telnyx';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
+import { planUnlocksModality, minimumTierForModality } from '@/lib/plans';
 
 
 export async function POST(request: Request) {
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
         ss.org_id as "orgId",
         ss.scenario_id as "scenarioId",
         ss.job_title_id as "jobTitleId",
+        (SELECT plan FROM organizations WHERE id = ss.org_id) as "orgPlan",
         json_build_object('id', s.id, 'name', s.name) as scenario,
         json_build_object('id', jt.id, 'name', jt.name) as "jobTitle"
       FROM simulation_sessions ss
@@ -72,12 +74,46 @@ export async function POST(request: Request) {
     if (sessionRows.length === 0) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
-    const session: any = sessionRows[0];
+    const session = sessionRows[0] as {
+      id: string;
+      type: string;
+      status: string;
+      userId: string;
+      orgId: string | null;
+      scenarioId: string;
+      jobTitleId: string;
+      orgPlan: string | null;
+      scenario: { id: string; name: string };
+      jobTitle: { id: string; name: string };
+    };
     if (!canAccessSession({ userId: session.userId, orgId: session.orgId }, viewer)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
     if (session.type !== 'PHONE') {
       return NextResponse.json({ error: 'Session is not a PHONE type' }, { status: 400 });
+    }
+
+    // Per-seat modality gating at the billable point (issue #16, Phase 4 —
+    // defense-in-depth for the #132 create-time gate). POST /api/simulations
+    // blocks CREATING a PHONE session unless the org's plan unlocks PHONE, but
+    // reads the plan only at creation. A PHONE session created while the org was
+    // ENTERPRISE survives a later downgrade, so without this check a downgraded
+    // tenant could still trigger billable outbound PSTN calls on the pre-existing
+    // session — bypassing the seat gate at the exact point real money is spent.
+    // Re-verify the session-owning org's CURRENT plan here, before dialing.
+    // Platform staff / test sessions (no org) are ungated, mirroring the
+    // create-time gate.
+    if (session.orgId && !planUnlocksModality(session.orgPlan, 'PHONE')) {
+      const requiredTier = minimumTierForModality('PHONE');
+      return NextResponse.json(
+        {
+          error: 'Your plan does not include PHONE practice',
+          code: 'MODALITY_LOCKED',
+          modality: 'PHONE',
+          requiredTier: requiredTier.id,
+        },
+        { status: 403 }
+      );
     }
     // A completed session already has a scored transcript — never wipe it by
     // re-dialing. Start a new session instead.

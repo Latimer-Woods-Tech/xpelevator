@@ -51,7 +51,12 @@ import { AuthError } from '@/lib/auth-api';
 
 const OWNER = { id: 'owner-1', role: 'MEMBER' as const, orgId: 'orgA' };
 
-/** A PHONE session owned by OWNER in orgA, IN_PROGRESS. */
+/**
+ * A PHONE session owned by OWNER in orgA, IN_PROGRESS. Defaults the owning org
+ * to the ENTERPRISE plan, since only an ENTERPRISE tenant unlocks PHONE — a
+ * working phone session belongs to one. Tests that exercise the seat gate at the
+ * billable point override `orgPlan` to a lower tier (the downgrade case).
+ */
 function phoneSession(overrides: Record<string, unknown> = {}) {
   return {
     id: 'sess-1',
@@ -59,12 +64,20 @@ function phoneSession(overrides: Record<string, unknown> = {}) {
     status: 'IN_PROGRESS',
     userId: 'owner-1',
     orgId: 'orgA',
+    orgPlan: 'ENTERPRISE',
     scenarioId: 'scn-1',
     jobTitleId: 'job-1',
     scenario: { id: 'scn-1', name: 'Angry customer' },
     jobTitle: { id: 'job-1', name: 'Support' },
     ...overrides,
   };
+}
+
+/** Did the destructive transcript-wipe DELETE run? */
+function ranDelete() {
+  return sqlMock.mock.calls.some((c) =>
+    (Array.isArray(c[0]) ? c[0].join(' ') : '').includes('DELETE FROM chat_messages')
+  );
 }
 
 /** Wire the sql mock: SELECT returns `rows`; DELETE/UPDATE resolve empty. */
@@ -181,9 +194,58 @@ describe('POST /api/telnyx/call — happy path', () => {
       expect.objectContaining({ to: '+12125550100', from: '+12125550000' })
     );
     // Reset only happens on the success path, after guards.
-    const ranDelete = sqlMock.mock.calls.some((c) =>
-      (Array.isArray(c[0]) ? c[0].join(' ') : '').includes('DELETE FROM chat_messages')
-    );
-    expect(ranDelete).toBe(true);
+    expect(ranDelete()).toBe(true);
+  });
+});
+
+describe('POST /api/telnyx/call — per-seat modality gating at the billable point', () => {
+  // Defense-in-depth for the #132 create-time gate: POST /api/simulations blocks
+  // CREATING a PHONE session unless the org unlocks PHONE, but reads the plan
+  // only at creation. A PHONE session created while the org was ENTERPRISE
+  // survives a downgrade — this route re-verifies the org's CURRENT plan before
+  // placing the billable PSTN call, so a downgraded tenant is blocked and no
+  // toll is incurred and no transcript wiped.
+  it('blocks a downgraded FREE org from dialing a pre-existing PHONE session → 403 MODALITY_LOCKED', async () => {
+    withSession([phoneSession({ orgPlan: 'FREE' })]);
+    const res = await post({ sessionId: 'sess-1', to: '+12125550100' });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.code).toBe('MODALITY_LOCKED');
+    expect(body.modality).toBe('PHONE');
+    expect(body.requiredTier).toBe('phone');
+    // No billable dial, and — critically — no destructive transcript wipe.
+    expect(initiateCallMock).not.toHaveBeenCalled();
+    expect(ranDelete()).toBe(false);
+  });
+
+  it('blocks a downgraded PRO org (voice tier, no phone) → 403, no dial', async () => {
+    withSession([phoneSession({ orgPlan: 'PRO' })]);
+    const res = await post({ sessionId: 'sess-1', to: '+12125550100' });
+    expect(res.status).toBe(403);
+    expect((await res.json()).requiredTier).toBe('phone');
+    expect(initiateCallMock).not.toHaveBeenCalled();
+    expect(ranDelete()).toBe(false);
+  });
+
+  it('an unknown/absent org plan is floored to chat → PHONE blocked (never over-grants) → 403', async () => {
+    withSession([phoneSession({ orgPlan: null })]);
+    const res = await post({ sessionId: 'sess-1', to: '+12125550100' });
+    expect(res.status).toBe(403);
+    expect(initiateCallMock).not.toHaveBeenCalled();
+  });
+
+  it('an ENTERPRISE org dials normally → 200 (the gate lets the entitled tenant through)', async () => {
+    withSession([phoneSession({ orgPlan: 'ENTERPRISE' })]);
+    const res = await post({ sessionId: 'sess-1', to: '+12125550100' });
+    expect(res.status).toBe(200);
+    expect(initiateCallMock).toHaveBeenCalledOnce();
+  });
+
+  it('a platform/test session with no org is ungated → 200 even without a plan', async () => {
+    // Mirrors the create-time gate: gating only engages when an orgId is present.
+    withSession([phoneSession({ orgId: null, orgPlan: null })]);
+    const res = await post({ sessionId: 'sess-1', to: '+12125550100' });
+    expect(res.status).toBe(200);
+    expect(initiateCallMock).toHaveBeenCalledOnce();
   });
 });
