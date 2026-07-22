@@ -3,6 +3,7 @@ import {
   canManageOrgClients,
   canAccessOrgReport,
   canAccessOrg,
+  canSetOrgPlan,
   isPlatformAdmin,
   resolveOperatorRollup,
   slugify,
@@ -74,6 +75,44 @@ describe('canAccessOrg', () => {
     expect(canAccessOrg(OWN, { role: 'MEMBER', orgId: OP })).toBe(false);
     expect(canAccessOrg(CLIENT, { role: 'MEMBER', orgId: OP })).toBe(false);
     expect(canAccessOrg(OWN, {})).toBe(false);
+  });
+});
+
+describe('canSetOrgPlan', () => {
+  const OP = 'operator-1';
+  const OPERATOR = { id: OP, parentOrgId: null };
+  const CLIENT = { id: 'client-1', parentOrgId: OP };
+  const OTHER_CLIENT = { id: 'client-9', parentOrgId: 'operator-2' };
+  const STANDALONE = { id: 'solo-1', parentOrgId: null };
+
+  it('a platform admin (ADMIN, no org) may set any org’s plan', () => {
+    expect(canSetOrgPlan(OPERATOR, { role: 'ADMIN', orgId: null })).toBe(true);
+    expect(canSetOrgPlan(CLIENT, { role: 'ADMIN', orgId: null })).toBe(true);
+    expect(canSetOrgPlan(STANDALONE, { role: 'ADMIN' })).toBe(true);
+  });
+
+  it('an operator admin may set the plan of a CLIENT they own', () => {
+    expect(canSetOrgPlan(CLIENT, { role: 'ADMIN', orgId: OP })).toBe(true);
+  });
+
+  it('an org’s OWN admin may NOT self-upgrade their plan (the closed hole)', () => {
+    // operator setting its own top-level plan
+    expect(canSetOrgPlan(OPERATOR, { role: 'ADMIN', orgId: OP })).toBe(false);
+    // client admin setting their own client plan
+    expect(canSetOrgPlan(CLIENT, { role: 'ADMIN', orgId: 'client-1' })).toBe(false);
+    // standalone admin setting their own plan
+    expect(canSetOrgPlan(STANDALONE, { role: 'ADMIN', orgId: 'solo-1' })).toBe(false);
+  });
+
+  it('an operator admin may NOT set another tenant’s plan', () => {
+    expect(canSetOrgPlan(OTHER_CLIENT, { role: 'ADMIN', orgId: OP })).toBe(false);
+    expect(canSetOrgPlan(STANDALONE, { role: 'ADMIN', orgId: OP })).toBe(false);
+  });
+
+  it('a MEMBER never sets a plan', () => {
+    expect(canSetOrgPlan(CLIENT, { role: 'MEMBER', orgId: null })).toBe(false);
+    expect(canSetOrgPlan(OPERATOR, { role: 'MEMBER', orgId: OP })).toBe(false);
+    expect(canSetOrgPlan(OPERATOR, {})).toBe(false);
   });
 });
 
