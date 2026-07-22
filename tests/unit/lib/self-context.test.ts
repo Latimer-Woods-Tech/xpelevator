@@ -108,6 +108,46 @@ describe('toSelfContext — org scoping', () => {
   });
 });
 
+describe('toSelfContext — modality entitlements', () => {
+  it('no org (platform staff / test) → ungated, every modality', () => {
+    const ctx = toSelfContext({ id: 'u1', role: 'ADMIN' }, null);
+    expect([...ctx.entitlements.modalities].sort()).toEqual([
+      'CHAT',
+      'PHONE',
+      'VOICE',
+    ]);
+  });
+
+  it('FREE plan → CHAT only (the floor every org gets)', () => {
+    const ctx = toSelfContext(
+      { id: 'u1', role: 'MEMBER' },
+      { id: 'o', name: 'Free Co', slug: 'free', plan: 'FREE', kind: 'STANDALONE', parentOrgId: null }
+    );
+    expect(ctx.entitlements.modalities).toEqual(['CHAT']);
+  });
+
+  it('PRO plan → CHAT + VOICE', () => {
+    const ctx = toSelfContext(
+      { id: 'u1', role: 'MEMBER' },
+      { id: 'o', name: 'Pro Co', slug: 'pro', plan: 'PRO', kind: 'STANDALONE', parentOrgId: null }
+    );
+    expect(ctx.entitlements.modalities).toEqual(['CHAT', 'VOICE']);
+  });
+
+  it('ENTERPRISE plan → CHAT + VOICE + PHONE', () => {
+    const ctx = toSelfContext({ id: 'u1', role: 'ADMIN' }, OP_ORG);
+    expect(ctx.entitlements.modalities).toEqual(['CHAT', 'VOICE', 'PHONE']);
+  });
+
+  it('unknown / null plan floors to CHAT (never over-grants a paid modality)', () => {
+    const ctx = toSelfContext(
+      { id: 'u1', role: 'MEMBER' },
+      { id: 'o', name: 'X', slug: 'x', plan: null, kind: null, parentOrgId: null }
+    );
+    expect(ctx.entitlements.modalities).toEqual(['CHAT']);
+  });
+});
+
 describe('toSelfContext — no-leak projection', () => {
   it('drops any extra column present on the org row', () => {
     const leaky = {

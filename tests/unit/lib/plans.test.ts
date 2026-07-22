@@ -10,6 +10,7 @@ import {
   modalitiesForPlan,
   planUnlocksModality,
   getPublicPlanCatalog,
+  ALL_MODALITIES as EXPORTED_ALL_MODALITIES,
   type SimulationType,
 } from '@/lib/plans';
 
@@ -51,6 +52,14 @@ describe('SEAT_TIERS catalog', () => {
     for (const t of SEAT_TIERS) {
       expect(`${t.name} ${t.description}`).not.toMatch(/\bAI\b/);
     }
+  });
+});
+
+describe('ALL_MODALITIES export (ungated set)', () => {
+  it('equals every supported modality (the highest, cumulative tier)', () => {
+    expect(new Set(EXPORTED_ALL_MODALITIES)).toEqual(new Set(ALL_MODALITIES));
+    // It is exactly the top tier's set by construction.
+    expect(EXPORTED_ALL_MODALITIES).toEqual(SEAT_TIERS[SEAT_TIERS.length - 1].modalities);
   });
 });
 

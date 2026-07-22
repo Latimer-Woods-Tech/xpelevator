@@ -18,7 +18,7 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react';
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // ── Hoisted mock handles — must use vi.hoisted() so these are available inside
@@ -84,9 +84,24 @@ function mockSession(name = 'Alex', id = 'user-123') {
   });
 }
 
-function mockFetch(overrides: { jobs?: unknown; jobsStatus?: number; simStatus?: number } = {}) {
-  global.fetch = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
+function mockFetch(
+  overrides: {
+    jobs?: unknown;
+    jobsStatus?: number;
+    simStatus?: number;
+    /** Entitlement modalities returned by GET /api/me; omit → 404 (unknown → optimistic). */
+    me?: readonly ('CHAT' | 'VOICE' | 'PHONE')[];
+  } = {}
+) {
+  global.fetch = vi.fn(async (url: string | URL | Request) => {
     const urlStr = url.toString();
+    if (urlStr.includes('/api/me')) {
+      if (overrides.me === undefined) return new Response('{}', { status: 404 });
+      return new Response(
+        JSON.stringify({ entitlements: { modalities: overrides.me } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
     if (urlStr.includes('/api/jobs')) {
       const status = overrides.jobsStatus ?? 200;
       const body =
@@ -174,15 +189,29 @@ describe('SimulatePage — job loading', () => {
   });
 
   it('retries the jobs fetch when retry button clicked', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'fail' }), { status: 500 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(SAMPLE_JOBS), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-    global.fetch = fetchMock;
+    // URL-aware so the page's parallel GET /api/me on mount doesn't consume an
+    // ordered mock slot: /api/jobs fails once then succeeds; /api/me → 404.
+    let jobsCalls = 0;
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const u = url.toString();
+      if (u.includes('/api/me')) return new Response('{}', { status: 404 });
+      if (u.includes('/api/jobs')) {
+        jobsCalls += 1;
+        return jobsCalls === 1
+          ? new Response(JSON.stringify({ error: 'fail' }), { status: 500 })
+          : new Response(JSON.stringify(SAMPLE_JOBS), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+      }
+      return new Response('{}', { status: 404 });
+    });
+    global.fetch = fetchMock as unknown as typeof globalThis.fetch;
     render(<SimulatePage />);
     const retryBtn = await screen.findByRole('button', { name: /retry/i });
     await userEvent.click(retryBtn);
     await waitFor(() => expect(screen.getByText('Help Desk Technician')).toBeInTheDocument());
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(jobsCalls).toBe(2);
   });
 });
 
@@ -247,5 +276,57 @@ describe('SimulatePage — job and scenario selection', () => {
     await waitFor(() =>
       expect(screen.getByText(/failed|error/i)).toBeInTheDocument()
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('SimulatePage — seat-tier modality gating (grey-out before the 403)', () => {
+  beforeEach(() => mockSession());
+
+  it('FREE seat (CHAT only): Voice is locked+disabled and Phone shows Locked', async () => {
+    mockFetch({ me: ['CHAT'] });
+    render(<SimulatePage />);
+    await userEvent.click(await screen.findByText('Help Desk Technician'));
+
+    // Voice on the CHAT scenario is greyed out (label flips to "🔒 Voice") …
+    const voiceBtn = await screen.findByRole('button', { name: /voice/i });
+    expect(voiceBtn).toHaveTextContent('🔒');
+    expect(voiceBtn).toBeDisabled();
+
+    // … the PHONE scenario's launch button reads "🔒 Locked" and is disabled …
+    const lockedBtn = await screen.findByRole('button', { name: /locked/i });
+    expect(lockedBtn).toBeDisabled();
+
+    // … and each carries an upsell pointer to the seat tiers.
+    expect(screen.getAllByText(/See seat tiers/i).length).toBeGreaterThan(0);
+
+    // Chat (the floor of every tier) stays enabled.
+    const chatBtn = screen.getByRole('button', { name: /^💬 chat$/i });
+    expect(chatBtn).not.toBeDisabled();
+  });
+
+  it('ENTERPRISE seat (all modalities): Voice and Phone are enabled, no lock badge', async () => {
+    mockFetch({ me: ['CHAT', 'VOICE', 'PHONE'] });
+    render(<SimulatePage />);
+    await userEvent.click(await screen.findByText('Help Desk Technician'));
+
+    const voiceBtn = await screen.findByRole('button', { name: /voice/i });
+    await waitFor(() => expect(voiceBtn).not.toBeDisabled());
+    expect(voiceBtn).toHaveTextContent('🎙️');
+
+    // The PHONE scenario shows a normal "Start" (not "🔒 Locked").
+    expect(screen.getByRole('button', { name: /^start$/i })).not.toBeDisabled();
+    expect(screen.queryByText(/See seat tiers/i)).not.toBeInTheDocument();
+  });
+
+  it('unknown entitlements (GET /api/me 404) → optimistic: nothing greyed out', async () => {
+    mockFetch(); // no `me` override → /api/me 404
+    render(<SimulatePage />);
+    await userEvent.click(await screen.findByText('Help Desk Technician'));
+    const voiceBtn = await screen.findByRole('button', { name: /voice/i });
+    expect(voiceBtn).toHaveTextContent('🎙️');
+    expect(voiceBtn).not.toBeDisabled();
+    expect(screen.queryByText(/See seat tiers/i)).not.toBeInTheDocument();
   });
 });
