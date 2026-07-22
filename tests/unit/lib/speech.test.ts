@@ -111,4 +111,20 @@ describe('splitSpeechChunks — flush', () => {
     expect(splitSpeechChunks('', 0)).toEqual({ chunks: [], consumed: 0 });
     expect(splitSpeechChunks('', 0, true)).toEqual({ chunks: [], consumed: 0 });
   });
+
+  it('drops a blank line — a bare newline emits no chunk but advances consumed', () => {
+    // The newline boundary strips to '' → the empty-sentence guard must NOT push
+    // a blank chunk, yet the line is still consumed so it is not re-scanned.
+    const r = splitSpeechChunks('\nHello there. ', 0);
+    expect(r.chunks).toEqual(['Hello there.']);
+    expect(r.chunks).not.toContain('');
+  });
+
+  it('keeps a newline-separated line whose only text is around a stripped marker', () => {
+    // A line carrying a control marker plus real words strips to just the words
+    // and is emitted; the marker never reaches the spoken chunk.
+    const r = splitSpeechChunks('One moment [START]\nnext', 0);
+    expect(r.chunks).toEqual(['One moment']);
+    expect(r.chunks.join(' ')).not.toContain('START');
+  });
 });

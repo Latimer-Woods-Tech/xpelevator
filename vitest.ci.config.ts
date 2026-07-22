@@ -17,10 +17,12 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  *   - db.ts / prisma.ts         — client construction against a real binding
  *   - http-agent-polyfill.ts    — Node undici polyfill, no logic to assert
  *
- * Thresholds sit below the currently-achieved numbers (lines ~92, branches ~82,
- * functions ~98) so ordinary edits don't flake the gate, while still catching a
+ * Thresholds sit below the currently-achieved numbers (lines ~97, branches ~91,
+ * functions ~99) so ordinary edits don't flake the gate, while still catching a
  * real regression. Target per PLATFORM_STANDARDS §3-4: 80 line / 85 branch / 70
- * function — line & function are already met; branches ratchet toward 85.
+ * function — ALL THREE now met and gated: the branch floor is at the §3-4 target
+ * of 85 (achieved ~91, a healthy margin), completing the "branches ratchet toward
+ * 85" Phase-3 sub-slice tracked in issue #16.
  */
 export default defineConfig({
   plugins: [tsconfigPaths({ projects: ['./tsconfig.test.json'] })],
@@ -50,7 +52,7 @@ export default defineConfig({
       thresholds: {
         lines: 85,
         functions: 90,
-        branches: 78,
+        branches: 85,
         statements: 85,
       },
     },
