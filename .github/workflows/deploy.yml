@@ -804,6 +804,45 @@ jobs:
           fi
           echo "✅ /api/branding/[slug] is public and 404s an unknown slug on both hosts"
 
+      - name: Verify host-resolved brand read is public + non-operator-safe (Phase 4)
+        # The operator-subdomain render surface (R-055) reads an operator's brand
+        # from the request Host header via the PUBLIC GET /api/branding/by-host, so
+        # `<operator>.xpelevator.com` can show the operator's brand with no slug in
+        # the path. Both deploy hosts here — the branded apex `xpelevator.com` and
+        # the `*.pages.dev` alias — are PLATFORM hosts, NOT operator subdomains, so
+        # `resolveOperatorSlugFromHost` returns null and the route 404s WITHOUT
+        # touching the DB. Permanent regression gate: an anonymous GET returns 404
+        # (proves the route is PUBLIC — a 401 would mean the middleware prefix
+        # regressed — and that a non-operator host yields a clean 404, never a
+        # 200/500 that would mean a brand leaked to the wrong host or the resolver
+        # broke). Checked on both hosts.
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/branding/by-host" || echo 000)
+              # 404 is the pass. 401 (auth wall regressed) or 200/500 are retried
+              # during propagation, then failed below.
+              if [ "$code" = "404" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/branding/by-host (anon) -> HTTP $code"
+            if [ "$code" = "401" ]; then
+              echo "::error::$BASE/api/branding/by-host must be PUBLIC (got 401) — the subdomain render surface can't read the brand pre-sign-in"
+              fail=1
+            elif [ "$code" != "404" ]; then
+              echo "::error::$BASE/api/branding/by-host should 404 on a non-operator platform host (got $code)"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Host-resolved brand-read verification failed"
+            exit 1
+          fi
+          echo "✅ /api/branding/by-host is public and 404s a non-operator host on both hosts"
+
       - name: Verify self-context /api/me is auth-gated (Phase 4)
         # GET /api/me returns the CALLER'S OWN identity + org context (id, slug,
         # kind, plan, parentOrgId, canManageClients) — the bootstrap primitive

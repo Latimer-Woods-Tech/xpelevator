@@ -5,13 +5,14 @@ import { useSearchParams } from 'next/navigation';
 import { useState, useEffect, Suspense } from 'react';
 import type { PublicBranding } from '@/lib/branding';
 
-// Client-facing white-label render surface (issue #16, Phase 4, R-050). When a
-// trainee arrives via an operator's slug (`/auth/signin?org=<slug>`), the shell
-// fetches the operator's brand-safe branding (`GET /api/branding/[slug]`, public)
-// and presents the operator's name / logo / colors instead of the platform
-// default — so the workspace looks like the operator's product, not ours. When
-// no `org` slug is present, or the org has no custom brand, it falls back to the
-// default XPElevator presentation unchanged.
+// Client-facing white-label render surface (issue #16, Phase 4, R-050 + R-055).
+// When a trainee arrives via an operator's slug (`/auth/signin?org=<slug>`) OR
+// via the operator's subdomain (`<operator>.xpelevator.com`, resolved host-side
+// by `GET /api/branding/by-host`), the shell fetches the operator's brand-safe
+// branding and presents the operator's name / logo / colors instead of the
+// platform default — so the workspace looks like the operator's product, not
+// ours. With no slug and no operator subdomain (the apex, or an org with no
+// custom brand), it falls back to the default XPElevator presentation unchanged.
 function SignInForm() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') ?? '/';
@@ -22,13 +23,17 @@ function SignInForm() {
   const [githubLoading, setGithubLoading] = useState(false);
   const [branding, setBranding] = useState<PublicBranding | null>(null);
 
-  // Load the operator's brand when an `org` slug is present. Same-origin,
-  // brand-safe read; any failure (unknown slug → 404, network) silently falls
+  // Load the operator's brand: prefer an explicit `?org=<slug>`; otherwise let
+  // the operator SUBDOMAIN resolve it host-side (`/api/branding/by-host`, R-055
+  // — 404 on the apex/pages.dev alias). Both are same-origin, brand-safe reads;
+  // any failure (unknown slug / non-operator host → 404, network) silently falls
   // back to the platform default — branding is presentation, never a gate.
   useEffect(() => {
-    if (!orgSlug) return;
     let cancelled = false;
-    fetch(`/api/branding/${encodeURIComponent(orgSlug)}`)
+    const url = orgSlug
+      ? `/api/branding/${encodeURIComponent(orgSlug)}`
+      : '/api/branding/by-host';
+    fetch(url)
       .then(res => (res.ok ? res.json() : null))
       .then((data: PublicBranding | null) => {
         if (!cancelled && data) setBranding(data);
