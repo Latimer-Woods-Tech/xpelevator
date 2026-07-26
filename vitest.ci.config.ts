@@ -24,8 +24,9 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
  * Routes under the gate: `analytics`, `analytics/latency`, `plans`, `me`,
- * `reports/sessions` (each ≥ the floors: analytics/plans/me at 100%,
- * reports/sessions at ~98% lines / ~89% branches). Retiring the credential-bound `tests/integration`
+ * `health`, `reports/sessions` (each ≥ the floors: analytics/plans/me/health at
+ * 100%, reports/sessions at ~98% lines / ~89% branches). Retiring the
+ * credential-bound `tests/integration`
  * tier + the `DISABLE_AUTH` crutch (P1-7) follows once the remaining routes
  * finish the sweep.
  *
@@ -62,6 +63,7 @@ export default defineConfig({
         'src/app/api/analytics/latency/route.ts',
         'src/app/api/plans/route.ts',
         'src/app/api/me/route.ts',
+        'src/app/api/health/route.ts',
         'src/app/api/reports/sessions/route.ts',
       ],
       exclude: [
