@@ -104,10 +104,11 @@ score and tenant boundaries defensible.
   Neon branch per CI run; then extend the coverage floor beyond `src/lib/**`.
   *(Down-payment 2026-07-26: established the deterministic API-route pattern —
   `tests/unit/api/**` mocks `@/lib/db` + `@/lib/auth-api` (no live creds, no
-  `DISABLE_AUTH`), runs in the `unit` + `coverage` CI tiers. First route under
-  the gate: `GET /api/analytics` (100% lines/branches), added to
-  `vitest.ci.config.ts` `include`. Remaining: bring the other `src/app/api/**`
-  routes under the same allowlist and retire the credential-bound
+  `DISABLE_AUTH`), runs in the `unit` + `coverage` CI tiers. Routes under the
+  gate now: `GET /api/analytics`, `/api/plans`, `/api/me`, `/api/reports/sessions`
+  (analytics/plans/me 100%, reports/sessions ~98% lines / ~89% branches), added
+  to the `vitest.ci.config.ts` `include` allowlist. Remaining: bring the rest of
+  `src/app/api/**` under the same allowlist and retire the credential-bound
   `tests/integration` tier + the P1-7 `DISABLE_AUTH` crutch.)*
 - [ ] **P2-8 Test the voice/phone path.** No tests for `api/telnyx/call`,
   `api/telnyx/webhook`, `useChatSession`, or any interface component — the

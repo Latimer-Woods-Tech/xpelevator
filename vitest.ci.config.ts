@@ -23,7 +23,11 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * creds — the pattern that replaces the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
- * First route under the gate: `analytics/route.ts`.
+ * Routes under the gate: `analytics`, `plans`, `me`, `reports/sessions`
+ * (each ≥ the floors: analytics/plans/me at 100%, reports/sessions at ~98%
+ * lines / ~89% branches). Retiring the credential-bound `tests/integration`
+ * tier + the `DISABLE_AUTH` crutch (P1-7) follows once the remaining routes
+ * finish the sweep.
  *
  * Thresholds sit below the currently-achieved numbers (lines ~97, branches ~91,
  * functions ~99) so ordinary edits don't flake the gate, while still catching a
@@ -55,6 +59,9 @@ export default defineConfig({
         'src/lib/**/*.ts',
         // API routes join the gate as they gain a deterministic test (P2-7).
         'src/app/api/analytics/route.ts',
+        'src/app/api/plans/route.ts',
+        'src/app/api/me/route.ts',
+        'src/app/api/reports/sessions/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',
