@@ -34,6 +34,33 @@ jobs:
       - name: Lint (eslint, zero errors)
         run: npm run lint
 
+  # Dependency-security gate (PLATFORM_STANDARDS §5). The BLOCKING check audits
+  # the production tree only (--omit=dev) so dev-dep noise can't block unrelated
+  # PRs; the full-tree audit runs as a separate advisory step (reports, never
+  # fails) until the remaining dev-tree advisories are clearable (tracked via
+  # the open Dependabot majors). Standing Law 1: this gate shipped red-first —
+  # see the proof-of-rejection run linked in the PR that introduced it.
+  audit:
+    name: Dependency audit (prod tree, high+)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      # npm audit needs only the lockfile — no install required.
+      - name: Audit production dependencies (BLOCKING, high+)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Audit full tree (advisory — reports, never fails)
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
   # Deterministic unit tests — no DB, no live LLM/Telnyx creds (all mocked).
   # Job name kept stable as a required status check.
   unit-tests:
