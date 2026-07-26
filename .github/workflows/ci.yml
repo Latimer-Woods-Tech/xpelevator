@@ -176,7 +176,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [quality, unit-tests, ui-tests, coverage, build, audit, probe-rejection]
+    needs: [quality, unit-tests, ui-tests, coverage, build, audit]
     runs-on: ubuntu-latest
     steps:
       - name: Require every gate to have succeeded
@@ -190,11 +190,3 @@ jobs:
             fi
           done
           echo "all gates green"
-
-  # Standing Law 1 probe: deliberately red so the new required "ci" context is
-  # OBSERVED rejecting a merge before it is trusted. Removed in the next commit.
-  probe-rejection:
-    name: Probe (deliberate failure, removed next commit)
-    runs-on: ubuntu-latest
-    steps:
-      - run: exit 1
