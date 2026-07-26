@@ -2,15 +2,28 @@
  * phase1-canary.mjs — Phase 1(d) end-to-end scoring canary.
  *
  * Drives ONE full authenticated chat session against the LIVE LWT deploy
- * (xpelevator-sim.pages.dev) and asserts the core loop produces a NON-NULL score
- * — the exact acceptance for Phase 1 (live-issue #1 was "scoring is DOWN,
- * every session score null"). Doubles as the Phase-1 "scoring canary".
+ * (xpelevator.com) and asserts the core loop produces a NON-NULL score — the
+ * exact acceptance for Phase 1 (live-issue #1 was "scoring is DOWN, every
+ * session score null"). Doubles as the Phase-1 "scoring canary".
  *
- * Auth: rather than fight the NextAuth credentials sign-in flow over curl (the
- * app sets no trustHost/AUTH_URL, so the sign-in POST would throw UntrustedHost),
- * we MINT a valid Auth.js v5 JWT session cookie from the staged AUTH_SECRET and
- * present it. Reading/decoding an existing session cookie needs no host trust, so
- * this exercises the real deployed endpoints exactly as a signed-in user would.
+ * AUTH-LIBRARY VERIFICATION GATE (why a merge auto-fires this job).
+ * Step 2 mints an Auth.js v5 session cookie with `next-auth/jwt` `encode()` and
+ * requires the DEPLOYED worker to decode it back to the canary user. That
+ * round-trip is the real next-auth / @auth/core / jose crypto path, so this
+ * canary is the authoritative end-to-end check for any auth-library or -runtime
+ * bump (e.g. next-auth 5.0.0-beta.32 + jose, merged in #145): if the JWT
+ * encode↔decode contract regressed, the minted cookie fails to authenticate
+ * here (step 2 user.email mismatch) and the canary goes red. Such bumps
+ * otherwise land only via the auth-blind 15-min health probe and a deploy gate
+ * that never performs a live sign-in, so a merge auto-firing this job (see the
+ * `push` paths filter in uptime-monitor.yml) is what closes the loop on them.
+ *
+ * Auth detail: rather than fight the NextAuth credentials sign-in flow over curl
+ * (the app sets no trustHost/AUTH_URL, so the sign-in POST would throw
+ * UntrustedHost), we MINT a valid Auth.js v5 JWT session cookie from the staged
+ * AUTH_SECRET and present it. Reading/decoding an existing session cookie needs
+ * no host trust, so this exercises the real deployed endpoints exactly as a
+ * signed-in user would.
  *
  * Env: BASE_URL, DATABASE_URL, AUTH_SECRET.
  */
