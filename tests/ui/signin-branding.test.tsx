@@ -21,7 +21,7 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 
 // ── Mocks: next-auth/react (signIn) + next/navigation (useSearchParams) ───────
 vi.mock('next-auth/react', () => ({
@@ -53,8 +53,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // @ts-expect-error – clean up the stubbed global between tests
-  delete globalThis.fetch;
+  // Unmount FIRST so a deferred passive effect can't run after teardown, then
+  // reset fetch to a benign, never-resolving stub. Never `delete` it: a
+  // late-firing effect on an undefined global throws `fetch is not defined` and
+  // intermittently flakes the required coverage gate.
+  cleanup();
+  globalThis.fetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;
 });
 
 describe('Sign-in shell — default (no operator brand)', () => {
