@@ -23,10 +23,14 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * creds — the pattern that replaces the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
- * Routes under the gate: `analytics`, `analytics/latency`, `plans`, `me`,
- * `health`, `reports/sessions` (each ≥ the floors: analytics/plans/me/health at
- * 100%, reports/sessions at ~98% lines / ~89% branches). Retiring the
- * credential-bound `tests/integration`
+ * Routes under the gate (14): `analytics`, `analytics/latency`, `plans`, `me`,
+ * `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
+ * `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
+ * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status` (each
+ * ≥ the floors). NOT yet gated because they sit below the 85% branch floor and
+ * need more deterministic tests first: `scoring` (branch ~80%), `simulations`
+ * (~44%), `scenario-packs/upgrade` (~81%), `telnyx/call` (~81%), `scenarios*`,
+ * `jobs/[id]/criteria`. Retiring the credential-bound `tests/integration`
  * tier + the `DISABLE_AUTH` crutch (P1-7) follows once the remaining routes
  * finish the sweep.
  *
@@ -65,6 +69,16 @@ export default defineConfig({
         'src/app/api/me/route.ts',
         'src/app/api/health/route.ts',
         'src/app/api/reports/sessions/route.ts',
+        // Operator-hierarchy + white-label + SKU surfaces (the R-043 routes that
+        // had live cross-tenant bugs in runs 30/31/32) — each already ≥ floor.
+        'src/app/api/branding/[slug]/route.ts',
+        'src/app/api/branding/by-host/route.ts',
+        'src/app/api/orgs/[id]/branding/route.ts',
+        'src/app/api/orgs/[id]/clients/route.ts',
+        'src/app/api/orgs/[id]/members/route.ts',
+        'src/app/api/scenario-packs/route.ts',
+        'src/app/api/scenario-packs/import/route.ts',
+        'src/app/api/scenario-packs/status/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',
