@@ -13,7 +13,7 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 
 vi.mock('next/link', () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -107,8 +107,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // @ts-expect-error – clean the stubbed global between tests
-  delete globalThis.fetch;
+  // Unmount FIRST so a deferred passive effect can't run after teardown, then
+  // reset fetch to a benign, never-resolving stub. Never `delete` it: a
+  // late-firing effect on an undefined global throws `fetch is not defined` and
+  // intermittently flakes the required coverage gate.
+  cleanup();
+  globalThis.fetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;
 });
 
 describe('Admin Scenario Packs — status rendering', () => {
