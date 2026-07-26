@@ -77,10 +77,13 @@ jobs:
         run: npm run test:ui
 
   # Coverage gate on the DETERMINISTIC tiers (unit + ui), scoped to the pure
-  # business-logic surface (src/lib/**, minus runtime-only DB/binding glue).
-  # Enforces the PLATFORM_STANDARDS §3-4 floor (line & function already met;
-  # branches ratchet toward 85). Config: vitest.ci.config.ts. Kept separate from
-  # the integration/smoke tiers, which hit live Neon+Groq and can't be gated.
+  # business-logic surface (src/lib/**, minus runtime-only DB/binding glue) plus
+  # the API routes that now have deterministic tests (issue #16, P2-7 — first:
+  # src/app/api/analytics/route.ts; routes join the include allowlist as they
+  # gain a tests/unit/api/** test). Enforces the PLATFORM_STANDARDS §3-4 floor
+  # (line & function already met; branches ratchet toward 85). Config:
+  # vitest.ci.config.ts. Kept separate from the integration/smoke tiers, which
+  # hit live Neon+Groq and can't be gated.
   coverage:
     name: Coverage gate (src/lib)
     runs-on: ubuntu-latest

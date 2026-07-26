@@ -98,10 +98,17 @@ score and tenant boundaries defensible.
   ignores `tests/**`; `eslint-config-next` is installed but unused. Wire it in.
 - [x] **P2-6 Gate deploys on CI.** `deploy.yml` fires on every push to `main`
   with no dependency on `ci.yml`. Add branch protection / workflow dependency.
-- [ ] **P2-7 CI-gate the API routes.** Integration tests hit live Neon+Groq
+- [~] **P2-7 CI-gate the API routes.** Integration tests hit live Neon+Groq
   and never run in CI; `src/app/api/**` has zero enforced coverage. Make them
   deterministic (mocks exist in `tests/mocks/prisma.ts`) or use an ephemeral
   Neon branch per CI run; then extend the coverage floor beyond `src/lib/**`.
+  *(Down-payment 2026-07-26: established the deterministic API-route pattern —
+  `tests/unit/api/**` mocks `@/lib/db` + `@/lib/auth-api` (no live creds, no
+  `DISABLE_AUTH`), runs in the `unit` + `coverage` CI tiers. First route under
+  the gate: `GET /api/analytics` (100% lines/branches), added to
+  `vitest.ci.config.ts` `include`. Remaining: bring the other `src/app/api/**`
+  routes under the same allowlist and retire the credential-bound
+  `tests/integration` tier + the P1-7 `DISABLE_AUTH` crutch.)*
 - [ ] **P2-8 Test the voice/phone path.** No tests for `api/telnyx/call`,
   `api/telnyx/webhook`, `useChatSession`, or any interface component — the
   differentiating feature is nearly untested.
