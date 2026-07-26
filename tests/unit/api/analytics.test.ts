@@ -123,18 +123,62 @@ describe('GET /api/analytics', () => {
     expect(body.byJobTitle[0].name).toBe('Sales');
   });
 
-  it('scopes to global-only rows when the caller has no org (null-org branch)', async () => {
-    authedAs(null);
-    h.sql.mockResolvedValue(fixtureRows());
+  it('keeps the org + global pool scope for an org caller (org path unchanged)', async () => {
+    authedAs('org-1');
+    let orgScopedTo: unknown = null;
+    let ownerFilterBuilt = false;
+    h.sql.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
+      const text = Array.isArray(strings) ? strings.join(' ') : String(strings);
+      if (/ss\.org_id IS NULL AND ss\.user_id =/.test(text)) {
+        ownerFilterBuilt = true;
+        return Promise.resolve([]);
+      }
+      if (/ss\.org_id = .*OR ss\.org_id IS NULL/.test(text)) {
+        orgScopedTo = values[0];
+        return Promise.resolve([]);
+      }
+      if (/FROM simulation_sessions/.test(text)) {
+        return Promise.resolve(fixtureRows());
+      }
+      return Promise.resolve([]);
+    });
 
     const res = await GET();
 
     expect(res.status).toBe(200);
-    // The org-scoped and global-only WHERE fragments are both built via the
-    // mocked `sql`, so the query seam is invoked on this path too.
-    expect(h.sql).toHaveBeenCalled();
-    const body = await res.json();
-    expect(body.totalSessions).toBe(2);
+    // Org callers keep the existing `org OR global` pool — no user narrowing.
+    expect(orgScopedTo).toBe('org-1');
+    expect(ownerFilterBuilt).toBe(false);
+  });
+
+  it('scopes an org-less caller to their OWN null-org sessions — never the shared null-org pool (session-access doctrine)', async () => {
+    authedAs(null);
+    // Capture the tenant WHERE fragment the route builds. Per
+    // `canAccessSession` (src/lib/session-access.ts), null-org sessions are
+    // OWNER-ONLY: the fragment must pair `org_id IS NULL` with a
+    // `ss.user_id = <caller>` filter. A bare `org_id IS NULL` (the shared-pool
+    // bug) aggregates EVERY self-registered user's scores into this caller's
+    // dashboard.
+    let ownerScopedTo: unknown = null;
+    h.sql.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
+      const text = Array.isArray(strings) ? strings.join(' ') : String(strings);
+      if (/ss\.org_id IS NULL AND ss\.user_id =/.test(text)) {
+        ownerScopedTo = values[0];
+        return Promise.resolve([]);
+      }
+      if (/FROM simulation_sessions/.test(text)) {
+        return Promise.resolve(fixtureRows());
+      }
+      // Any other fragment (e.g. the legacy pooled bare `org_id IS NULL`).
+      return Promise.resolve([]);
+    });
+
+    const res = await GET();
+
+    expect(res.status).toBe(200);
+    // The security-critical assertion: the null-org branch filtered by the
+    // caller's own auth id.
+    expect(ownerScopedTo).toBe('u1');
   });
 
   it('returns 500 on an unexpected (non-auth) failure', async () => {

@@ -13,8 +13,9 @@
  * Access: any authenticated user, strictly tenant-scoped — identical to
  * `/api/analytics`. `requireAuth()` yields 401 for anon (also caught by
  * middleware), and the query filters reply turns to the caller's org
- * (`org_id = <org> OR org_id IS NULL`, or `org_id IS NULL` for an org-less user),
- * so it can never surface another tenant's turns. Only aggregate timing is
+ * (`org_id = <org> OR org_id IS NULL`; an org-less caller gets only their OWN
+ * null-org sessions — owner-only per `canAccessSession`), so it can never
+ * surface another tenant's (or another org-less user's) turns. Only aggregate timing is
  * returned — no message content, no scenario `script`/hints — so nothing here can
  * leak a hidden mechanic.
  *
@@ -46,9 +47,15 @@ export async function GET(request: Request) {
     // Compose the window onto the tenant filter. Both narrow an already
     // authorized set — isolation is untouched. `since` is inclusive; `until` is
     // covered whole-day via the exclusive `untilExclusive` upper bound.
+    // An org-less caller is scoped to their OWN null-org sessions — per the
+    // session-access doctrine (`canAccessSession`, src/lib/session-access.ts)
+    // "no org" is never a shared tenant, so a bare `org_id IS NULL` fallback
+    // (which pooled every self-registered user's turns) is the same
+    // cross-tenant bug that doctrine closed. `ss.user_id` is the auth id
+    // written at session insert.
     const tenantFilter = userOrgId
       ? sql`ss.org_id = ${userOrgId} OR ss.org_id IS NULL`
-      : sql`ss.org_id IS NULL`;
+      : sql`ss.org_id IS NULL AND ss.user_id = ${session.user.id}`;
     let filter = sql`cm.ttft_ms IS NOT NULL AND (${tenantFilter})`;
     if (window.since) {
       filter = sql`${filter} AND cm.timestamp >= ${window.since}`;

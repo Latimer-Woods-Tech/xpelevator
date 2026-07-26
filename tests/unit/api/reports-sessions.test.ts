@@ -107,6 +107,62 @@ describe('GET /api/reports/sessions — default own-org scope', () => {
   });
 });
 
+describe('GET /api/reports/sessions — null-org owner-only scope (session-access doctrine)', () => {
+  /** The caller id the null-org branch filtered on (`ss.user_id =`). */
+  let ownerScopedTo: unknown;
+  /** Whether the legacy pooled bare `org_id IS NULL` fragment was built. */
+  let pooledFragmentBuilt: boolean;
+
+  /**
+   * Route sql for the org-less admin's default report. Per `canAccessSession`
+   * (src/lib/session-access.ts) null-org sessions are OWNER-ONLY — the export
+   * must pair `org_id IS NULL` with `ss.user_id = <caller>`. A bare
+   * `org_id IS NULL` fragment is the shared-pool bug: it hands an org-less
+   * ADMIN a CSV of EVERY self-registered user's email + scores.
+   */
+  function routeNullOrgSql() {
+    ownerScopedTo = null;
+    pooledFragmentBuilt = false;
+    sqlMock.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
+      const text = Array.isArray(strings) ? strings.join(' ') : String(strings);
+      if (/ss\.org_id IS NULL AND ss\.user_id =/.test(text)) {
+        ownerScopedTo = values[0];
+        return Promise.resolve([]);
+      }
+      if (/ss\.org_id IS NULL/.test(text)) {
+        pooledFragmentBuilt = true;
+        return Promise.resolve([]);
+      }
+      if (/FROM simulation_sessions/.test(text)) {
+        return Promise.resolve([]);
+      }
+      throw new Error(`unmatched sql in test: ${text}`);
+    });
+  }
+
+  it('an org-less admin’s default report covers ONLY their own sessions, never the whole null-org pool', async () => {
+    asAdmin(null);
+    routeNullOrgSql();
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/csv');
+    // The security-critical assertions: the null-org branch filters on the
+    // caller's own auth id, and the pooled fragment is never built.
+    expect(ownerScopedTo).toBe('u1');
+    expect(pooledFragmentBuilt).toBe(false);
+  });
+
+  it('?format=pdf keeps the same owner-only scope', async () => {
+    asAdmin(null);
+    routeNullOrgSql();
+    const res = await GET(req('?format=pdf'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('application/pdf');
+    expect(ownerScopedTo).toBe('u1');
+    expect(pooledFragmentBuilt).toBe(false);
+  });
+});
+
 describe('GET /api/reports/sessions — ?clientOrgId operator→client scope', () => {
   it('unknown clientOrgId → 404 (before any session read)', async () => {
     asAdmin(OPERATOR);
