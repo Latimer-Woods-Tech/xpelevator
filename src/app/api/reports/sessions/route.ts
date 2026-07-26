@@ -131,8 +131,17 @@ export async function GET(request: Request) {
         orgId = target.id;
       }
       // Strict tenant scoping: an admin sees only their own org's sessions.
-      // (`org_id IS NULL` for an admin without an org = their personal workspace.)
-      where = orgId ? sql`ss.org_id = ${orgId}` : sql`ss.org_id IS NULL`;
+      // An admin WITHOUT an org gets their personal workspace — null-org
+      // sessions they OWN. Per the session-access doctrine
+      // (`canAccessSession`, src/lib/session-access.ts), "no org" is never a
+      // shared tenant: a bare `org_id IS NULL` here handed any org-less ADMIN
+      // a CSV/PDF of EVERY self-registered user's email + scores. Sessions
+      // are keyed by `ss.user_id` (the auth id, always written at insert —
+      // `db_user_id` is a nullable display-join FK), matching the doctrine's
+      // owner check.
+      where = orgId
+        ? sql`ss.org_id = ${orgId}`
+        : sql`ss.org_id IS NULL AND ss.user_id = ${session.user.id}`;
     }
 
     // Narrow the (already tenant-scoped) `where` by the date window. Composing

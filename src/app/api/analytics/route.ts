@@ -21,7 +21,12 @@ export async function GET() {
     const userOrgId = authSession.user.orgId;
 
     // Multi-tenancy: sessions are filtered to the caller's org (+ global) in
-    // the WHERE clause of the query below.
+    // the WHERE clause of the query below. An org-less caller is scoped to
+    // their OWN null-org sessions — per the session-access doctrine
+    // (`canAccessSession`, src/lib/session-access.ts) "no org" is never a
+    // shared tenant, so a bare `org_id IS NULL` fallback (which aggregated
+    // every self-registered user into one pool) is the same cross-tenant bug
+    // that doctrine closed. `ss.user_id` is the auth id written at insert.
 
     // Fetch all completed sessions with scores and criteria
     const rawSessions = await sql`
@@ -55,7 +60,7 @@ export async function GET() {
       LEFT JOIN scores sc ON sc.session_id = ss.id
       LEFT JOIN criteria c ON c.id = sc.criteria_id
       WHERE ss.status = 'COMPLETED'
-        AND (${userOrgId ? sql`ss.org_id = ${userOrgId} OR ss.org_id IS NULL` : sql`ss.org_id IS NULL`})
+        AND (${userOrgId ? sql`ss.org_id = ${userOrgId} OR ss.org_id IS NULL` : sql`ss.org_id IS NULL AND ss.user_id = ${authSession.user.id}`})
       GROUP BY ss.id, jt.id
       ORDER BY ss.ended_at ASC NULLS FIRST
     `;
