@@ -1,10 +1,11 @@
 // ── Prisma client — SCHEMA/MIGRATIONS + TEST TOOLING ONLY ───────────────────
 //
-// Decision (P2-4): Prisma owns the schema (prisma/schema.prisma) and migrations,
-// and provides the data-factory client for the live integration-test helper
-// (tests/integration/helpers/db.ts). It is NOT used by production request paths:
-// every src/app/** route queries Neon directly via `sql` from '@/lib/db'. This
-// boundary is enforced by a no-restricted-imports ESLint rule over src/app/**.
+// Decision (P2-4): Prisma owns the schema (prisma/schema.prisma) and migrations.
+// It is NOT used by production request paths: every src/app/** route queries Neon
+// directly via `sql` from '@/lib/db'. This boundary is enforced by a
+// no-restricted-imports ESLint rule over src/app/**. (Its former data-factory
+// consumer — the live `tests/integration` helper — was retired once the
+// deterministic `tests/unit/api/**` mocks covered the API surface; issue #16 P2-7.)
 // Do not import this module from application code — the Prisma client has known
 // runtime incompatibilities on the Cloudflare Workers edge (see LESSONS_LEARNED).
 //

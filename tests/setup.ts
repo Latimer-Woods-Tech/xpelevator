@@ -1,8 +1,10 @@
 /**
  * Global Vitest setup — runs before every test file.
  *
- * Live environment: loads real credentials from .env so integration tests
- * hit the actual Neon DB and Groq API rather than mocks.
+ * Loads real credentials from .env when present, for the credential-bound
+ * out-of-band suites (the `smoke` tier against a real SMOKE_BASE_URL, and the
+ * standalone `test:e2e` script). The deterministic unit/ui tiers that run in CI
+ * mock every seam and need none of this.
  *
  * Unit tests that need isolated behaviour can still use vi.mock() locally.
  */

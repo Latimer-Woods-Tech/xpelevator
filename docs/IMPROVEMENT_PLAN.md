@@ -70,11 +70,15 @@ score and tenant boundaries defensible.
   `type` and doesn't verify the scenario/job belong to the caller's org
   (`simulations/route.ts:15`). Add Zod (or manual) schema validation to every
   POST/PUT body and org-scope checks on create.
-- [ ] **P1-7 Remove the `DISABLE_AUTH` footgun before GA**
-  (`src/middleware.ts:41`, `src/lib/auth-api.ts:57`) — a misconfigured
-  `NODE_ENV` disables all auth and grants ADMIN. *(Deliberately deferred: the
-  live integration-test tier depends on it; remove together with the P2-7
-  auth harness that replaces it.)*
+- [x] **P1-7 Remove the `DISABLE_AUTH` footgun before GA**
+  (`src/middleware.ts`, `src/lib/auth-api.ts`) — a misconfigured `NODE_ENV`
+  disabled all auth and granted ADMIN. **DONE:** the bypass is deleted from both
+  `requireAuth` and the middleware — auth is now enforced unconditionally in
+  every environment — and the credential-bound `tests/integration` tier that
+  depended on it was retired (the deterministic `tests/unit/api/**` mocks replace
+  it, full API surface, P2-7 sweep complete). A proof-of-removal test
+  (`tests/unit/lib/auth-api.test.ts`) asserts `DISABLE_AUTH=true` no longer
+  bypasses auth, so the footgun can't silently return (Standing Law 1).
 
 ## Phase 2 — Engineering consolidation (~2 weeks)
 
@@ -98,7 +102,7 @@ score and tenant boundaries defensible.
   ignores `tests/**`; `eslint-config-next` is installed but unused. Wire it in.
 - [x] **P2-6 Gate deploys on CI.** `deploy.yml` fires on every push to `main`
   with no dependency on `ci.yml`. Add branch protection / workflow dependency.
-- [~] **P2-7 CI-gate the API routes.** Integration tests hit live Neon+Groq
+- [x] **P2-7 CI-gate the API routes.** Integration tests hit live Neon+Groq
   and never run in CI; `src/app/api/**` has zero enforced coverage. Make them
   deterministic (mocks exist in `tests/mocks/prisma.ts`) or use an ephemeral
   Neon branch per CI run; then extend the coverage floor beyond `src/lib/**`.
@@ -128,9 +132,10 @@ score and tenant boundaries defensible.
   its previously-untested DELETE unlink handler (own-org-admin-only; global
   catalog protected) plus the GET/POST auth-401 + 500 boundaries and the POST
   idempotent-relink path. **The `src/app/api/**` coverage-gate sweep is now
-  COMPLETE — every API route sits under the deterministic gate.** Remaining:
-  retire the credential-bound `tests/integration` tier + the P1-7 `DISABLE_AUTH`
-  crutch — now unblocked.)*
+  COMPLETE — every API route sits under the deterministic gate.** Follow-up
+  DONE: the credential-bound `tests/integration` tier + the P1-7 `DISABLE_AUTH`
+  crutch have been retired — the deterministic mocks cover the whole surface, so
+  no route can regress its auth/tenant/error branches without failing CI.)*
 - [ ] **P2-8 Test the voice/phone path.** No tests for `api/telnyx/call`,
   `api/telnyx/webhook`, `useChatSession`, or any interface component — the
   differentiating feature is nearly untested.

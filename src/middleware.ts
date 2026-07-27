@@ -51,12 +51,6 @@ const PUBLIC_EXACT_ROUTES = [
 const PUBLIC_PREFIX_ROUTES = ['/api/auth', '/api/branding'];
 
 export default function middleware(req: NextRequest) {
-  // TESTING MODE: Bypass auth checks if DISABLE_AUTH is set — never in production.
-  // TODO(phase-2/3): retire this crutch once the test-auth harness lands.
-  if (process.env.DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production') {
-    return NextResponse.next();
-  }
-
   const { pathname } = req.nextUrl;
 
   // Allow public routes — exact match, plus the explicit prefix allow-list.

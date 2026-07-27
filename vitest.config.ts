@@ -26,7 +26,6 @@ export default defineConfig({
     // ui/ tests run in happy-dom so React components can render
     environmentMatchGlobs: [
       ['tests/ui/**', 'happy-dom'],
-      ['tests/integration/ui/**', 'happy-dom'],
     ],
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],

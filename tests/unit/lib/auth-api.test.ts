@@ -12,9 +12,9 @@
  * Web Crypto so the signature path runs end-to-end without a network or secret.
  *
  * Covered:
- *   requireAuth        — DISABLE_AUTH bypass (+ production guard), 401 when
- *                        unauthenticated, MEMBER default, ADMIN 403 gate,
- *                        orgId/role propagation from the DB row
+ *   requireAuth        — 401 when unauthenticated, MEMBER default, ADMIN 403
+ *                        gate, orgId/role propagation from the DB row, and
+ *                        proof that the retired DISABLE_AUTH backdoor stays gone
  *   getAuthOrNull      — null on failure, session on success
  *   withAuth           — passes through on success, maps AuthError → JSON
  *                        status, rethrows non-AuthError
@@ -73,21 +73,17 @@ describe('requireAuth', () => {
     vi.resetModules();
   });
 
-  it('bypasses auth and grants a test ADMIN when DISABLE_AUTH=true outside production', async () => {
+  // Proof-of-removal (Standing Law 1): the `DISABLE_AUTH` auth-bypass footgun
+  // was retired with the credential-bound `tests/integration` tier. Setting it
+  // must now do NOTHING — real auth is enforced in every environment. This test
+  // fails the moment anyone reintroduces the backdoor.
+  it('ignores DISABLE_AUTH=true outside production and still enforces real auth (backdoor retired)', async () => {
     process.env.DISABLE_AUTH = 'true';
-    const { mod, authFn } = await loadAuthApi();
-    const result = await mod.requireAuth();
-    expect(result.session.user.role).toBe('ADMIN');
-    expect(result.session.user.id).toBe('test-user-id');
-    // Bypass must short-circuit before ever calling the real auth()
-    expect(authFn).not.toHaveBeenCalled();
-  });
-
-  it('ignores the DISABLE_AUTH backdoor in production and enforces real auth', async () => {
-    process.env.DISABLE_AUTH = 'true';
-    (process.env as Record<string, string>).NODE_ENV = 'production';
-    const { mod } = await loadAuthApi({ authUser: null });
+    (process.env as Record<string, string>).NODE_ENV = 'test';
+    const { mod, authFn } = await loadAuthApi({ authUser: null });
+    // No bypass: unauthenticated caller is rejected and real auth() is consulted.
     await expect(mod.requireAuth()).rejects.toMatchObject({ status: 401 });
+    expect(authFn).toHaveBeenCalled();
   });
 
   it('throws AuthError(401) when there is no authenticated session', async () => {
