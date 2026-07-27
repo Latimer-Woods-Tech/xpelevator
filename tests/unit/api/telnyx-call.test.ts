@@ -105,6 +105,9 @@ beforeEach(() => {
   sqlMock.mockReset();
   initiateCallMock.mockReset();
   encodeClientStateMock.mockClear();
+  // Clear call history only — keep the default throwing impl (no CF context in
+  // the unit env); per-test `mockReturnValueOnce` overrides the success path.
+  getCfCtxMock.mockClear();
   // Default: authenticated as the owner.
   requireAuthMock.mockResolvedValue({ session: { user: OWNER } });
   initiateCallMock.mockResolvedValue({
@@ -247,5 +250,64 @@ describe('POST /api/telnyx/call — per-seat modality gating at the billable poi
     const res = await post({ sessionId: 'sess-1', to: '+12125550100' });
     expect(res.status).toBe(200);
     expect(initiateCallMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe('POST /api/telnyx/call — from-number resolution', () => {
+  it('uses a caller-supplied `from` verbatim, bypassing env resolution → 200', async () => {
+    // When the body carries an explicit `from`, the CF-context / env lookup is
+    // skipped entirely; the number is passed straight to initiateCall.
+    withSession([phoneSession()]);
+    const res = await post({ sessionId: 'sess-1', to: '+12125550100', from: '+14155550111' });
+    expect(res.status).toBe(200);
+    expect(initiateCallMock).toHaveBeenCalledWith(
+      expect.objectContaining({ to: '+12125550100', from: '+14155550111' })
+    );
+    // CF context is never consulted when the caller supplies a from-number.
+    expect(getCfCtxMock).not.toHaveBeenCalled();
+  });
+
+  it('resolves the from-number from the Cloudflare runtime binding (precedence over process.env) → 200', async () => {
+    // In the Worker runtime, process.env is inlined at build time and won't
+    // carry the secret; getCloudflareContext().env supplies it. The CF value
+    // wins over the (also-set) process.env fallback.
+    getCfCtxMock.mockReturnValueOnce({ env: { TELNYX_FROM_NUMBER: '+13105550222' } });
+    withSession([phoneSession()]);
+    const res = await post({ sessionId: 'sess-1', to: '+12125550100' });
+    expect(res.status).toBe(200);
+    expect(getCfCtxMock).toHaveBeenCalledOnce();
+    expect(initiateCallMock).toHaveBeenCalledWith(
+      expect.objectContaining({ from: '+13105550222' })
+    );
+  });
+
+  it('returns 400 when no from-number is resolvable anywhere — no billable dial, no transcript wipe', async () => {
+    // Caller supplies none, CF context throws (default mock), and the
+    // process.env fallback is unset — the route must refuse to dial.
+    delete process.env.TELNYX_FROM_NUMBER;
+    withSession([phoneSession()]);
+    const res = await post({ sessionId: 'sess-1', to: '+12125550100' });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/No from number/);
+    expect(initiateCallMock).not.toHaveBeenCalled();
+    expect(ranDelete()).toBe(false);
+  });
+});
+
+describe('POST /api/telnyx/call — 500 error boundary', () => {
+  it('maps a thrown Error to 500 with its message', async () => {
+    withSession([phoneSession()]);
+    initiateCallMock.mockRejectedValue(new Error('Telnyx 502 upstream'));
+    const res = await post({ sessionId: 'sess-1', to: '+12125550100' });
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe('Telnyx 502 upstream');
+  });
+
+  it('maps a thrown non-Error to the generic 500 fallback message', async () => {
+    withSession([phoneSession()]);
+    initiateCallMock.mockRejectedValue('boom'); // a bare string, not an Error
+    const res = await post({ sessionId: 'sess-1', to: '+12125550100' });
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe('Failed to initiate call');
   });
 });
