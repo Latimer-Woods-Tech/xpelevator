@@ -135,7 +135,18 @@ score and tenant boundaries defensible.
   COMPLETE — every API route sits under the deterministic gate.** Follow-up
   DONE: the credential-bound `tests/integration` tier + the P1-7 `DISABLE_AUTH`
   crutch have been retired — the deterministic mocks cover the whole surface, so
-  no route can regress its auth/tenant/error branches without failing CI.)*
+  no route can regress its auth/tenant/error branches without failing CI.
+  Reconciliation 2026-07-27: the 21-route count above covered the CRUD/guard
+  routes; the SSE scoring hot path `chat/route.ts` (#156) was tracked separately
+  (bigger, streaming). It has now joined the gate too — **22 routes** — at 90.9%
+  branch: POST guards (auth/validation/size/not-found/cross-tenant/closed/
+  throttle), the streamed turn (chunk→done framing + CUSTOMER-reply INSERT), the
+  `[RESOLVED]`/`[END]`/maxTurns finalize-and-score paths, the mid-stream error
+  frame; GET transcript read (auth/tenant/sanitizer/404/500) and the phone
+  live-transcript SSE poll. A correctness fix landed with it: anon `POST /api/chat`
+  now maps `AuthError` → **401** (mirroring GET) instead of masking it as a 500,
+  with a proof-of-rejection test. The `src/app/api/**` surface is now fully
+  gated.)*
 - [ ] **P2-8 Test the voice/phone path.** No tests for `api/telnyx/call`,
   `api/telnyx/webhook`, `useChatSession`, or any interface component — the
   differentiating feature is nearly untested.

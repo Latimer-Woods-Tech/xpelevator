@@ -23,16 +23,18 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * creds — the pattern that RETIRED the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
- * Routes under the gate (21): `analytics`, `analytics/latency`, `plans`, `me`,
+ * Routes under the gate (22): `analytics`, `analytics/latency`, `plans`, `me`,
  * `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
  * `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
  * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`,
  * `scenario-packs/upgrade`, `telnyx/call`, `simulations`, `scenarios`,
- * `scenarios/[id]`, `jobs/[id]/criteria` (each ≥ the floors — `jobs/[id]/criteria`
- * joined this slice: its DELETE handler + the GET/POST auth-401 and 500 boundaries
- * + POST idempotent-relink path were previously untested, so it now covers every
- * unlink-guard branch, 100% branch). **The `src/app/api/**` coverage-gate sweep is
- * COMPLETE — every API route now sits under the deterministic gate.** The
+ * `scenarios/[id]`, `jobs/[id]/criteria`, `chat` (each ≥ the floors — `chat`
+ * joined last: the ~635-line SSE scoring hot path (#156), covering the POST
+ * guards + streamed-turn framing + `[RESOLVED]`/`[END]`/maxTurns finalize-and-
+ * score + the GET transcript read + the phone live-transcript SSE poll, 90.9%
+ * branch; an anon `POST /api/chat`→401 fix rode along). **The `src/app/api/**`
+ * coverage-gate sweep is COMPLETE — every API route now sits under the
+ * deterministic gate.** The
  * credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch (P1-7)
  * have since been RETIRED — the deterministic mocks cover the whole surface.
  *
@@ -109,6 +111,14 @@ export default defineConfig({
         // cross-tenant read/link IDOR guards + the DELETE unlink guards (own-org
         // admin only; global catalog protected) all covered → sweep complete.
         'src/app/api/jobs/[id]/criteria/route.ts',
+        // The SSE scoring hot path (~635 lines) — the product's core loop.
+        // POST guards (auth/validation/size/not-found/cross-tenant/closed/
+        // throttle) + the streamed turn (chunk→done framing, CUSTOMER-reply
+        // INSERT), the [RESOLVED]/[END]/maxTurns auto-end + finalize/score, and
+        // the mid-stream error frame; GET transcript read (auth/tenant/sanitizer/
+        // 404/500) and the phone live-transcript SSE poll (transcript/ended/
+        // error). Anon POST now maps AuthError→401 (was a masked 500).
+        'src/app/api/chat/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',
