@@ -105,18 +105,21 @@ score and tenant boundaries defensible.
   *(Down-payment 2026-07-26: established the deterministic API-route pattern —
   `tests/unit/api/**` mocks `@/lib/db` + `@/lib/auth-api` (no live creds, no
   `DISABLE_AUTH`), runs in the `unit` + `coverage` CI tiers. Routes under the
-  gate now (15 routes): `analytics`, `analytics/latency`, `plans`, `me`,
+  gate now (17 routes): `analytics`, `analytics/latency`, `plans`, `me`,
   `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
   `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
-  `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`
+  `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`,
+  `scenario-packs/upgrade`, `telnyx/call`
   — each ≥ the 85/85/90/85 floor — added to the `vitest.ci.config.ts` `include`
   allowlist. `scoring` (the manual ADMIN score-override write path) was lifted
   80% → 96.66% branch by adding the cross-org 403 tenant-isolation case and the
-  500 failure-path cases. NOT yet gated (below the branch floor, need more tests
-  first): `simulations` (~44%), `scenario-packs/upgrade`
-  (~81%), `telnyx/call` (~81%), `scenarios*`, `jobs/[id]/criteria`. Remaining:
-  raise those over the floor, then retire the credential-bound
-  `tests/integration` tier + the P1-7 `DISABLE_AUTH` crutch.)*
+  500 failure-path cases; `scenario-packs/upgrade` 81% → 100% branch (null-version
+  / no-match-UPDATE / no-job-title / ON-CONFLICT cases); `telnyx/call` 81% → 100%
+  branch (caller-supplied `from` / CF-runtime-binding / no-from-number 400 /
+  500-Error-vs-non-Error error-boundary cases). NOT yet gated (below the branch
+  floor, need more tests first): `simulations` (~44%), `scenarios*`,
+  `jobs/[id]/criteria`. Remaining: raise those over the floor, then retire the
+  credential-bound `tests/integration` tier + the P1-7 `DISABLE_AUTH` crutch.)*
 - [ ] **P2-8 Test the voice/phone path.** No tests for `api/telnyx/call`,
   `api/telnyx/webhook`, `useChatSession`, or any interface component — the
   differentiating feature is nearly untested.

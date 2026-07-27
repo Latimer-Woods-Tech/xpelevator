@@ -23,15 +23,15 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * creds — the pattern that replaces the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
- * Routes under the gate (16): `analytics`, `analytics/latency`, `plans`, `me`,
+ * Routes under the gate (17): `analytics`, `analytics/latency`, `plans`, `me`,
  * `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
  * `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
  * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`,
- * `scenario-packs/upgrade` (each ≥ the floors — `scenario-packs/upgrade` at 100%
- * branch after the null-version / no-match-UPDATE / no-job-title / ON-CONFLICT
- * cases added this slice). NOT yet gated because they sit below the 85% branch
- * floor and need more deterministic tests first: `simulations` (~44%),
- * `telnyx/call` (~81%), `scenarios*`, `jobs/[id]/criteria`. Retiring the
+ * `scenario-packs/upgrade`, `telnyx/call` (each ≥ the floors — `telnyx/call` at
+ * 100% branch after the caller-supplied-`from` / CF-runtime-binding / no-from-number
+ * (400) / 500-Error-vs-non-Error error-boundary cases added this slice). NOT yet
+ * gated because they sit below the 85% branch floor and need more deterministic
+ * tests first: `simulations` (~44%), `scenarios*`, `jobs/[id]/criteria`. Retiring the
  * credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch (P1-7)
  * follows once the remaining routes finish the sweep.
  *
@@ -87,6 +87,10 @@ export default defineConfig({
         // tenant + provenance scoped; every write branch (stale UPDATE, idempotent
         // INSERT, orphan-report) now deterministically covered.
         'src/app/api/scenario-packs/upgrade/route.ts',
+        // Billable outbound PSTN dial — auth + ownership + per-seat modality gate
+        // at the money point, plus the from-number resolution (caller / CF binding /
+        // process.env) and the 500 error boundary — all branches now covered.
+        'src/app/api/telnyx/call/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',
