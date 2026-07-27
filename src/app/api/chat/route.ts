@@ -304,6 +304,12 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    // An unauthenticated caller must get 401 (not a generic 500) — mirror the
+    // GET handler, which already maps AuthError to its status. Without this, an
+    // anon POST /api/chat surfaced as a 500, masking the real auth failure.
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error('[chat] POST failed:', error);
     return NextResponse.json({ error: 'Failed to process message' }, { status: 500 });
   }
