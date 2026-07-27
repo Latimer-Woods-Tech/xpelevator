@@ -51,25 +51,6 @@ export async function requireAuth(
   _request?: Request,
   requiredRole?: UserRole
 ): Promise<AuthResult> {
-  // TESTING MODE: Bypass auth if DISABLE_AUTH is set. Only honoured outside
-  // production; a hard guard keeps this backdoor out of live deployments.
-  // TODO(phase-2/3): remove entirely once the integration-test auth harness
-  // (seeded admin user + Auth.js session mock) replaces this crutch.
-  if (process.env.DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production') {
-    return {
-      session: {
-        user: {
-          id: 'test-user-id',
-          email: 'test@example.com',
-          name: 'Test User',
-          dbUserId: undefined,
-          role: 'ADMIN', // Grant admin access in test mode
-          orgId: null,
-        },
-      },
-    };
-  }
-
   const session = await auth();
 
   if (!session?.user?.id) {

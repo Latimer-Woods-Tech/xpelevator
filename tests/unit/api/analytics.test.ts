@@ -1,12 +1,13 @@
 /**
  * Deterministic API-route test — `GET /api/analytics`.
  *
- * This is the first route brought under the CI coverage gate (issue #16, P2-7
- * down-payment). The pre-existing suite in `tests/integration/api/**` drives
- * the same route handlers but against **live Neon + Groq** (via
- * `tests/setup.ts` loading real `.env`) and leans on the `DISABLE_AUTH`
- * footgun (P1-7), so it cannot be a required CI gate and left `src/app/api/**`
- * with zero enforced coverage.
+ * This was the first route brought under the CI coverage gate (issue #16, P2-7
+ * down-payment). It replaced a credential-bound suite in `tests/integration/api/**`
+ * that drove the same route handlers against **live Neon + Groq** (via
+ * `tests/setup.ts` loading real `.env`) and leaned on the `DISABLE_AUTH`
+ * footgun (P1-7) — so it could never be a required CI gate and left
+ * `src/app/api/**` with zero enforced coverage. Once the deterministic pattern
+ * below covered the whole API surface, that tier and the footgun were retired.
  *
  * The pattern established here makes a route deterministic with NO live
  * credentials by mocking exactly two seams:

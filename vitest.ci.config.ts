@@ -20,7 +20,7 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * API routes (`src/app/api/**`) join this gate INCREMENTALLY (issue #16, P2-7):
  * a route is added to `include` below only once it has a DETERMINISTIC test
  * under `tests/unit/api/**` (mocks `@/lib/db` + `@/lib/auth-api`, no live
- * creds — the pattern that replaces the credential-bound `tests/integration`
+ * creds — the pattern that RETIRED the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
  * Routes under the gate (21): `analytics`, `analytics/latency`, `plans`, `me`,
@@ -32,9 +32,9 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * joined this slice: its DELETE handler + the GET/POST auth-401 and 500 boundaries
  * + POST idempotent-relink path were previously untested, so it now covers every
  * unlink-guard branch, 100% branch). **The `src/app/api/**` coverage-gate sweep is
- * COMPLETE — every API route now sits under the deterministic gate.** Retiring the
- * credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch (P1-7) is
- * now unblocked.
+ * COMPLETE — every API route now sits under the deterministic gate.** The
+ * credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch (P1-7)
+ * have since been RETIRED — the deterministic mocks cover the whole surface.
  *
  * Thresholds sit below the currently-achieved numbers (lines ~97, branches ~91,
  * functions ~99) so ordinary edits don't flake the gate, while still catching a

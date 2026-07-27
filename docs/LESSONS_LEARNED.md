@@ -321,9 +321,16 @@ $ curl https://xpelevator.com/api/debug/groq
 ### 📚 TEST/DEV FILES (Lower Priority)
 
 **Testing Infrastructure:**
-- `tests/integration/helpers/db.ts` - Test database helpers
-- `tests/integration/api/*.test.ts` - Integration tests (8 files)
+- `tests/unit/**` - Deterministic unit + API-route tests (mock `@/lib/db` +
+  `@/lib/auth-api`; no live creds). These are the CI-gated tiers.
+- `tests/ui/**` - React component render tests (happy-dom)
+- `tests/smoke/api.smoke.test.ts` - Live smoke checks against a real
+  `SMOKE_BASE_URL` (skips visibly when no target is set)
 - `validate.mjs` - Local validation script
+
+> The old `tests/integration/**` tier (live Neon+Groq, leaned on the
+> `DISABLE_AUTH` bypass) was **retired** once the deterministic `tests/unit/api/**`
+> pattern covered the full `src/app/api/**` surface — see issue #16 P2-7/P1-7.
 
 **Database Seeding:**
 - `prisma/seed.ts` - Initial data population
