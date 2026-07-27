@@ -23,12 +23,13 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * creds — the pattern that replaces the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
- * Routes under the gate (14): `analytics`, `analytics/latency`, `plans`, `me`,
+ * Routes under the gate (15): `analytics`, `analytics/latency`, `plans`, `me`,
  * `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
  * `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
- * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status` (each
- * ≥ the floors). NOT yet gated because they sit below the 85% branch floor and
- * need more deterministic tests first: `scoring` (branch ~80%), `simulations`
+ * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`
+ * (each ≥ the floors — `scoring` at 96.66% branch after the tenant-isolation +
+ * failure-path cases added this slice). NOT yet gated because they sit below the
+ * 85% branch floor and need more deterministic tests first: `simulations`
  * (~44%), `scenario-packs/upgrade` (~81%), `telnyx/call` (~81%), `scenarios*`,
  * `jobs/[id]/criteria`. Retiring the credential-bound `tests/integration`
  * tier + the `DISABLE_AUTH` crutch (P1-7) follows once the remaining routes
@@ -79,6 +80,9 @@ export default defineConfig({
         'src/app/api/scenario-packs/route.ts',
         'src/app/api/scenario-packs/import/route.ts',
         'src/app/api/scenario-packs/status/route.ts',
+        // Manual score-override write path — ADMIN-only, tenant-scoped; the
+        // rows it writes feed analytics + the operator-facing manager reports.
+        'src/app/api/scoring/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',

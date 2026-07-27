@@ -105,13 +105,15 @@ score and tenant boundaries defensible.
   *(Down-payment 2026-07-26: established the deterministic API-route pattern —
   `tests/unit/api/**` mocks `@/lib/db` + `@/lib/auth-api` (no live creds, no
   `DISABLE_AUTH`), runs in the `unit` + `coverage` CI tiers. Routes under the
-  gate now (14 routes): `analytics`, `analytics/latency`, `plans`, `me`,
+  gate now (15 routes): `analytics`, `analytics/latency`, `plans`, `me`,
   `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
   `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
-  `scenario-packs`, `scenario-packs/import`, `scenario-packs/status` — each
-  ≥ the 85/85/90/85 floor — added to the `vitest.ci.config.ts` `include`
-  allowlist. NOT yet gated (below the branch floor, need more tests first):
-  `scoring` (~80% branch), `simulations` (~44%), `scenario-packs/upgrade`
+  `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`
+  — each ≥ the 85/85/90/85 floor — added to the `vitest.ci.config.ts` `include`
+  allowlist. `scoring` (the manual ADMIN score-override write path) was lifted
+  80% → 96.66% branch by adding the cross-org 403 tenant-isolation case and the
+  500 failure-path cases. NOT yet gated (below the branch floor, need more tests
+  first): `simulations` (~44%), `scenario-packs/upgrade`
   (~81%), `telnyx/call` (~81%), `scenarios*`, `jobs/[id]/criteria`. Remaining:
   raise those over the floor, then retire the credential-bound
   `tests/integration` tier + the P1-7 `DISABLE_AUTH` crutch.)*

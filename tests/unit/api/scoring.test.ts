@@ -120,4 +120,56 @@ describe('POST /api/scoring — validation', () => {
     );
     expect(inserted).toBe(true);
   });
+
+  it('201 with feedback omitted (persists NULL feedback, not undefined)', async () => {
+    withSession([{ id: 's1', userId: 'u1', orgId: 'orgA' }]);
+    const res = await post({
+      sessionId: 's1',
+      scores: [{ criteriaId: 'c1', score: 8 }],
+    });
+    expect(res.status).toBe(201);
+    // The INSERT interpolates `s.feedback ?? null` — the omitted-feedback arm
+    // must resolve to a real NULL bind value, never JS `undefined`.
+    const insertCall = sqlMock.mock.calls.find((c) =>
+      (Array.isArray(c[0]) ? c[0].join(' ') : '').includes('INSERT INTO scores')
+    );
+    expect(insertCall).toBeDefined();
+    // Bind values follow the template-strings array; none may be `undefined`.
+    expect((insertCall ?? []).slice(1)).not.toContain(undefined);
+  });
+});
+
+describe('POST /api/scoring — tenant isolation (403)', () => {
+  it('403 when an admin from another org targets a session they do not own', async () => {
+    // Admin is in orgA; the session belongs to a different user in orgB.
+    // canAccessSession (real, not mocked) → owner:false, same-org-admin:false.
+    withSession([{ id: 's1', userId: 'someone-else', orgId: 'orgB' }]);
+    const res = await post({
+      sessionId: 's1',
+      scores: [{ criteriaId: 'c1', score: 9 }],
+    });
+    expect(res.status).toBe(403);
+    // The cross-tenant caller must be rejected before any score row is written.
+    const inserted = sqlMock.mock.calls.some((c) =>
+      (Array.isArray(c[0]) ? c[0].join(' ') : '').includes('INSERT INTO scores')
+    );
+    expect(inserted).toBe(false);
+  });
+});
+
+describe('POST /api/scoring — failure handling (500)', () => {
+  it('500 when the session lookup throws a genuine Error', async () => {
+    sqlMock.mockImplementation(() => Promise.reject(new Error('db unreachable')));
+    const res = await post({ sessionId: 's1', scores: [{ criteriaId: 'c1', score: 7 }] });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('Failed to score simulation');
+  });
+
+  it('500 when a non-Error value is thrown (String(error) fallback)', async () => {
+    // A thrown non-Error must not crash the catch — the route coerces via String().
+    sqlMock.mockImplementation(() => Promise.reject('boom'));
+    const res = await post({ sessionId: 's1', scores: [{ criteriaId: 'c1', score: 7 }] });
+    expect(res.status).toBe(500);
+  });
 });
