@@ -23,16 +23,16 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * creds — the pattern that replaces the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
- * Routes under the gate (18): `analytics`, `analytics/latency`, `plans`, `me`,
+ * Routes under the gate (20): `analytics`, `analytics/latency`, `plans`, `me`,
  * `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
  * `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
  * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`,
- * `scenario-packs/upgrade`, `telnyx/call`, `simulations` (each ≥ the floors —
- * `simulations` at 94% branch after this slice added the POST guard branches
- * (auth/validation/not-found/cross-tenant/daily-cap/500) + the previously
- * untested GET list handler's admin-org vs own-sessions branches). NOT yet
- * gated because they sit below the 85% branch floor and need more deterministic
- * tests first: `scenarios*`, `jobs/[id]/criteria`. Retiring the
+ * `scenario-packs/upgrade`, `telnyx/call`, `simulations`, `scenarios`,
+ * `scenarios/[id]` (each ≥ the floors — the two `scenarios*` routes joined this
+ * slice: GET list + GET-by-id now cover every org-scoped query shape and the
+ * trainee/admin sanitizer, so `scenarios` is at 100% branch and `scenarios/[id]`
+ * at ~96%). NOT yet gated because it sits below the 85% branch floor and needs
+ * more deterministic tests first: `jobs/[id]/criteria`. Retiring the
  * credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch (P1-7)
  * follows once the remaining routes finish the sweep.
  *
@@ -98,6 +98,13 @@ export default defineConfig({
         // vs own-sessions branches with hidden-script sanitization — 94% branch
         // (only the NODE_ENV==='production' detail-suppression ternaries remain).
         'src/app/api/simulations/route.ts',
+        // Admin-authored scenario CRUD — the hidden-mechanic boundary (persona /
+        // objective / hints live in `script`). GET list + GET-by-id now cover
+        // every org-scoped query shape and the sanitizer (trainee sees only
+        // ttsVoiceName; admin sees the full script); POST tenant-scope guard and
+        // PUT/DELETE global-catalog protection + all auth/500 boundaries covered.
+        'src/app/api/scenarios/route.ts',
+        'src/app/api/scenarios/[id]/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',
