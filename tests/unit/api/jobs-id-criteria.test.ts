@@ -23,7 +23,7 @@ const { requireAuthMock, sqlMock, FakeAuthError } = vi.hoisted(() => {
 vi.mock('@/lib/auth-api', () => ({ requireAuth: requireAuthMock, AuthError: FakeAuthError }));
 vi.mock('@/lib/db', () => ({ sql: sqlMock, default: sqlMock }));
 
-import { GET, POST } from '@/app/api/jobs/[id]/criteria/route';
+import { GET, POST, DELETE } from '@/app/api/jobs/[id]/criteria/route';
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const req = (criteriaId = 'c1') =>
@@ -216,5 +216,162 @@ describe('GET /api/jobs/[id]/criteria — cross-org read IDOR guard', () => {
     const res = await GET(getReq(), params('j1'));
     expect(res.status).toBe(200);
     expect(listQueryRan()).toBe(true);
+  });
+});
+
+describe('/api/jobs/[id]/criteria — auth + error boundaries (GET/POST)', () => {
+  const getReq = () => new Request('http://localhost/api/jobs/j1/criteria');
+
+  it('GET → 401 when the caller is unauthenticated (no DB touched)', async () => {
+    requireAuthMock.mockRejectedValue(new FakeAuthError('Unauthorized', 401));
+    const res = await GET(getReq(), params('j1'));
+    expect(res.status).toBe(401);
+    expect(sqlMock).not.toHaveBeenCalled();
+  });
+
+  it('GET → 500 when the org-scope read throws a non-auth error', async () => {
+    requireAuthMock.mockResolvedValue({ session: { user: { id: 'u', role: 'MEMBER', orgId: 'orgA' } } });
+    sqlMock.mockRejectedValue(new Error('neon down'));
+    const res = await GET(getReq(), params('j1'));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Failed to fetch criteria' });
+  });
+
+  it('POST → 401 when the caller is not an admin / unauthenticated', async () => {
+    requireAuthMock.mockRejectedValue(new FakeAuthError('Forbidden', 403));
+    const res = await POST(req(), params('j1'));
+    expect(res.status).toBe(403);
+    expect(ranInsert()).toBe(false);
+  });
+
+  it('POST → 404 when the criterion being linked does not exist', async () => {
+    asAdmin('orgA');
+    // job title owned by caller, but the criterion row is missing.
+    wire({ jobOrg: 'orgA', critOrg: undefined });
+    const res = await POST(req(), params('j1'));
+    expect(res.status).toBe(404);
+    expect(ranInsert()).toBe(false);
+  });
+
+  it('POST is idempotent — an already-linked pair returns 201 without a second INSERT', async () => {
+    asAdmin('orgA');
+    // wire()'s job_criteria branch returns a non-empty existing row → INSERT skipped.
+    wire({ jobOrg: 'orgA', critOrg: 'orgA' });
+    const res = await POST(req(), params('j1'));
+    expect(res.status).toBe(201);
+    expect(ranInsert()).toBe(false);
+    expect(await res.json()).toEqual({ jobTitleId: 'j1', criteriaId: 'c1' });
+  });
+
+  it('POST → 500 when a write throws a non-auth error', async () => {
+    asAdmin('orgA');
+    sqlMock.mockRejectedValue(new Error('neon down'));
+    const res = await POST(req(), params('j1'));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Failed to link criteria' });
+  });
+});
+
+describe('DELETE /api/jobs/[id]/criteria — unlink guards + boundaries', () => {
+  const delReq = (body?: unknown) =>
+    new Request('http://localhost/api/jobs/j1/criteria', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  function ranSpecificDelete() {
+    return sqlMock.mock.calls.some((c) => {
+      const t = Array.isArray(c[0]) ? c[0].join(' ') : '';
+      return t.includes('DELETE FROM job_criteria') && t.includes('criteria_id');
+    });
+  }
+  function ranDeleteAll() {
+    return sqlMock.mock.calls.some((c) => {
+      const t = Array.isArray(c[0]) ? c[0].join(' ') : '';
+      return t.includes('DELETE FROM job_criteria') && !t.includes('criteria_id');
+    });
+  }
+
+  it('→ 401/403 when the caller is not an authenticated admin (no delete issued)', async () => {
+    requireAuthMock.mockRejectedValue(new FakeAuthError('Forbidden', 403));
+    const res = await DELETE(delReq({ criteriaId: 'c1' }), params('j1'));
+    expect(res.status).toBe(403);
+    expect(ranSpecificDelete()).toBe(false);
+    expect(ranDeleteAll()).toBe(false);
+  });
+
+  it('→ 404 when the job title does not exist', async () => {
+    asAdmin('orgA');
+    wire({ jobOrg: undefined });
+    const res = await DELETE(delReq({ criteriaId: 'c1' }), params('nope'));
+    expect(res.status).toBe(404);
+    expect(ranSpecificDelete()).toBe(false);
+  });
+
+  it("DENIES an org-A admin unlinking criteria from an org-B job title (403)", async () => {
+    asAdmin('orgA');
+    wire({ jobOrg: 'orgB' });
+    const res = await DELETE(delReq({ criteriaId: 'c1' }), params('j1'));
+    expect(res.status).toBe(403);
+    expect(ranSpecificDelete()).toBe(false);
+    expect(ranDeleteAll()).toBe(false);
+  });
+
+  it('DENIES unlinking from a GLOBAL job title (tenant admin cannot touch the shared catalog)', async () => {
+    asAdmin('orgA');
+    wire({ jobOrg: null });
+    const res = await DELETE(delReq({ criteriaId: 'c1' }), params('j1'));
+    expect(res.status).toBe(403);
+  });
+
+  it('unlinks a SPECIFIC criterion when criteriaId is supplied → 204', async () => {
+    asAdmin('orgA');
+    wire({ jobOrg: 'orgA' });
+    const res = await DELETE(delReq({ criteriaId: 'c1' }), params('j1'));
+    expect(res.status).toBe(204);
+    expect(ranSpecificDelete()).toBe(true);
+    expect(ranDeleteAll()).toBe(false);
+  });
+
+  it('unlinks ALL criteria when the body carries no criteriaId → 204', async () => {
+    asAdmin('orgA');
+    wire({ jobOrg: 'orgA' });
+    const res = await DELETE(delReq({}), params('j1'));
+    expect(res.status).toBe(204);
+    expect(ranDeleteAll()).toBe(true);
+    expect(ranSpecificDelete()).toBe(false);
+  });
+
+  it('treats an unparseable body as "delete all" (the .catch fallback) → 204', async () => {
+    asAdmin('orgA');
+    // guardJobOwnership reads job_titles; the malformed body makes request.json() reject.
+    sqlMock.mockImplementation((strings?: TemplateStringsArray) => {
+      const text = Array.isArray(strings) ? strings.join(' ') : String(strings);
+      if (text.includes('FROM job_titles')) return Promise.resolve([{ orgId: 'orgA' }]);
+      return Promise.resolve([]);
+    });
+    const res = await DELETE(
+      new Request('http://localhost/api/jobs/j1/criteria', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'not-json{',
+      }),
+      params('j1')
+    );
+    expect(res.status).toBe(204);
+    expect(ranDeleteAll()).toBe(true);
+  });
+
+  it('→ 500 when the delete throws a non-auth error', async () => {
+    asAdmin('orgA');
+    sqlMock.mockImplementation((strings?: TemplateStringsArray) => {
+      const text = Array.isArray(strings) ? strings.join(' ') : String(strings);
+      if (text.includes('FROM job_titles')) return Promise.resolve([{ orgId: 'orgA' }]);
+      throw new Error('neon down');
+    });
+    const res = await DELETE(delReq({ criteriaId: 'c1' }), params('j1'));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Failed to unlink criteria' });
   });
 });

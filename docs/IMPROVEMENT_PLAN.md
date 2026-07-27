@@ -105,12 +105,13 @@ score and tenant boundaries defensible.
   *(Down-payment 2026-07-26: established the deterministic API-route pattern —
   `tests/unit/api/**` mocks `@/lib/db` + `@/lib/auth-api` (no live creds, no
   `DISABLE_AUTH`), runs in the `unit` + `coverage` CI tiers. Routes under the
-  gate now (20 routes): `analytics`, `analytics/latency`, `plans`, `me`,
+  gate now (21 routes — the FULL `src/app/api/**` surface): `analytics`,
+  `analytics/latency`, `plans`, `me`,
   `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
   `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
   `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`,
   `scenario-packs/upgrade`, `telnyx/call`, `simulations`, `scenarios`,
-  `scenarios/[id]`
+  `scenarios/[id]`, `jobs/[id]/criteria`
   — each ≥ the 85/85/90/85 floor — added to the `vitest.ci.config.ts` `include`
   allowlist. `scoring` (the manual ADMIN score-override write path) was lifted
   80% → 96.66% branch by adding the cross-org 403 tenant-isolation case and the
@@ -122,10 +123,14 @@ score and tenant boundaries defensible.
   list admin-org vs own-sessions branches); the two `scenarios*` routes joined
   by covering the GET list + GET-by-id — every org-scoped query shape and the
   trainee/admin sanitizer (persona / objective / **hints** stay server-side) —
-  `scenarios` at 100% branch, `scenarios/[id]` at ~96%. NOT yet gated (below the
-  branch floor, needs more tests first): `jobs/[id]/criteria` — the last route
-  outside the gate. Remaining: raise it over the floor, then retire the
-  credential-bound `tests/integration` tier + the P1-7 `DISABLE_AUTH` crutch.)*
+  `scenarios` at 100% branch, `scenarios/[id]` at ~96%. `jobs/[id]/criteria` —
+  the last route outside the gate — joined at 60% → **100% branch** by covering
+  its previously-untested DELETE unlink handler (own-org-admin-only; global
+  catalog protected) plus the GET/POST auth-401 + 500 boundaries and the POST
+  idempotent-relink path. **The `src/app/api/**` coverage-gate sweep is now
+  COMPLETE — every API route sits under the deterministic gate.** Remaining:
+  retire the credential-bound `tests/integration` tier + the P1-7 `DISABLE_AUTH`
+  crutch — now unblocked.)*
 - [ ] **P2-8 Test the voice/phone path.** No tests for `api/telnyx/call`,
   `api/telnyx/webhook`, `useChatSession`, or any interface component — the
   differentiating feature is nearly untested.

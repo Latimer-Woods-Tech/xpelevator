@@ -23,18 +23,18 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * creds — the pattern that replaces the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
- * Routes under the gate (20): `analytics`, `analytics/latency`, `plans`, `me`,
+ * Routes under the gate (21): `analytics`, `analytics/latency`, `plans`, `me`,
  * `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
  * `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
  * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`,
  * `scenario-packs/upgrade`, `telnyx/call`, `simulations`, `scenarios`,
- * `scenarios/[id]` (each ≥ the floors — the two `scenarios*` routes joined this
- * slice: GET list + GET-by-id now cover every org-scoped query shape and the
- * trainee/admin sanitizer, so `scenarios` is at 100% branch and `scenarios/[id]`
- * at ~96%). NOT yet gated because it sits below the 85% branch floor and needs
- * more deterministic tests first: `jobs/[id]/criteria`. Retiring the
- * credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch (P1-7)
- * follows once the remaining routes finish the sweep.
+ * `scenarios/[id]`, `jobs/[id]/criteria` (each ≥ the floors — `jobs/[id]/criteria`
+ * joined this slice: its DELETE handler + the GET/POST auth-401 and 500 boundaries
+ * + POST idempotent-relink path were previously untested, so it now covers every
+ * unlink-guard branch, 100% branch). **The `src/app/api/**` coverage-gate sweep is
+ * COMPLETE — every API route now sits under the deterministic gate.** Retiring the
+ * credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch (P1-7) is
+ * now unblocked.
  *
  * Thresholds sit below the currently-achieved numbers (lines ~97, branches ~91,
  * functions ~99) so ordinary edits don't flake the gate, while still catching a
@@ -105,6 +105,10 @@ export default defineConfig({
         // PUT/DELETE global-catalog protection + all auth/500 boundaries covered.
         'src/app/api/scenarios/route.ts',
         'src/app/api/scenarios/[id]/route.ts',
+        // Job↔criteria link CRUD — the LAST route to join the gate. GET/POST
+        // cross-tenant read/link IDOR guards + the DELETE unlink guards (own-org
+        // admin only; global catalog protected) all covered → sweep complete.
+        'src/app/api/jobs/[id]/criteria/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',
