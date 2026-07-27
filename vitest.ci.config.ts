@@ -23,15 +23,16 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * creds — the pattern that replaces the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
- * Routes under the gate (17): `analytics`, `analytics/latency`, `plans`, `me`,
+ * Routes under the gate (18): `analytics`, `analytics/latency`, `plans`, `me`,
  * `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
  * `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
  * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`,
- * `scenario-packs/upgrade`, `telnyx/call` (each ≥ the floors — `telnyx/call` at
- * 100% branch after the caller-supplied-`from` / CF-runtime-binding / no-from-number
- * (400) / 500-Error-vs-non-Error error-boundary cases added this slice). NOT yet
+ * `scenario-packs/upgrade`, `telnyx/call`, `simulations` (each ≥ the floors —
+ * `simulations` at 94% branch after this slice added the POST guard branches
+ * (auth/validation/not-found/cross-tenant/daily-cap/500) + the previously
+ * untested GET list handler's admin-org vs own-sessions branches). NOT yet
  * gated because they sit below the 85% branch floor and need more deterministic
- * tests first: `simulations` (~44%), `scenarios*`, `jobs/[id]/criteria`. Retiring the
+ * tests first: `scenarios*`, `jobs/[id]/criteria`. Retiring the
  * credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch (P1-7)
  * follows once the remaining routes finish the sweep.
  *
@@ -91,6 +92,12 @@ export default defineConfig({
         // at the money point, plus the from-number resolution (caller / CF binding /
         // process.env) and the 500 error boundary — all branches now covered.
         'src/app/api/telnyx/call/route.ts',
+        // Core session-create + list write path (the last core write route to
+        // join the gate): POST guards (auth/validation/not-found/cross-tenant/
+        // daily-cap/500) + per-seat modality gate, and the GET list's admin-org
+        // vs own-sessions branches with hidden-script sanitization — 94% branch
+        // (only the NODE_ENV==='production' detail-suppression ternaries remain).
+        'src/app/api/simulations/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',
