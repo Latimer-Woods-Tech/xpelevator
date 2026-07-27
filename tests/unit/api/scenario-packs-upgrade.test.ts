@@ -96,6 +96,20 @@ describe('POST /api/scenario-packs/upgrade — validation', () => {
     expect(sqlMock).not.toHaveBeenCalled();
   });
 
+  it('invalid JSON body → 400 (never touches the DB)', async () => {
+    asAdmin();
+    // A syntactically-broken body — request.json() throws, caught into a 400.
+    const badReq = new Request('http://localhost/api/scenario-packs/upgrade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{not valid json',
+    });
+    const res = await POST(badReq);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'Invalid JSON body' });
+    expect(sqlMock).not.toHaveBeenCalled();
+  });
+
   it('unknown packId → 404', async () => {
     asAdmin();
     const res = await POST(req({ packId: 'no-such-pack' }));
@@ -225,5 +239,86 @@ describe('POST /api/scenario-packs/upgrade — write path', () => {
     sqlMock.mockRejectedValue(new Error('neon down'));
     const res = await POST(req({ packId: PACK.id }));
     expect(res.status).toBe(500);
+  });
+});
+
+describe('POST /api/scenario-packs/upgrade — edge branches', () => {
+  it('a stored row with a NULL pack_version is treated as stale → UPDATE', async () => {
+    // Exercises the `packVersion == null ? null : Number(...)` map for a row the
+    // DB stored before versions were stamped: it must be counted as an update,
+    // not silently left unchanged (that would strand it below the catalog).
+    asAdmin('org-1');
+    routeSql([
+      [
+        /SELECT source_scenario_key/,
+        () => [
+          { sourceScenarioKey: KEYS[0], packVersion: null },
+          ...KEYS.slice(1).map((k) => ({ sourceScenarioKey: k, packVersion: PACK_CATALOG_VERSION })),
+        ],
+      ],
+      [/UPDATE scenarios SET/, () => [{ id: 'sc-updated' }]],
+    ]);
+    const res = await POST(req({ packId: PACK.id }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.scenarios.updated).toBe(1);
+    expect(body.scenarios.unchanged).toBe(KEYS.length - 1);
+  });
+
+  it('an UPDATE that matches no row is not counted (updated stays 0)', async () => {
+    // A stale plan whose UPDATE returns zero rows (e.g. the row was deleted
+    // between the read and the write) must not inflate the updated count.
+    asAdmin('org-1');
+    routeSql([
+      [
+        /SELECT source_scenario_key/,
+        () => KEYS.map((k) => ({ sourceScenarioKey: k, packVersion: PACK_CATALOG_VERSION - 1 })),
+      ],
+      [/UPDATE scenarios SET/, () => []], // RETURNING id → no row matched
+    ]);
+    const res = await POST(req({ packId: PACK.id }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.scenarios.updated).toBe(0);
+    expect(body.scenarios.inserted).toBe(0);
+  });
+
+  it('a needed insert with no resolvable pack job title → skipped, inserted 0', async () => {
+    // toInsert is non-empty but the org has no pack-provenanced job_titles row to
+    // hang the new scenario on → the insert loop is skipped and no INSERT runs.
+    asAdmin('org-1');
+    routeSql([
+      [
+        /SELECT source_scenario_key/,
+        () => KEYS.slice(1).map((k) => ({ sourceScenarioKey: k, packVersion: PACK_CATALOG_VERSION })),
+      ],
+      [/SELECT id FROM job_titles/, () => []], // no pack role resolved
+    ]);
+    const res = await POST(req({ packId: PACK.id }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.scenarios.inserted).toBe(0);
+    const issued = sqlMock.mock.calls
+      .map((c) => (Array.isArray(c[0]) ? c[0].join(' ') : ''))
+      .join(' ');
+    expect(issued).not.toMatch(/INSERT INTO scenarios/i);
+  });
+
+  it('an insert that hits ON CONFLICT DO NOTHING is not counted (inserted stays 0)', async () => {
+    // The insert is idempotent — a concurrent import already landed the row, so
+    // RETURNING id comes back empty and inserted must not increment.
+    asAdmin('org-1');
+    routeSql([
+      [
+        /SELECT source_scenario_key/,
+        () => KEYS.slice(1).map((k) => ({ sourceScenarioKey: k, packVersion: PACK_CATALOG_VERSION })),
+      ],
+      [/SELECT id FROM job_titles/, () => [{ id: 'jt-1' }]],
+      [/INSERT INTO scenarios/, () => []], // ON CONFLICT DO NOTHING → no row returned
+    ]);
+    const res = await POST(req({ packId: PACK.id }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.scenarios.inserted).toBe(0);
   });
 });

@@ -23,17 +23,17 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * creds — the pattern that replaces the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
- * Routes under the gate (15): `analytics`, `analytics/latency`, `plans`, `me`,
+ * Routes under the gate (16): `analytics`, `analytics/latency`, `plans`, `me`,
  * `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
  * `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
- * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`
- * (each ≥ the floors — `scoring` at 96.66% branch after the tenant-isolation +
- * failure-path cases added this slice). NOT yet gated because they sit below the
- * 85% branch floor and need more deterministic tests first: `simulations`
- * (~44%), `scenario-packs/upgrade` (~81%), `telnyx/call` (~81%), `scenarios*`,
- * `jobs/[id]/criteria`. Retiring the credential-bound `tests/integration`
- * tier + the `DISABLE_AUTH` crutch (P1-7) follows once the remaining routes
- * finish the sweep.
+ * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`,
+ * `scenario-packs/upgrade` (each ≥ the floors — `scenario-packs/upgrade` at 100%
+ * branch after the null-version / no-match-UPDATE / no-job-title / ON-CONFLICT
+ * cases added this slice). NOT yet gated because they sit below the 85% branch
+ * floor and need more deterministic tests first: `simulations` (~44%),
+ * `telnyx/call` (~81%), `scenarios*`, `jobs/[id]/criteria`. Retiring the
+ * credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch (P1-7)
+ * follows once the remaining routes finish the sweep.
  *
  * Thresholds sit below the currently-achieved numbers (lines ~97, branches ~91,
  * functions ~99) so ordinary edits don't flake the gate, while still catching a
@@ -83,6 +83,10 @@ export default defineConfig({
         // Manual score-override write path — ADMIN-only, tenant-scoped; the
         // rows it writes feed analytics + the operator-facing manager reports.
         'src/app/api/scoring/route.ts',
+        // Opt-in pack re-sync (R-047 counterpart to the frozen import) — ADMIN-only,
+        // tenant + provenance scoped; every write branch (stale UPDATE, idempotent
+        // INSERT, orphan-report) now deterministically covered.
+        'src/app/api/scenario-packs/upgrade/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',
