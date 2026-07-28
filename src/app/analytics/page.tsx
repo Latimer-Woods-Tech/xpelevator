@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { PageShell, Container, Button, ButtonLink } from '@/components/ui';
 import { TopNav } from '@/components/ui/TopNav';
-import { PhoneIcon, ChatIcon, AlertTriangleIcon } from '@/components/ui/icons';
+import { PhoneIcon, ChatIcon, HeadsetIcon, AlertTriangleIcon } from '@/components/ui/icons';
 import { scoreBarClass, scoreTextClass } from '@/lib/score-color';
 
 interface TrendPoint {
@@ -27,7 +27,7 @@ interface CriteriaBreakdown {
 }
 
 interface TypeBreakdown {
-  type: 'PHONE' | 'CHAT';
+  type: 'PHONE' | 'CHAT' | 'VOICE';
   sessions: number;
   avg: number | null;
 }
@@ -307,15 +307,17 @@ export default function AnalyticsPage() {
               )}
             </Section>
 
-            {/* ── By simulation type ───────────────────────────────────────── */}
-            <Section title="Phone vs Chat">
-              <div className="grid grid-cols-2 gap-6">
+            {/* ── By simulation type (modality) ────────────────────────────── */}
+            <Section title="Performance by Modality">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                 {data.byType.map(t => (
                   <div key={t.type} className="space-y-2">
                     <div className="flex items-center gap-2 text-sm font-medium">
                       {t.type === 'PHONE'
                         ? <PhoneIcon className="h-4 w-4 text-brand-soft" />
-                        : <ChatIcon className="h-4 w-4 text-brand-soft" />}
+                        : t.type === 'VOICE'
+                          ? <HeadsetIcon className="h-4 w-4 text-brand-soft" />
+                          : <ChatIcon className="h-4 w-4 text-brand-soft" />}
                       <span>{t.type}</span>
                       <span className="text-slate-400 font-normal">— {t.sessions} sessions</span>
                     </div>
