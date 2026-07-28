@@ -484,6 +484,34 @@ describe('lib/ai — scoreSession', () => {
     expect(result).toHaveLength(1); // only the valid one
     expect(result[0].criteriaId).toBe('c1');
   });
+
+  it('emits at most one score per criterion when the judge duplicates a row', async () => {
+    // The judge (or parseScoreRows' salvage path) occasionally returns the same
+    // criteriaIndex twice. Two rows for one criteria_id would be inserted as two
+    // score rows and double-count that criterion's weight in the weighted average
+    // (sum(score*weight)/sum(weight)) — silently skewing the /10. Keep the FIRST.
+    const raw = JSON.stringify([
+      { criteriaIndex: 1, score: 9, justification: 'First judgment.' },
+      { criteriaIndex: 1, score: 2, justification: 'Duplicate — must be dropped.' },
+      { criteriaIndex: 2, score: 6, justification: 'Resolution partial.' },
+    ]);
+    fetchMock.mockResolvedValueOnce(completionResponse(raw));
+
+    const result = await scoreSession(
+      [
+        { role: 'CUSTOMER' as const, content: 'My internet is down.' },
+        { role: 'AGENT' as const, content: 'Let me help.' },
+      ],
+      SAMPLE_CRITERIA
+    );
+
+    // Exactly one row per criterion — no double-counted weight downstream.
+    expect(result).toHaveLength(2);
+    expect(result.filter(r => r.criteriaId === 'c1')).toHaveLength(1);
+    // The FIRST occurrence wins (score 9), not the later duplicate (score 2).
+    expect(result[0]).toMatchObject({ criteriaId: 'c1', score: 9 });
+    expect(result[1]).toMatchObject({ criteriaId: 'c2', score: 6 });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
