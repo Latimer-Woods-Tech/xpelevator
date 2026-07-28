@@ -40,10 +40,12 @@ describe('computeAnalytics', () => {
     expect(out.scoreTrend).toEqual([]);
     expect(out.byJobTitle).toEqual([]);
     expect(out.byCriteria).toEqual([]);
-    // byType always reports the two headline modalities, even at zero volume.
+    // byType always reports EVERY modality (PHONE | CHAT | VOICE), even at zero
+    // volume — VOICE is a first-class type and must never be dropped.
     expect(out.byType).toEqual([
       { type: 'PHONE', sessions: 0, avg: null },
       { type: 'CHAT', sessions: 0, avg: null },
+      { type: 'VOICE', sessions: 0, avg: null },
     ]);
   });
 
@@ -195,10 +197,33 @@ describe('computeAnalytics', () => {
       ],
       NOW,
     );
-    // CHAT weighted: (4*1 + 6*3)/(1+3) = 22/4 = 5.5
+    // CHAT weighted: (4*1 + 6*3)/(1+3) = 22/4 = 5.5; VOICE present at zero volume.
     expect(out.byType).toEqual([
       { type: 'PHONE', sessions: 1, avg: 8 },
       { type: 'CHAT', sessions: 2, avg: 5.5 },
+      { type: 'VOICE', sessions: 0, avg: null },
     ]);
+  });
+
+  it('counts VOICE sessions in the modality breakdown and reconciles with totalSessions', () => {
+    // Regression: browser-voice (VOICE) is a first-class shipped modality, but
+    // `byType` previously filtered only PHONE and CHAT — so every VOICE session's
+    // count and scores silently vanished from the manager's per-modality view and
+    // `sum(byType.sessions)` no longer matched `totalSessions`.
+    const out = computeAnalytics(
+      [
+        session({ type: 'PHONE', scores: [score('c1', 'A', 1, 8)] }),
+        session({ type: 'CHAT', scores: [score('c1', 'A', 1, 4)] }),
+        session({ type: 'VOICE', scores: [score('c1', 'A', 1, 9)] }),
+        session({ type: 'VOICE', scores: [score('c1', 'A', 3, 5)] }),
+      ],
+      NOW,
+    );
+    const voice = out.byType.find(t => t.type === 'VOICE');
+    // VOICE weighted: (9*1 + 5*3)/(1+3) = 24/4 = 6
+    expect(voice).toEqual({ type: 'VOICE', sessions: 2, avg: 6 });
+    // The modality breakdown accounts for every session — no modality is dropped.
+    const modalityTotal = out.byType.reduce((n, t) => n + t.sessions, 0);
+    expect(modalityTotal).toBe(out.totalSessions);
   });
 });

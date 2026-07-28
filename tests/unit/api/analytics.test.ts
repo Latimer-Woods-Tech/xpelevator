@@ -119,7 +119,7 @@ describe('GET /api/analytics', () => {
     // Route glue produced the full dashboard shape from the fixture rows.
     expect(body.totalSessions).toBe(2);
     expect(typeof body.overallAvg).toBe('number');
-    expect(body.byType.map((t: { type: string }) => t.type).sort()).toEqual(['CHAT', 'PHONE']);
+    expect(body.byType.map((t: { type: string }) => t.type).sort()).toEqual(['CHAT', 'PHONE', 'VOICE']);
     expect(body.byJobTitle).toHaveLength(1);
     expect(body.byJobTitle[0].name).toBe('Sales');
   });

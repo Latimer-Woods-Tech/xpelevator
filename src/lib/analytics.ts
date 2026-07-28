@@ -70,6 +70,14 @@ export interface AnalyticsSummary {
 export const TREND_WINDOW_DAYS = 60;
 
 /**
+ * The canonical practice modalities, in dashboard display order. Mirrors the
+ * Prisma `SimulationType` enum (PHONE | CHAT | VOICE) so the by-modality
+ * breakdown always covers exactly the product's modalities and can never drift
+ * from — or silently drop — one of them.
+ */
+export const MODALITIES = ['PHONE', 'CHAT', 'VOICE'] as const;
+
+/**
  * Reduce a caller's completed sessions into the analytics dashboard payload.
  *
  * @param sessions completed, tenant-scoped sessions (already filtered by the route)
@@ -179,18 +187,24 @@ export function computeAnalytics(sessions: SessionFull[], now: Date): AnalyticsS
     }))
     .sort((a, b) => (a.avg ?? 0) - (b.avg ?? 0));
 
-  // ── Type breakdown ────────────────────────────────────────────────────────
-  const phoneSessions = sessions.filter((s) => s.type === 'PHONE');
-  const chatSessions = sessions.filter((s) => s.type === 'CHAT');
+  // ── Type (modality) breakdown ─────────────────────────────────────────────
+  // The product ships THREE modalities (Prisma `SimulationType`: PHONE | CHAT |
+  // VOICE — browser voice is a first-class, admin-selectable type). Deriving the
+  // rows from this canonical list, rather than filtering two hard-coded types,
+  // guarantees the by-modality view can never silently drop a modality: VOICE
+  // was previously omitted, so every VOICE session's count + scores vanished
+  // from the manager breakdown and `sum(byType.sessions)` no longer reconciled
+  // with `totalSessions`. A row is always emitted per modality, even at zero
+  // volume, so the dashboard shape stays stable.
   const typeAvg = (arr: SessionFull[]) => {
     const sc: ScoreFull[] = arr.flatMap((s) => s.scores);
     const wSum = sc.reduce((sum, s) => sum + s.criteria.weight, 0);
     return wSum > 0 ? sc.reduce((sum, s) => sum + s.score * s.criteria.weight, 0) / wSum : null;
   };
-  const byType = [
-    { type: 'PHONE', sessions: phoneSessions.length, avg: typeAvg(phoneSessions) },
-    { type: 'CHAT', sessions: chatSessions.length, avg: typeAvg(chatSessions) },
-  ];
+  const byType = MODALITIES.map((type) => {
+    const arr = sessions.filter((s) => s.type === type);
+    return { type, sessions: arr.length, avg: typeAvg(arr) };
+  });
 
   return {
     totalSessions,
