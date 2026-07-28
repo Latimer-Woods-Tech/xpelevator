@@ -19,6 +19,7 @@ import {
   isStartSignal,
   isEndSignal,
   isControlSignal,
+  stripEndSignal,
 } from '@/lib/limits';
 
 describe('limits constants', () => {
@@ -74,6 +75,18 @@ describe('lifecycle control signals', () => {
     expect(isEndSignal('I would like to end this now')).toBe(false);
   });
 
+  it('recognizes a trailing [END] token appended to real closing prose', () => {
+    // Regression: a trainee who closes with words + the token ("Thanks [END]")
+    // previously was NOT an end signal, so the session silently continued.
+    expect(isEndSignal('Thanks for your patience [END]')).toBe(true);
+    expect(isEndSignal('That resolves it, goodbye [end]')).toBe(true);
+    expect(isEndSignal('Thanks for your patience [END]  ')).toBe(true);
+    // The token must be TRAILING — a bare mention mid-sentence is not an end.
+    expect(isEndSignal('Press [END] to stop, but keep going for now')).toBe(false);
+    // "end conversation" stays an EXACT phrase, not a substring.
+    expect(isEndSignal('I would like to end conversation soon')).toBe(false);
+  });
+
   it('treats both signals as control signals; a normal reply is not', () => {
     expect(isControlSignal('[START]')).toBe(true);
     expect(isControlSignal('[END]')).toBe(true);
@@ -82,6 +95,23 @@ describe('lifecycle control signals', () => {
     // throttled) — this is the regression guard for the canary 429-on-END bug.
     expect(isControlSignal('Thanks, that resolves my issue.')).toBe(false);
     expect(isControlSignal('')).toBe(false);
+  });
+});
+
+describe('stripEndSignal', () => {
+  it('recovers the closing prose from a prose + [END] message', () => {
+    expect(stripEndSignal('Thanks for your patience [END]')).toBe(
+      'Thanks for your patience'
+    );
+    expect(stripEndSignal('That resolves it, goodbye [end]  ')).toBe(
+      'That resolves it, goodbye'
+    );
+  });
+
+  it('yields "" for a bare control token (nothing scorable to persist)', () => {
+    expect(stripEndSignal('[END]')).toBe('');
+    expect(stripEndSignal('  [end]  ')).toBe('');
+    expect(stripEndSignal('End Conversation')).toBe('');
   });
 });
 

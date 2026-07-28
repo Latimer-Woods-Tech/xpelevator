@@ -76,10 +76,30 @@ export function isStartSignal(content: string): boolean {
 /**
  * `[END]` (or the natural-language "end conversation") terminates a session and
  * triggers scoring. Case-insensitive so a trainee typing the phrase is honored.
+ *
+ * The `[END]` control token is recognized as a *trailing* marker, so a trainee
+ * who closes with real words — e.g. "Thanks for your patience [END]" — still
+ * ends the session (previously only a bare `[END]` was honored, so a prose+token
+ * closing silently continued the conversation). Use {@link stripEndSignal} to
+ * recover the closing prose for the transcript + scoring.
  */
 export function isEndSignal(content: string): boolean {
   const t = content.trim();
-  return t.toUpperCase() === '[END]' || t.toLowerCase() === 'end conversation';
+  return t.toLowerCase() === 'end conversation' || /\[END\]\s*$/i.test(t);
+}
+
+/**
+ * Removes a trailing `[END]` control token (case-insensitive, with surrounding
+ * whitespace) — and the exact natural-language "end conversation" phrase — from a
+ * trainee's closing message, returning the residual prose (trimmed). A bare
+ * `[END]` or "end conversation" yields `""`. Used so a closing like
+ * "Thanks for your patience [END]" is persisted + scored on its words, never the
+ * control token, and a bare token contributes no scorable turn.
+ */
+export function stripEndSignal(content: string): string {
+  const t = content.trim();
+  if (t.toLowerCase() === 'end conversation') return '';
+  return t.replace(/\s*\[END\]\s*$/i, '').trim();
 }
 
 /**

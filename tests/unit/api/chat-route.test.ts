@@ -306,6 +306,48 @@ describe('POST /api/chat — streaming + terminal', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ended: true });
     expect(scoringMock).toHaveBeenCalledTimes(1);
+    // Regression: a BARE control token must NOT be persisted as a trainee turn —
+    // otherwise a literal "[END]" AGENT row lands in the transcript operators
+    // review + export (the CSV artifact). No AGENT INSERT should have fired.
+    const agentInsert = sqlMock.mock.calls.find(c =>
+      String((c[0] as unknown as string[]).join(' ')).includes("'AGENT'")
+    );
+    expect(agentInsert).toBeUndefined();
+    // And the bare token adds no scorable turn to the transcript.
+    const scored = scoringMock.mock.calls[0][1] as Array<{ role: string; content: string }>;
+    expect(scored.some(m => m.content.includes('[END]'))).toBe(false);
+  });
+
+  it('[END] appended to closing prose ends + scores on the words, not the token', async () => {
+    asUser('u1', 'o1');
+    wireSql({
+      postLoad: [
+        sessionRow({
+          messages: [{ role: 'CUSTOMER', content: 'Is my issue resolved?' }],
+        }),
+      ],
+      insertAgent: [],
+      endFinal: [{ id: 'sess1', status: 'COMPLETED', scoringStatus: 'SCORED', scenario: {}, jobTitle: {}, messages: [], scores: [] }],
+    });
+    const res = await POST(
+      postReq({ sessionId: 'sess1', content: 'Thanks for your patience [END]' })
+    );
+    // A prose + trailing-token close now terminates the session (previously it
+    // was unrecognized and silently continued the conversation).
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ended: true });
+    expect(aiMock.streamNextCustomerMessage).not.toHaveBeenCalled();
+    expect(scoringMock).toHaveBeenCalledTimes(1);
+    // The closing turn is persisted + scored on the STRIPPED prose, never the
+    // control token.
+    const agentInsert = sqlMock.mock.calls.find(c =>
+      String((c[0] as unknown as string[]).join(' ')).includes("'AGENT'")
+    );
+    expect(agentInsert).toBeDefined();
+    expect(agentInsert?.[2]).toBe('Thanks for your patience');
+    const scored = scoringMock.mock.calls[0][1] as Array<{ role: string; content: string }>;
+    expect(scored).toContainEqual({ role: 'AGENT', content: 'Thanks for your patience' });
+    expect(scored.some(m => m.content.includes('[END]'))).toBe(false);
   });
 
   it('maxTurns reached auto-ends the session', async () => {

@@ -16,6 +16,7 @@ import {
   isStartSignal,
   isEndSignal,
   isControlSignal,
+  stripEndSignal,
 } from '@/lib/limits';
 import { finalizeAndScoreSession } from '@/lib/session-scoring';
 
@@ -110,6 +111,12 @@ export async function POST(request: Request) {
     const trimmed = content.trim();
     const isStart = isStartSignal(content);
     const isEnd = isEndSignal(content);
+    // A trainee may close with prose + the control token, e.g.
+    // "Thanks for your patience [END]". `endProse` is that closing stripped of
+    // the `[END]` marker — persisted + scored as the final trainee turn. A bare
+    // `[END]` (or "end conversation") yields "" → no scorable/persisted turn, so
+    // the control token never lands in the transcript operators review + export.
+    const endProse = isEnd ? stripEndSignal(content) : '';
 
     // Turn throttle: a human can't reply in under MIN_TURN_INTERVAL_MS; a
     // script hammering the endpoint burns Groq tokens. Enforced against DB
@@ -134,17 +141,29 @@ export async function POST(request: Request) {
     // a Neon round-trip off the pre-first-token path — the latency the trainee
     // actually feels. On terminal branches (end/maxTurns) we await before
     // scoring so the transcript read is durable.
-    const agentInsertPromise = isStart
-      ? null
-      : sql`
+    // The content persisted as this trainee turn: [START] inserts nothing; an
+    // [END] turn inserts only its token-stripped closing prose (skipped when the
+    // token stands alone, `endProse === ''`); a normal turn inserts the message.
+    const persistedTurn = isStart ? null : isEnd ? endProse || null : trimmed;
+    const agentInsertPromise = persistedTurn
+      ? sql`
         INSERT INTO chat_messages (id, session_id, role, content, timestamp)
-        VALUES (gen_random_uuid(), ${sessionId}, 'AGENT', ${trimmed}, NOW())
-      `;
+        VALUES (gen_random_uuid(), ${sessionId}, 'AGENT', ${persistedTurn}, NOW())
+      `
+      : null;
 
     // ── 3. Check for end signal ───────────────────────────────────────────────
     if (isEnd) {
       if (agentInsertPromise) await agentInsertPromise;
-      return await endSession(sessionId, session as any);
+      // session.messages was loaded BEFORE this closing turn's INSERT. Include
+      // the trainee's closing prose in the scored transcript so an [END] with
+      // real words is scored on those words — mirroring the [RESOLVED] (reload)
+      // and maxTurns (append) paths so all three end paths score the same,
+      // complete transcript. A bare token (endProse === '') adds no turn.
+      const endedSession = endProse
+        ? { ...session, messages: [...session.messages, { role: 'AGENT', content: endProse }] }
+        : session;
+      return await endSession(sessionId, endedSession as any);
     }
 
     // ── 3.5. Enforce maxTurns ─────────────────────────────────────────────────
