@@ -147,9 +147,14 @@ score and tenant boundaries defensible.
   now maps `AuthError` → **401** (mirroring GET) instead of masking it as a 500,
   with a proof-of-rejection test. The `src/app/api/**` surface is now fully
   gated.)*
-- [ ] **P2-8 Test the voice/phone path.** No tests for `api/telnyx/call`,
-  `api/telnyx/webhook`, `useChatSession`, or any interface component — the
-  differentiating feature is nearly untested.
+- [ ] **P2-8 Test the voice/phone path.** *(In progress.)* Both server routes
+  are now under the deterministic CI coverage gate: `api/telnyx/call` (the
+  billable outbound dial, gated in P2-7) and `api/telnyx/webhook` (the ~474-line
+  inbound Call Control control loop — 27 cases: signature 401 / malformed 400,
+  the answered-opening + idempotency skip + speak-failure fallback,
+  speak.ended listen-or-hangup, the transcription turn incl. noise re-listen and
+  the `[RESOLVED]` finalize+score, and hangup→ABANDONED; 88.5% branch). Remaining:
+  `useChatSession` and the interface components — still untested.
 - [x] **P2-9 Repo cleanup.** Delete ~23 committed build logs
   (`*.log`, `*.exit`, `build-output*.txt`, `hi.*`, `which.log`), the `.bak`
   test, `fix-data.sql`, `install.bat`, `wait-and-test.py`, `validate.mjs`

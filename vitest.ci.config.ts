@@ -94,6 +94,14 @@ export default defineConfig({
         // at the money point, plus the from-number resolution (caller / CF binding /
         // process.env) and the 500 error boundary — all branches now covered.
         'src/app/api/telnyx/call/route.ts',
+        // Inbound Call Control webhook — the PHONE modality's control loop
+        // (~474 lines): malformed-JSON 400, Ed25519 signature 401 (fail closed),
+        // the call.answered opening + idempotency skip + speak-failure fallback,
+        // call.speak.ended listen/hangup, the call.transcription turn (partials
+        // ignored, noise re-listen, STT→model→speak, [RESOLVED] finalize+score),
+        // and call.hangup → ABANDONED. First deterministic coverage of the
+        // differentiating voice path (P2-8).
+        'src/app/api/telnyx/webhook/route.ts',
         // Core session-create + list write path (the last core write route to
         // join the gate): POST guards (auth/validation/not-found/cross-tenant/
         // daily-cap/500) + per-seat modality gate, and the GET list's admin-org
