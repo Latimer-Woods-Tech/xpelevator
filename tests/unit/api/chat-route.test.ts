@@ -328,6 +328,12 @@ describe('POST /api/chat — streaming + terminal', () => {
     expect(scoringMock).toHaveBeenCalledTimes(1);
     // The LLM was never invoked — the turn ended before streaming.
     expect(aiMock.streamNextCustomerMessage).not.toHaveBeenCalled();
+    // Regression: the trainee's FINAL turn ("one more") — the one that hit the
+    // cap — must be in the scored transcript, not dropped. It was loaded before
+    // this turn's INSERT, so the route has to append it (as [RESOLVED]/phone do).
+    const scoredTranscript = scoringMock.mock.calls[0][1] as Array<{ role: string; content: string }>;
+    expect(scoredTranscript).toContainEqual({ role: 'AGENT', content: 'one more' });
+    expect(scoredTranscript).toContainEqual({ role: 'AGENT', content: 'earlier reply' });
   });
 
   it('mid-stream LLM failure emits an error SSE frame and closes cleanly', async () => {
