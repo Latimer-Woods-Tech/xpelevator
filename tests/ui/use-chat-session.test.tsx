@@ -222,11 +222,11 @@ describe('useChatSession — sendMessage streaming', () => {
     expect(result.current.lastAiMessage).toBe('Hi, I need help.');
   });
 
-  it('ignores malformed SSE lines and swallows a mid-stream error frame (pins current behavior)', async () => {
-    // NOTE: the `type:'error'` branch `throw`s inside the same per-line try/catch
-    // that skips malformed JSON, so the throw is swallowed and `error` is NOT
-    // surfaced to the caller. This asserts the CURRENT behavior — a candidate
-    // correctness fix tracked as a follow-up slice, not a desired contract.
+  it('skips malformed SSE lines but surfaces a mid-stream error frame to the caller', async () => {
+    // A malformed `data:` line is skipped (the per-line try/catch swallows the
+    // JSON.parse failure), but an explicit `type:'error'` frame is NOT swallowed:
+    // it aborts the stream and surfaces `data.message` as `error`. Any frame
+    // after the error (the `done` below) must NOT be processed.
     const post = () =>
       sseResponse([
         'data: not-json\n\n',
@@ -240,8 +240,24 @@ describe('useChatSession — sendMessage streaming', () => {
       await result.current.sendMessage('hello');
     });
 
-    expect(result.current.error).toBeNull(); // swallowed, not surfaced
-    expect(result.current.lastAiMessage).toBe('recovered reply.');
+    expect(result.current.error).toBe('boom'); // surfaced, not swallowed
+    expect(result.current.lastAiMessage).toBeNull(); // stream aborted before `done`
+    expect(result.current.sending).toBe(false);
+  });
+
+  it('surfaces a mid-stream error frame with a fallback message when none is given', async () => {
+    const post = () =>
+      sseResponse([
+        frame({ type: 'chunk', content: 'partial ' }),
+        frame({ type: 'error' }),
+      ]);
+    const { result } = await mounted(post);
+
+    await act(async () => {
+      await result.current.sendMessage('hello');
+    });
+
+    expect(result.current.error).toBe('Stream error');
     expect(result.current.sending).toBe(false);
   });
 
