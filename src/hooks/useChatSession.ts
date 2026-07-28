@@ -129,6 +129,12 @@ export function useChatSession(sessionId: string): ChatSessionState {
             if (chunks.length) setSpeechChunks(prev => [...prev, ...chunks]);
           };
 
+          // An explicit `error` SSE frame must surface to the caller. It is
+          // captured here (not thrown inside the per-line try/catch, which
+          // exists only to skip malformed JSON and would otherwise swallow it)
+          // and re-thrown just below to reach the outer catch → setError.
+          let streamError: Error | null = null;
+
           outer: while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -192,12 +198,20 @@ export function useChatSession(sessionId: string): ChatSessionState {
                   setEnded(true);
                   break outer;
                 } else if (data.type === 'error') {
-                  throw new Error(data.message);
+                  streamError = new Error(
+                    typeof data.message === 'string' && data.message
+                      ? data.message
+                      : 'Stream error'
+                  );
+                  break;
                 }
               } catch {
                 // skip malformed SSE lines
               }
             }
+
+            // Re-thrown outside the per-line try/catch so it is not swallowed.
+            if (streamError) throw streamError;
           }
         } else {
           // Non-streaming end-session response
