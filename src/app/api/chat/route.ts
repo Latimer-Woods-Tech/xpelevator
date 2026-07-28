@@ -160,7 +160,18 @@ export async function POST(request: Request) {
         if (priorAgentTurns + 1 >= maxTurns) {
           console.log(`[Chat API] maxTurns (${maxTurns}) reached — auto-ending session`);
           if (agentInsertPromise) await agentInsertPromise;
-          return await endSession(sessionId, session as any);
+          // session.messages was loaded BEFORE this final trainee turn was saved,
+          // so include it in the transcript scored here. Without this, a session
+          // that ends by hitting the turn cap drops the trainee's closing message
+          // from the /10 scoring — mis-scoring the core loop. This mirrors the
+          // [RESOLVED] path (which reloads the transcript for exactly this reason)
+          // and the phone path (fresh DB load); maxTurns was the only auto-end
+          // that scored a stale, one-turn-short transcript.
+          const endedSession = {
+            ...session,
+            messages: [...session.messages, { role: 'AGENT', content: trimmed }],
+          };
+          return await endSession(sessionId, endedSession as any);
         }
       }
     }
