@@ -649,6 +649,49 @@ describe('lib/ai — streamNextCustomerMessage', () => {
     expect(sent.model).toBe('llama-3.1-8b-instant');
     expect(sent.stream).toBe(true);
   });
+
+  // ── Graceful degradation: a failed/empty customer turn must never leak ──────
+  // internal error detail or the banned "AI" token to the trainee. Regression
+  // guard for the old catch path, which yielded `[AI Error: ${msg}]` — a
+  // user-facing surface (streamed to the trainee AND persisted as the customer
+  // turn that scoring reads) that both leaked transport internals and violated
+  // the org copy rule (#16 Phase 4: no "AI" in user-facing copy).
+  it('never leaks internal error detail or the banned "AI" token on a Groq failure', async () => {
+    // Non-OK Groq response → chatCompletionStream throws an error whose message
+    // carries upstream detail the trainee must never see.
+    fetchMock.mockResolvedValueOnce(
+      new Response('secret-upstream-detail', { status: 429 })
+    );
+
+    const tokens: string[] = [];
+    for await (const token of streamNextCustomerMessage('prompt', [])) {
+      tokens.push(token);
+    }
+    const output = tokens.join('');
+
+    // Degrades to a single, in-character fallback turn...
+    expect(output.trim().length).toBeGreaterThan(0);
+    // ...that carries NO internal detail and NOT the banned "AI" token.
+    expect(output).not.toContain('AI');
+    expect(output).not.toContain('[AI Error');
+    expect(output).not.toContain('429');
+    expect(output).not.toContain('secret-upstream-detail');
+    expect(output).not.toMatch(/Groq/i);
+  });
+
+  it('falls back in-character (no "AI" token) when the model stream yields nothing', async () => {
+    // Empty stream (only [DONE], no content deltas) → the same safe fallback.
+    fetchMock.mockResolvedValueOnce(streamResponse([]));
+
+    const tokens: string[] = [];
+    for await (const token of streamNextCustomerMessage('prompt', [])) {
+      tokens.push(token);
+    }
+    const output = tokens.join('');
+
+    expect(output.trim().length).toBeGreaterThan(0);
+    expect(output).not.toContain('AI');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
