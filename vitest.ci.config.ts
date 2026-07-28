@@ -127,6 +127,17 @@ export default defineConfig({
         // 404/500) and the phone live-transcript SSE poll (transcript/ended/
         // error). Anon POST now maps AuthError→401 (was a masked 500).
         'src/app/api/chat/route.ts',
+        // Client-side session state machine + SSE message loop shared by chat
+        // and voice modes (P2-8 — the remaining untested half of the voice path
+        // after the src/app/api/** gate sweep). Deterministic renderHook tests
+        // (mock global.fetch; a real ReadableStream drives the SSE frames; the
+        // pure splitSpeechChunks runs for real) cover load (in-progress /
+        // COMPLETED / CANCELLED / not-ok), the streamed chunk→done turn with
+        // speech-chunk + timing emission, session_ending then session_ended
+        // (re-fetch + end), the silent-signal [START] optimistic-skip, malformed-
+        // line skipping, the non-streaming end body, POST-not-ok → error, the
+        // empty-content guard, and endConversation → [END].
+        'src/hooks/useChatSession.ts',
       ],
       exclude: [
         'src/lib/db.ts',
