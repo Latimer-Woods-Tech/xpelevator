@@ -111,12 +111,20 @@ C4 L2 — the deployable/runtime units, with real names. Verified against
   seam so the planned Bandwidth swap stays cheap (VISION non-goal / Phase 5).
 
 ### CI/CD + monitoring — GitHub Actions
-- **`deploy.yml`** — build OpenNext → `wrangler pages deploy` to `xpelevator-sim`
-  → post-deploy live gates (health 200, Groq credential live, read-auth 401 +
-  no hidden-hint leak, tenant-isolation 403, security headers). DNS-untouched,
-  so safe on merge.
-- **`ci.yml`** — `typecheck` + `lint` + `unit` (Vitest) + `ui` (Vitest) gates on
-  every PR (the two credential-free tiers block merge).
+Full gate map (all pre-merge, deploy-pipeline, and monitoring gates, grep-derived
+from the workflow files): [`tech/ci-gate-topology.md`](./tech/ci-gate-topology.md).
+Summary:
+- **`deploy.yml`** — `ci-gate` → `migrate` (backup + dry-run + `prisma migrate
+  deploy` → "up to date") → `deploy`: build OpenNext → **preview → fail-closed
+  smoke-gate → promote** → ~25 post-deploy live gates (health 200, G72
+  build-commit drift, Groq credential live, Phase-2 read-auth/hidden-hint/tenant
+  isolation/security-headers, and the Phase-4 surface + admin gates).
+  DNS-untouched, so safe on merge.
+- **`ci.yml`** — six required gates aggregated by the single `ci` status context:
+  `quality` (typecheck + lint), prod-tree `audit`, `unit` + `ui` (Vitest,
+  credential-free), `coverage` (§3–4 floors 85/85/90/85), and `build`. The `ci`
+  aggregator exists because the branch ruleset requires a context named `ci` that
+  no job carried until 2026-07-26 (merges had been going through admin bypass).
 - **`uptime-monitor.yml`** — `/api/health` + direct Groq credential probe every
   15 min; end-to-end scoring canary every 6 h; opens/updates one alert issue on
   failure.
