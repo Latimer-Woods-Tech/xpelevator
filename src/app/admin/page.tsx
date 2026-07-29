@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import type { Criteria, JobTitle, Scenario } from '@/types';
+import type { Criteria, JobTitle, Scenario, SimulationType } from '@/types';
 import { useToast, useConfirm } from '@/components/ui/feedback';
 import type { PackStatus, ScenarioUpgradeItem, UpgradePreviewCounts } from '@/lib/scenario-packs';
 import { upgradeActionLabel, summarizeUpgradeCounts } from '@/lib/scenario-packs';
@@ -23,6 +23,14 @@ const blankScenario = {
   customerObjective: '',
   difficulty: 'medium' as 'easy' | 'medium' | 'hard',
   hints: [] as string[],
+};
+
+// One badge colour per modality so VOICE reads as its own modality, not grouped
+// with PHONE. Mirrors the three-way MODALITY_GLYPH map on /sessions + /simulate.
+const SCENARIO_TYPE_BADGE: Record<SimulationType, string> = {
+  CHAT: 'bg-blue-900/50 text-blue-400',
+  PHONE: 'bg-purple-900/50 text-purple-400',
+  VOICE: 'bg-emerald-900/50 text-emerald-400',
 };
 
 // ─── Tooltip ─────────────────────────────────────────────────────────────────
@@ -586,7 +594,7 @@ function ScenariosTab() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="font-medium">{s.name}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded font-medium ${s.type === 'CHAT' ? 'bg-blue-900/50 text-blue-400' : 'bg-purple-900/50 text-purple-400'}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded font-medium ${SCENARIO_TYPE_BADGE[s.type] ?? SCENARIO_TYPE_BADGE.CHAT}`}>
                     {s.type}
                   </span>
                 </div>
