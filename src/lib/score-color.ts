@@ -39,3 +39,25 @@ export function scoreBarClass(score: number): string {
     weak: 'bg-rose-500',
   }[scoreBand(score)];
 }
+
+/**
+ * Raw hex for a score bar/fill — the same four bands as {@link scoreBarClass},
+ * for surfaces that must colour with an inline `backgroundColor` (an SVG-style
+ * bar) rather than a Tailwind class. The values mirror Tailwind's `*-500` shades
+ * so a bar coloured here is visually identical to one coloured with the class.
+ *
+ * This exists so the analytics score-trend chart stops carrying its OWN
+ * threshold table: it previously used a divergent 3-tier hex scale (green ≥8 ·
+ * yellow ≥5 · red) that disagreed with the canonical 4-tier band on the same
+ * surface — a 6.5 rendered yellow in the trend but sky ("good") in every other
+ * score readout, exactly the per-page divergence this module was created to
+ * kill. One scale, used everywhere — as classes or as hex.
+ */
+export function scoreBarHex(score: number): string {
+  return {
+    strong: '#10b981', // emerald-500
+    good: '#0ea5e9', // sky-500
+    fair: '#f59e0b', // amber-500
+    weak: '#f43f5e', // rose-500
+  }[scoreBand(score)];
+}

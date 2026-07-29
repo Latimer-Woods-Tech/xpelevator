@@ -5,7 +5,7 @@ import { useSession, signOut } from 'next-auth/react';
 import { PageShell, Container, Button, ButtonLink } from '@/components/ui';
 import { TopNav } from '@/components/ui/TopNav';
 import { PhoneIcon, ChatIcon, HeadsetIcon, AlertTriangleIcon } from '@/components/ui/icons';
-import { scoreBarClass, scoreTextClass } from '@/lib/score-color';
+import { scoreBarClass, scoreTextClass, scoreBarHex } from '@/lib/score-color';
 
 interface TrendPoint {
   date: string;
@@ -102,8 +102,10 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
       <div className="flex items-end gap-1 min-w-max px-1" style={{ height: chartH + 28 }}>
         {points.map(pt => {
           const barH = Math.max(2, (pt.avg / maxVal) * chartH);
-          const color =
-            pt.avg >= 8 ? '#22c55e' : pt.avg >= 5 ? '#facc15' : '#ef4444';
+          // Canonical 4-tier band (score-color.ts) — the trend chart previously
+          // carried its own divergent 3-tier hex scale, so the same /10 rendered
+          // a different colour here than in every other score readout.
+          const color = scoreBarHex(pt.avg);
           const label =
             pt.date.slice(5); // MM-DD
           return (
