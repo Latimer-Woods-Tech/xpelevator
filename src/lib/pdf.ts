@@ -54,12 +54,38 @@ function pdfString(value: string): string {
 }
 
 /**
+ * Common typographic characters → their closest printable-ASCII equivalent.
+ *
+ * Without this, a title/subtitle written with an em-dash or a middot separator
+ * (every report subtitle uses `·`, every title uses `—`) degrades to a `?` at
+ * best — and, because the file is UTF-8 encoded but the fonts declare
+ * `/WinAnsiEncoding`, to MOJIBAKE at worst: a viewer reads the two/three UTF-8
+ * bytes as separate WinAnsi glyphs (`—` → `â€"`, `·` → `Â·`). Mapping these to
+ * ASCII first keeps the exported artifact readable ("XPElevator - Session
+ * Report") instead of garbled.
+ */
+const ASCII_TRANSLITERATIONS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/[‒-―]/g, '-'], // figure/en/em/horizontal dash → hyphen
+  [/[·•]/g, '-'], // middle dot / bullet → hyphen
+  [/[‘’‚‛]/g, "'"], // curly single quotes → '
+  [/[“”„‟]/g, '"'], // curly double quotes → "
+  [/…/g, '...'], // horizontal ellipsis → ...
+  [/ /g, ' '], // non-breaking space → space
+];
+
+/**
  * Collapse anything the standard Helvetica encoding + our 1-byte-per-char offset
  * math can't represent to plain ASCII. Newlines/tabs become spaces so a cell can
- * never break the single-line text layout.
+ * never break the single-line text layout; common typographic punctuation is
+ * transliterated (see {@link ASCII_TRANSLITERATIONS}) so it survives readably
+ * rather than as a `?` or WinAnsi mojibake; any remaining non-ASCII becomes `?`.
  */
 function toAscii(value: string): string {
-  return value.replace(/[\r\n\t]+/g, ' ').replace(/[^\x20-\x7E]/g, '?');
+  let out = value.replace(/[\r\n\t]+/g, ' ');
+  for (const [pattern, replacement] of ASCII_TRANSLITERATIONS) {
+    out = out.replace(pattern, replacement);
+  }
+  return out.replace(/[^\x20-\x7E]/g, '?');
 }
 
 /**
@@ -86,9 +112,17 @@ function columnOffsets(columns: readonly PdfColumn[]): number[] {
   return offsets;
 }
 
-/** One `BT … Tj … ET` text-showing operator at an absolute position. */
+/**
+ * One `BT … Tj … ET` text-showing operator at an absolute position.
+ *
+ * `toAscii` is applied here — the single choke point every string passes
+ * through — so the title, subtitle and column headers (which do not go through
+ * {@link fitText}) can never emit a multi-byte UTF-8 sequence that a
+ * WinAnsi-encoded viewer would render as mojibake. Body cells are already
+ * ASCII by the time they arrive, so this is a no-op for them.
+ */
 function textOp(x: number, y: number, font: string, size: number, text: string): string {
-  return `BT /${font} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${pdfString(text)}) Tj ET`;
+  return `BT /${font} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${pdfString(toAscii(text))}) Tj ET`;
 }
 
 /** Build the content stream for one page and return the operator string. */
