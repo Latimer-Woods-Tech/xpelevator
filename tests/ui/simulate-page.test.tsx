@@ -75,6 +75,16 @@ const SAMPLE_JOBS = [
       { id: 'sc-003', name: 'Slow PC Investigation', description: null, type: 'CHAT' },
     ],
   },
+  {
+    // Name deliberately free of "voice"/"phone"/"chat" — the job card is a
+    // <button>, and the seat-tier tests query buttons by those tokens.
+    id: 'job-retention',
+    name: 'Retention Desk Agent',
+    description: 'Browser-microphone role-play',
+    scenarios: [
+      { id: 'sc-v01', name: 'Escalated Complaint', description: null, type: 'VOICE' },
+    ],
+  },
 ];
 
 function mockSession(name = 'Alex', id = 'user-123') {
@@ -239,6 +249,19 @@ describe('SimulatePage — job and scenario selection', () => {
     // "💬 Chat" launch button that now sits below each CHAT scenario.
     await waitFor(() => expect(screen.getByText('CHAT')).toBeInTheDocument());
     expect(screen.getByText('PHONE')).toBeInTheDocument();
+  });
+
+  it('a VOICE scenario card shows the microphone glyph, not the chat bubble', async () => {
+    // Proof-of-rejection: the pre-fix header `type === 'PHONE' ? '📞' : '💬'`
+    // rendered 💬 for a VOICE scenario — the same two-of-three cherry-picking
+    // cleared in the analytics tiles (runs 58/59). VOICE is a first-class,
+    // admin-selectable modality and must carry its own glyph.
+    mockFetch();
+    render(<SimulatePage />);
+    await userEvent.click(await screen.findByText('Retention Desk Agent'));
+    await waitFor(() => expect(screen.getByText('VOICE')).toBeInTheDocument());
+    expect(screen.getByText('🎙️')).toBeInTheDocument();
+    expect(screen.queryByText('💬')).not.toBeInTheDocument();
   });
 
   it('start button triggers POST to /api/simulations', async () => {
