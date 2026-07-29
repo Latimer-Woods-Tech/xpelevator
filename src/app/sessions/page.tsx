@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSession, signOut } from 'next-auth/react';
-import type { SimulationSession as Session, ScoreItem } from '@/types';
+import type { SimulationSession as Session, ScoreItem, SimulationType } from '@/types';
 import { PageShell, Container, Card, Badge, Button, ButtonLink, ScoreBar } from '@/components/ui';
 import { TopNav } from '@/components/ui/TopNav';
-import { PhoneIcon, ChatIcon, AlertTriangleIcon } from '@/components/ui/icons';
+import { PhoneIcon, ChatIcon, HeadsetIcon, AlertTriangleIcon } from '@/components/ui/icons';
 import { scoreTextClass } from '@/lib/score-color';
 
 function statusTone(status: string): 'success' | 'warning' | 'neutral' {
@@ -14,6 +14,16 @@ function statusTone(status: string): 'success' | 'warning' | 'neutral' {
   if (status === 'IN_PROGRESS') return 'warning';
   return 'neutral';
 }
+
+// Every admin-selectable modality gets its own labelled glyph. A two-way
+// PHONE-or-else split silently rendered VOICE sessions with the chat icon,
+// mislabelling the modality in the list a manager reviews. The `title` also
+// gives each icon an accessible name (role="img" + aria-label).
+const MODALITY_GLYPH: Record<SimulationType, { Icon: typeof PhoneIcon; label: string }> = {
+  PHONE: { Icon: PhoneIcon, label: 'Phone session' },
+  VOICE: { Icon: HeadsetIcon, label: 'Voice session' },
+  CHAT: { Icon: ChatIcon, label: 'Chat session' },
+};
 
 export default function SessionsPage() {
   const { data: authSession } = useSession();
@@ -78,13 +88,13 @@ export default function SessionsPage() {
             <div className="space-y-4">
               {sessions.map(session => {
                 const avg = avgScore(session.scores);
+                const glyph = MODALITY_GLYPH[session.type] ?? MODALITY_GLYPH.CHAT;
+                const ModalityIcon = glyph.Icon;
                 return (
                   <Card key={session.id} className="p-6">
                     <div className="mb-3 flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
-                        {session.type === 'PHONE'
-                          ? <PhoneIcon className="h-5 w-5 text-brand-soft" />
-                          : <ChatIcon className="h-5 w-5 text-brand-soft" />}
+                        <ModalityIcon className="h-5 w-5 text-brand-soft" title={glyph.label} />
                         <div>
                           <h2 className="font-semibold">{session.scenario.name}</h2>
                           <p className="text-sm text-slate-400">{session.jobTitle.name}</p>
