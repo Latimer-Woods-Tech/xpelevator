@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { scoreBand, scoreTextClass, scoreBarClass } from '@/lib/score-color';
+import { scoreBand, scoreTextClass, scoreBarClass, scoreBarHex } from '@/lib/score-color';
 
 describe('scoreBand', () => {
   it('maps the four bands at their boundaries', () => {
@@ -35,5 +35,37 @@ describe('scoreTextClass / scoreBarClass', () => {
     expect(scoreBarClass(9)).toContain('emerald');
     expect(scoreTextClass(2)).toContain('rose');
     expect(scoreBarClass(2)).toContain('rose');
+  });
+});
+
+describe('scoreBarHex', () => {
+  const EMERALD = '#10b981';
+  const SKY = '#0ea5e9';
+  const AMBER = '#f59e0b';
+  const ROSE = '#f43f5e';
+
+  it('returns the *-500 hex for each of the four bands', () => {
+    expect(scoreBarHex(9)).toBe(EMERALD); // strong
+    expect(scoreBarHex(7)).toBe(SKY); // good
+    expect(scoreBarHex(5)).toBe(AMBER); // fair
+    expect(scoreBarHex(2)).toBe(ROSE); // weak
+  });
+
+  it('maps at the same band boundaries as scoreBand (never a 3-tier scale)', () => {
+    expect(scoreBarHex(8)).toBe(EMERALD);
+    expect(scoreBarHex(6)).toBe(SKY);
+    expect(scoreBarHex(4)).toBe(AMBER);
+    expect(scoreBarHex(3.9)).toBe(ROSE);
+    // Four distinct colours — a 3-tier scale would collapse one band.
+    expect(new Set([scoreBarHex(9), scoreBarHex(7), scoreBarHex(5), scoreBarHex(2)]).size).toBe(4);
+  });
+
+  it('agrees with the canonical band exactly where the old 3-tier trend scale diverged', () => {
+    // The old trend chart used `>=8 green : >=5 yellow : red`. At 6.5 that gave
+    // yellow; the canonical band calls 6.5 "good" (sky). At 4.5 the old scale
+    // gave red; the canonical band calls it "fair" (amber). Lock both so the
+    // divergent scale can never come back.
+    expect(scoreBarHex(6.5)).toBe(SKY); // was yellow (#facc15) under the 3-tier scale
+    expect(scoreBarHex(4.5)).toBe(AMBER); // was red (#ef4444) under the 3-tier scale
   });
 });
