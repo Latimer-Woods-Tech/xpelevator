@@ -130,6 +130,40 @@ describe('renderTablePdf', () => {
     expect(text).toContain('a b');
   });
 
+  it('renders a title/subtitle with typographic punctuation as readable ASCII (no mojibake)', () => {
+    // Every real report title uses an em-dash and every subtitle a middot; these
+    // bypass fitText, so before the textOp/toAscii choke point they reached the
+    // stream as raw UTF-8 and a WinAnsi viewer rendered them as mojibake
+    // (`—` → `â€"`, `·` → `Â·`).
+    const bytes = renderTablePdf({
+      title: 'XPElevator — Session Report',
+      subtitle: 'Generated 2026-07-29 · 3 completed sessions · “weighted” average /10',
+      columns: COLUMNS,
+      rows: [['a', 'b']],
+    });
+    const text = decode(bytes);
+
+    // Transliterated to readable ASCII, not '?' and not garbled.
+    expect(text).toContain('XPElevator - Session Report');
+    expect(text).toContain('Generated 2026-07-29 - 3 completed sessions - "weighted" average /10');
+
+    // The tell-tale WinAnsi mojibake for the UTF-8 middot / em-dash / curly
+    // quote is gone (this is what fails if the toAscii choke point is removed).
+    expect(text).not.toContain('Â·'); // U+00B7 as UTF-8 under WinAnsi
+    expect(text).not.toContain('â'); // em-dash / curly-quote lead byte 0xE2
+
+    // Byte-precise: the multi-byte UTF-8 sequences must not appear at all.
+    const hasSeq = (seq: number[]): boolean => {
+      for (let i = 0; i + seq.length <= bytes.length; i++) {
+        if (seq.every((b, j) => bytes[i + j] === b)) return true;
+      }
+      return false;
+    };
+    expect(hasSeq([0xc2, 0xb7])).toBe(false); // U+00B7 ·
+    expect(hasSeq([0xe2, 0x80, 0x94])).toBe(false); // U+2014 —
+    expect(hasSeq([0xe2, 0x80, 0x9c])).toBe(false); // U+201C “
+  });
+
   it("declares each content stream's /Length as its true byte length", () => {
     const text = decode(
       renderTablePdf({ title: 'Len', columns: COLUMNS, rows: [['hello', 'world']] })
