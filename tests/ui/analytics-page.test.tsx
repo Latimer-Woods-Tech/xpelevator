@@ -12,7 +12,7 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 
 // next/link → plain anchor so href assertions work in jsdom.
 vi.mock('next/link', () => ({
@@ -116,5 +116,63 @@ describe('AnalyticsPage — scoring health surface', () => {
     await waitFor(() =>
       expect(screen.queryByText(/could not be scored/i)).not.toBeInTheDocument()
     );
+  });
+});
+
+describe('AnalyticsPage — per-modality highlight tiles reconcile with total', () => {
+  /**
+   * Mounts the page with a full three-modality breakdown. The top-of-page
+   * highlight tiles must surface EVERY modality (PHONE, CHAT, and VOICE) so a
+   * manager's per-modality counts reconcile with Total Sessions. VOICE was
+   * previously dropped from the highlights, so its sessions vanished from the
+   * top of the page and the modality tiles undercounted the total.
+   */
+  const withThreeModalities = () => {
+    const data = {
+      totalSessions: 6,
+      overallAvg: 6.5,
+      scoringHealth: { scored: 6, failed: 0, notScorable: 0, unknown: 0 },
+      scoreTrend: [],
+      byJobTitle: [],
+      byCriteria: [],
+      byType: [
+        { type: 'PHONE', sessions: 2, avg: 7 },
+        { type: 'CHAT', sessions: 1, avg: 6 },
+        { type: 'VOICE', sessions: 3, avg: 6.5 },
+      ],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(data) })
+      )
+    );
+  };
+
+  /** Read the value rendered in the StatCard whose label matches `label`. */
+  const tileValue = (label: string): string => {
+    const card = screen.getByText(label).parentElement as HTMLElement;
+    return within(card).getByText(/^[\d.]+( \/ 10)?$/).textContent ?? '';
+  };
+
+  it('renders a Voice Sessions highlight tile with the correct count', async () => {
+    withThreeModalities();
+    render(<AnalyticsPage />);
+    // Fails before the fix — the highlights had no Voice tile at all.
+    expect(await screen.findByText('Voice Sessions')).toBeInTheDocument();
+    expect(tileValue('Voice Sessions')).toBe('3');
+  });
+
+  it('per-modality highlight counts sum to Total Sessions', async () => {
+    withThreeModalities();
+    render(<AnalyticsPage />);
+    await screen.findByText('Voice Sessions');
+    const phone = Number(tileValue('Phone Sessions'));
+    const chat = Number(tileValue('Chat Sessions'));
+    const voice = Number(tileValue('Voice Sessions'));
+    const total = Number(tileValue('Total Sessions'));
+    // The reconciliation invariant the dropped-VOICE bug broke.
+    expect(phone + chat + voice).toBe(total);
+    expect(total).toBe(6);
   });
 });

@@ -224,21 +224,29 @@ export default function AnalyticsPage() {
         ) : (
           <div className="space-y-8">
             {/* ── Summary cards ───────────────────────────────────────────── */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {/*
+              The per-modality highlight tiles are derived from `data.byType`
+              (the canonical PHONE|CHAT|VOICE breakdown) rather than hard-coded
+              per modality, so they can never again silently drop a modality:
+              VOICE was previously omitted here, so its session count vanished
+              from the highlights and the modality tiles no longer reconciled
+              with Total Sessions. Deriving from `byType` keeps the highlights
+              and the "Performance by Modality" section below in lock-step.
+            */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
               <StatCard label="Total Sessions" value={String(data.totalSessions)} />
               <StatCard
                 label="Overall Avg Score"
                 value={data.overallAvg !== null ? data.overallAvg.toFixed(1) + ' / 10' : '—'}
                 highlight={data.overallAvg !== null ? data.overallAvg : undefined}
               />
-              <StatCard
-                label="Phone Sessions"
-                value={String(data.byType.find(t => t.type === 'PHONE')?.sessions ?? 0)}
-              />
-              <StatCard
-                label="Chat Sessions"
-                value={String(data.byType.find(t => t.type === 'CHAT')?.sessions ?? 0)}
-              />
+              {data.byType.map(t => (
+                <StatCard
+                  key={t.type}
+                  label={`${modalityLabel(t.type)} Sessions`}
+                  value={String(t.sessions)}
+                />
+              ))}
             </div>
 
             {/* ── Scoring health ──────────────────────────────────────────── */}
