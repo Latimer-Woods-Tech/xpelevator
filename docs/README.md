@@ -25,6 +25,7 @@
 | [BACKLOG.md](BACKLOG.md) | Product & engineering backlog — all open issues, sprint assignments, completed history |
 | [ROADMAP.md](ROADMAP.md) | Phase plan, gap analysis, architecture decision log |
 | [tech/](tech/) | Per-technology reference docs (Groq, Telnyx, Prisma, Cloudflare, Next.js, Tailwind) |
+| [PII_INVENTORY.md](PII_INVENTORY.md) | Data-handling inventory (§10) — the personal data stored today, its processors, and the founder-gated retention/DSR follow-on (issue #157) |
 
 ---
 
