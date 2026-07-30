@@ -30,22 +30,14 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     exclude: ['tests/e2e/**', 'tests/voice/**', 'node_modules/**'],
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'html', 'json-summary'],
-      include: ['src/**/*.ts', 'src/**/*.tsx'],
-      exclude: [
-        'src/app/layout.tsx',
-        'src/app/providers.tsx',
-        'src/app/error.tsx',
-        'src/app/not-found.tsx',
-      ],
-      thresholds: {
-        lines: 60,
-        functions: 60,
-        branches: 50,
-        statements: 60,
-      },
-    },
+    // NOTE: no coverage gate lives here on purpose. This config runs EVERY local
+    // tier — including the smoke tier, which hits live Neon + Groq via
+    // tests/setup.ts — so a coverage percentage measured through it is not a
+    // meaningful or reproducible floor. The authoritative coverage gate is
+    // `vitest.ci.config.ts` (run via `npm run test:coverage:ci`): deterministic
+    // unit + ui tiers only, an explicit route allowlist, and the
+    // PLATFORM_STANDARDS §3-4 floors (85 line / 90 fn / 85 branch / 85 stmt).
+    // Run that config for the real signal; `npm run test:coverage` here reports
+    // informational v8 coverage with no thresholds. (issue #156, process tier.)
   },
 });
