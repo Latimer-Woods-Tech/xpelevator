@@ -26,6 +26,7 @@
 | [ROADMAP.md](ROADMAP.md) | Phase plan, gap analysis, architecture decision log |
 | [tech/](tech/) | Per-technology reference docs (Groq, Telnyx, Prisma, Cloudflare, Next.js, Tailwind) |
 | [PII_INVENTORY.md](PII_INVENTORY.md) | Data-handling inventory (§10) — the personal data stored today, its processors, and the founder-gated retention/DSR follow-on (issue #157) |
+| [SLO.md](SLO.md) | Service-level objectives (§4/§9) — 99.9% availability target + error budget, the live uptime-monitor SLIs, alert thresholds, and P1–P4 incident tiers (issue #154) |
 
 ---
 
