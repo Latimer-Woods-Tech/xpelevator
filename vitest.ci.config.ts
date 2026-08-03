@@ -138,6 +138,13 @@ export default defineConfig({
         // line skipping, the non-streaming end body, POST-not-ok → error, the
         // empty-content guard, and endConversation → [END].
         'src/hooks/useChatSession.ts',
+        // Standalone scoring-criteria CRUD — missed by the link-route sweep
+        // above (`jobs/[id]/criteria`). GET org-scoped read (anon 401 / own+global
+        // vs global-only branches / 500), POST ADMIN-only own-org create, and the
+        // PUT/DELETE `canMutateResource` guard that protects the GLOBAL catalog
+        // from tenant admins + blocks cross-org mutation — all branches covered.
+        'src/app/api/criteria/route.ts',
+        'src/app/api/criteria/[id]/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',
