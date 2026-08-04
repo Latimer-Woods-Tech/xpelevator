@@ -23,7 +23,7 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * creds — the pattern that RETIRED the credential-bound `tests/integration`
  * tier and the `DISABLE_AUTH` crutch). An explicit allowlist keeps the floor
  * honest: an untested route can't silently drag the measured percentage.
- * Routes under the gate (22): `analytics`, `analytics/latency`, `plans`, `me`,
+ * Routes under the gate (29): `analytics`, `analytics/latency`, `plans`, `me`,
  * `health`, `reports/sessions`, `branding/[slug]`, `branding/by-host`,
  * `orgs/[id]/branding`, `orgs/[id]/clients`, `orgs/[id]/members`,
  * `scenario-packs`, `scenario-packs/import`, `scenario-packs/status`, `scoring`,
@@ -33,13 +33,15 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * guards + streamed-turn framing + `[RESOLVED]`/`[END]`/maxTurns finalize-and-
  * score + the GET transcript read + the phone live-transcript SSE poll, 90.9%
  * branch; an anon `POST /api/chat`→401 fix rode along). The prose "sweep is
- * COMPLETE" that once sat here was overstated: the standalone `criteria` (#192)
- * and now the standalone `jobs`/`jobs/[id]` CRUD resources were each still
- * outside the gate when it was written. **Remaining uncovered CRUD routes: the
- * standalone `orgs` / `orgs/[id]` governance routes** (the nested
- * `orgs/[id]/{branding,clients,members}` sub-routes ARE gated) — next slice.
- * The credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch
- * (P1-7) have since been RETIRED — the deterministic mocks cover the surface.
+ * COMPLETE" that once sat here was repeatedly overstated: the standalone
+ * `criteria` (#192), `jobs`/`jobs/[id]` (#193), and `orgs`/`orgs/[id]` resources
+ * were each still outside the gate when successive versions of it were written.
+ * With the standalone `orgs` governance routes now covered, the `src/app/api/**`
+ * deterministic-coverage sweep (P2-7) is genuinely COMPLETE — every route under
+ * `src/app/api/**` (standalone + nested) now carries a deterministic test and
+ * sits in this allowlist. The credential-bound `tests/integration` tier + the
+ * `DISABLE_AUTH` crutch (P1-7) have since been RETIRED — the deterministic mocks
+ * cover the surface.
  *
  * Thresholds sit below the currently-achieved numbers (lines ~97, branches ~91,
  * functions ~99) so ordinary edits don't flake the gate, while still catching a
@@ -159,6 +161,19 @@ export default defineConfig({
         // from tenant admins + blocks cross-org mutation — all branches covered.
         'src/app/api/criteria/route.ts',
         'src/app/api/criteria/[id]/route.ts',
+        // Standalone org governance CRUD — the LAST uncovered standalone
+        // resource, and the most security-loaded (the nested
+        // `orgs/[id]/{branding,clients,members}` sub-routes were already gated).
+        // LIST is admin-only + scoped (platform sees all; tenant/operator sees
+        // own + owned clients); CREATE is PLATFORM-admin-only (a tenant admin is
+        // refused a top-level mint); `[id]` GET/PUT/DELETE run the real R-043
+        // guards — `canAccessOrg` (own/owned-client vs cross-tenant),
+        // `canSetOrgPlan` (an org's own admin may rename but NOT self-upgrade the
+        // seat tier — the billing bypass), and `canDeleteOrg` (no self-delete of a
+        // provisioned workspace; session-free-only). With this the
+        // `src/app/api/**` deterministic-coverage sweep (P2-7) is COMPLETE.
+        'src/app/api/orgs/route.ts',
+        'src/app/api/orgs/[id]/route.ts',
       ],
       exclude: [
         'src/lib/db.ts',
