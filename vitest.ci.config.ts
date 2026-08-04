@@ -32,11 +32,14 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  * joined last: the ~635-line SSE scoring hot path (#156), covering the POST
  * guards + streamed-turn framing + `[RESOLVED]`/`[END]`/maxTurns finalize-and-
  * score + the GET transcript read + the phone live-transcript SSE poll, 90.9%
- * branch; an anon `POST /api/chat`→401 fix rode along). **The `src/app/api/**`
- * coverage-gate sweep is COMPLETE — every API route now sits under the
- * deterministic gate.** The
- * credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch (P1-7)
- * have since been RETIRED — the deterministic mocks cover the whole surface.
+ * branch; an anon `POST /api/chat`→401 fix rode along). The prose "sweep is
+ * COMPLETE" that once sat here was overstated: the standalone `criteria` (#192)
+ * and now the standalone `jobs`/`jobs/[id]` CRUD resources were each still
+ * outside the gate when it was written. **Remaining uncovered CRUD routes: the
+ * standalone `orgs` / `orgs/[id]` governance routes** (the nested
+ * `orgs/[id]/{branding,clients,members}` sub-routes ARE gated) — next slice.
+ * The credential-bound `tests/integration` tier + the `DISABLE_AUTH` crutch
+ * (P1-7) have since been RETIRED — the deterministic mocks cover the surface.
  *
  * Thresholds sit below the currently-achieved numbers (lines ~97, branches ~91,
  * functions ~99) so ordinary edits don't flake the gate, while still catching a
@@ -115,10 +118,21 @@ export default defineConfig({
         // PUT/DELETE global-catalog protection + all auth/500 boundaries covered.
         'src/app/api/scenarios/route.ts',
         'src/app/api/scenarios/[id]/route.ts',
-        // Job↔criteria link CRUD — the LAST route to join the gate. GET/POST
-        // cross-tenant read/link IDOR guards + the DELETE unlink guards (own-org
-        // admin only; global catalog protected) all covered → sweep complete.
+        // Job↔criteria link CRUD. GET/POST cross-tenant read/link IDOR guards +
+        // the DELETE unlink guards (own-org admin only; global catalog protected)
+        // all covered.
         'src/app/api/jobs/[id]/criteria/route.ts',
+        // Standalone job-title CRUD — missed by the link-route sweep above
+        // (`jobs/[id]/criteria`), the same class of gap the `criteria` resource
+        // had before #192. GET org-scoped read (anon 401 / org-filter-bind vs
+        // global-only branches / 500), POST ADMIN-only own-org create (INSERT
+        // binds the session org), and the PUT/DELETE `canMutateResource` guard
+        // protecting the GLOBAL catalog from tenant admins + blocking cross-org
+        // mutation (platform admin owns global). Every auth/guard branch covered;
+        // the only residue is the `NODE_ENV !== 'production'` detail-suppression
+        // ternary, same as the `simulations` entry above.
+        'src/app/api/jobs/route.ts',
+        'src/app/api/jobs/[id]/route.ts',
         // The SSE scoring hot path (~635 lines) — the product's core loop.
         // POST guards (auth/validation/size/not-found/cross-tenant/closed/
         // throttle) + the streamed turn (chunk→done framing, CUSTOMER-reply
