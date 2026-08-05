@@ -21,7 +21,7 @@
  * AUTH_SECRET. Auth: mints a valid Auth.js v5 JWT session cookie from the staged
  * AUTH_SECRET, exactly as scripts/verify-turn-telemetry.mjs does.
  */
-import { neon } from '@neondatabase/serverless';
+import { sql } from './lib/pg.mjs';
 import { encode } from 'next-auth/jwt';
 
 const BASE = (process.env.BASE_URL || '').replace(/\/$/, '');
@@ -31,7 +31,6 @@ if (!BASE || !AUTH_SECRET || !DB) {
   console.error('Missing BASE_URL / AUTH_SECRET / DATABASE_URL');
   process.exit(1);
 }
-const sql = neon(DB);
 const TAG = `r067-latency-${Date.now()}`;
 const EMAIL = `${TAG}@xpelevator.internal`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

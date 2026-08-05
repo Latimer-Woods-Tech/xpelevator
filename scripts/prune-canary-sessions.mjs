@@ -12,7 +12,7 @@
  *
  * Env: DATABASE_URL.
  */
-import { neon } from '@neondatabase/serverless';
+import { sql } from './lib/pg.mjs';
 
 const KEEP = 3;
 const CANARY_EMAIL = 'phase1-canary@xpelevator.internal';
@@ -21,7 +21,6 @@ if (!DB) {
   console.error('Missing DATABASE_URL');
   process.exit(1);
 }
-const sql = neon(DB);
 
 async function main() {
   const users = await sql`SELECT id FROM users WHERE email = ${CANARY_EMAIL}`;
