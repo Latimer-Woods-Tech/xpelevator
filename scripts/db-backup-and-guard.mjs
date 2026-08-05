@@ -17,7 +17,7 @@
  * Exit codes: 0 = safe to proceed (workflow resolves baseline.txt then deploys);
  *             2 = dirty/failed migration state detected — ABORT, needs a human.
  */
-import { neon } from '@neondatabase/serverless';
+import { sql } from './lib/pg.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
 const url = process.env.DATABASE_URL?.replace(/\r/g, '');
@@ -25,7 +25,6 @@ if (!url) {
   console.error('DATABASE_URL is not set');
   process.exit(2);
 }
-const sql = neon(url);
 
 // Local migrations shipped in prisma/migrations (dir name = migration_name).
 // `nonIdempotent` ones use bare CREATE TYPE/TABLE and MUST be baselined if their
@@ -65,7 +64,7 @@ async function main() {
       console.log(`  · skip (unsafe identifier): ${table_name}`);
       continue;
     }
-    const rows = await sql.query(`SELECT * FROM "${table_name}"`);
+    const rows = await sql.unsafe(`SELECT * FROM "${table_name}"`);
     writeFileSync(`backup/${table_name}.json`, JSON.stringify(rows, null, 2));
     totalRows += rows.length;
     console.log(`  · ${table_name}: ${rows.length} rows`);
