@@ -5,31 +5,19 @@
 name = "xpelevator-sim"
 compatibility_date = "2025-01-01"
 
-# nodejs_compat is required for the postgres.js driver
+# nodejs_compat is required for Neon serverless driver
 # global_fetch_strictly_public is required by OpenNext CF 1.x
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 
 # Cloudflare Pages build output directory (advanced mode). We deploy the generated
 # assets folder so static files are at the root (/_next/...), and include _worker.js
 # inside that folder.
-#
-# ⚠️ ORDER IS LOAD-BEARING. Every root-level key MUST appear above the first
-# [[table]] header. In TOML a bare key after a table header belongs to THAT table,
-# so when this line sat below [[hyperdrive]] it parsed as
-# hyperdrive[0].pages_build_output_dir. Wrangler then reported the root key
-# "missing", printed "Ignoring configuration file", and deployed with NO bindings —
-# the Hyperdrive binding silently never reached the Worker and every DB route
-# returned 500 while static pages served 200. Keep root keys above the tables.
 pages_build_output_dir = ".open-next/assets"
 
 # Static assets are served by Pages; ASSETS binding is provided automatically
 
 [vars]
 PRISMA_CLIENT_ENGINE_TYPE = "wasm"
-
-[[hyperdrive]]
-binding = "HYPERDRIVE"
-id = "5b62381d252c4c0abb0a24b2d7a27d87"
 
 # ── Environment variables ────────────────────────────────────────────────────
 # Set these via `wrangler secret put DATABASE_URL` / `wrangler secret put GROQ_API_KEY`
@@ -47,7 +35,3 @@ compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 [env.preview.vars]
 PRISMA_CLIENT_ENGINE_TYPE = "wasm"
-
-[[env.preview.hyperdrive]]
-binding = "HYPERDRIVE"
-id = "5b62381d252c4c0abb0a24b2d7a27d87"

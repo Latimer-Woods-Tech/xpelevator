@@ -29,7 +29,7 @@
  * Seeds two throwaway orgs + one admin user, runs the checks, and cleans
  * everything up in a finally block. Env: BASE_URL, DATABASE_URL, AUTH_SECRET.
  */
-import { sql } from './lib/pg.mjs';
+import { neon } from '@neondatabase/serverless';
 import { encode } from 'next-auth/jwt';
 
 const BASE = (process.env.BASE_URL || '').replace(/\/$/, '');
@@ -39,6 +39,7 @@ if (!BASE || !AUTH_SECRET || !DB) {
   console.error('Missing BASE_URL / AUTH_SECRET / DATABASE_URL');
   process.exit(1);
 }
+const sql = neon(DB);
 const TAG = `r043-orgiso-${Date.now()}`;
 const ADMIN_EMAIL = `${TAG}-admin@xpelevator.internal`;
 
