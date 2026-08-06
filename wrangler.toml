@@ -43,3 +43,6 @@ PRISMA_CLIENT_ENGINE_TYPE = "wasm"
 # 2026-08-06 (retry): deploy #267 (#199) and #268 (#201 re-trigger) both died on
 # the same GitHub Actions infra incident before the build/publish step. This no-op
 # comment re-runs deploy.yml once more to actually ship the Neon-restored build.
+#
+# 2026-08-06 (re-kick): scheduler recovered but event-triggered runs stalled;
+# fresh commit to regenerate a pull_request event for #203.
