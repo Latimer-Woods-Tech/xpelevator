@@ -36,6 +36,9 @@ compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 [env.preview.vars]
 PRISMA_CLIENT_ENGINE_TYPE = "wasm"
 
-# 2026-08-06: redeploy trigger — deploy #267 (revert #199) failed on a transient
-# GitHub Actions infra error (Bad Gateway resolving action downloads), not on code.
-# This no-op comment re-runs deploy.yml to actually ship the Neon-restored build.
+# 2026-08-06: redeploy trigger (2nd attempt). Deploy #267 (revert #199) and #268
+# (#201 redeploy) both died on a transient GitHub Actions infra outage — Bad
+# Gateway resolving action downloads, then a 15-min CI-gate hang — BEFORE the
+# build/publish job ran, so the Neon-restored build never shipped. Actions infra
+# has since recovered (monitor run #993 ran clean). This no-op comment re-runs
+# deploy.yml to actually ship the reverted Neon build and clear the scoring outage.
