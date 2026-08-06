@@ -50,9 +50,14 @@ const eslintConfig = [
         {
           paths: [
             {
+              name: "@prisma/client",
+              message:
+                "Do not use the Prisma client in application code — query Postgres via '@/lib/db' (raw SQL through the Hyperdrive binding). Prisma owns schema/migrations only; its runtime client has known incompatibilities on the Workers edge.",
+            },
+            {
               name: "@/lib/prisma",
               message:
-                "Do not use the Prisma client in application code — query Neon via '@/lib/db' (raw SQL). Prisma is schema/migrations + test-tooling only (see src/lib/prisma.ts).",
+                "The runtime Prisma client was removed (dead code; the Neon HTTP driver is gone). Query Postgres via '@/lib/db' (raw SQL through the Hyperdrive binding).",
             },
           ],
         },
