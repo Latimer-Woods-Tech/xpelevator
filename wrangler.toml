@@ -39,3 +39,5 @@ PRISMA_CLIENT_ENGINE_TYPE = "wasm"
 # 2026-08-06: redeploy trigger — deploy #267 (revert #199) failed on a transient
 # GitHub Actions infra error (Bad Gateway resolving action downloads), not on code.
 # This no-op comment re-runs deploy.yml to actually ship the Neon-restored build.
+# 2026-08-06T18:10Z: deploy #268 CI-gate stalled/cancelled on the ongoing GitHub Actions
+# incident (runner provisioning). Re-trigger #2 — no code change; main still == 21d64d8 + comments.
