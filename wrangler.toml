@@ -49,3 +49,6 @@ PRISMA_CLIENT_ENGINE_TYPE = "wasm"
 #
 # 2026-08-06 (re-kick 2): event-triggering recovered but one CI gate finished
 # 'abandoned' (5/6 green) — infra, not code. Fresh commit for a clean CI run.
+#
+# 2026-08-06 (re-kick 3): 1fb0d90b's push event was dropped (no CI run in 50min);
+# GH event->run pipeline still intermittently dropping events. Trying again.
