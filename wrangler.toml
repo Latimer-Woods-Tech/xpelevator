@@ -46,3 +46,6 @@ PRISMA_CLIENT_ENGINE_TYPE = "wasm"
 #
 # 2026-08-06 (re-kick): scheduler recovered but event-triggered runs stalled;
 # fresh commit to regenerate a pull_request event for #203.
+#
+# 2026-08-06 (re-kick 2): event-triggering recovered but one CI gate finished
+# 'abandoned' (5/6 green) — infra, not code. Fresh commit for a clean CI run.
