@@ -35,3 +35,7 @@ compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 [env.preview.vars]
 PRISMA_CLIENT_ENGINE_TYPE = "wasm"
+
+# 2026-08-06: redeploy trigger — deploy #267 (revert #199) failed on a transient
+# GitHub Actions infra error (Bad Gateway resolving action downloads), not on code.
+# This no-op comment re-runs deploy.yml to actually ship the Neon-restored build.
