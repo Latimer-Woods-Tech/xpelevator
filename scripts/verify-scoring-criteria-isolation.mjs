@@ -39,13 +39,14 @@
  *
  * Env: DATABASE_URL.
  */
-import { sql } from './lib/pg.mjs';
+import { neon } from '@neondatabase/serverless';
 
 const DB = process.env.DATABASE_URL?.replace(/\r/g, '');
 if (!DB) {
   console.error('Missing DATABASE_URL');
   process.exit(1);
 }
+const sql = neon(DB);
 const TAG = `scoring-iso-${Date.now()}`;
 
 let failed = 0;

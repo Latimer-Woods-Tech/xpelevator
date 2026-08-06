@@ -27,7 +27,7 @@
  *
  * Env: BASE_URL, DATABASE_URL, AUTH_SECRET.
  */
-import { sql } from './lib/pg.mjs';
+import { neon } from '@neondatabase/serverless';
 import { encode } from 'next-auth/jwt';
 
 const BASE = (process.env.BASE_URL || '').replace(/\/$/, '');
@@ -37,6 +37,7 @@ if (!BASE || !AUTH_SECRET || !DB) {
   console.error('Missing BASE_URL / AUTH_SECRET / DATABASE_URL');
   process.exit(1);
 }
+const sql = neon(DB);
 const CANARY_EMAIL = 'phase1-canary@xpelevator.internal';
 const AGENT_LINE =
   "I'm really sorry for the frustration this has caused — that's not the " +

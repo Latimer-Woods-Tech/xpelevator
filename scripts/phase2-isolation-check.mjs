@@ -22,7 +22,7 @@
  * and cleans everything up in a finally block. Env: BASE_URL, DATABASE_URL,
  * AUTH_SECRET.
  */
-import { sql } from './lib/pg.mjs';
+import { neon } from '@neondatabase/serverless';
 import { encode } from 'next-auth/jwt';
 
 const BASE = (process.env.BASE_URL || '').replace(/\/$/, '');
@@ -32,6 +32,7 @@ if (!BASE || !AUTH_SECRET || !DB) {
   console.error('Missing BASE_URL / AUTH_SECRET / DATABASE_URL');
   process.exit(1);
 }
+const sql = neon(DB);
 const TAG = `phase2-iso-${Date.now()}`;
 const OWNER_EMAIL = `${TAG}-owner@xpelevator.internal`;
 const INTRUDER_EMAIL = `${TAG}-intruder@xpelevator.internal`;

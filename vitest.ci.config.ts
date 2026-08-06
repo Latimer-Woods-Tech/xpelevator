@@ -177,6 +177,7 @@ export default defineConfig({
       ],
       exclude: [
         'src/lib/db.ts',
+        'src/lib/prisma.ts',
         'src/lib/http-agent-polyfill.ts',
       ],
       thresholds: {

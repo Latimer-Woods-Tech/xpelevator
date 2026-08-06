@@ -17,7 +17,7 @@
  * Auth: mints a valid Auth.js v5 JWT session cookie from the staged AUTH_SECRET,
  * exactly as scripts/phase1-canary.mjs + scripts/phase2-isolation-check.mjs do.
  */
-import { sql } from './lib/pg.mjs';
+import { neon } from '@neondatabase/serverless';
 import { encode } from 'next-auth/jwt';
 
 const BASE = (process.env.BASE_URL || '').replace(/\/$/, '');
@@ -27,6 +27,7 @@ if (!BASE || !AUTH_SECRET || !DB) {
   console.error('Missing BASE_URL / AUTH_SECRET / DATABASE_URL');
   process.exit(1);
 }
+const sql = neon(DB);
 const TAG = `r066-telemetry-${Date.now()}`;
 const EMAIL = `${TAG}@xpelevator.internal`;
 const VALID_TIERS = new Set(['realtime', 'acceptable', 'slow']);
