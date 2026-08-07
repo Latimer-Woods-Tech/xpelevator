@@ -1,6 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// The per-IP rate limiter (#157) is exercised in its own suites; here it is a
+// pass-through so this test focuses on the pack-catalog contract.
+vi.mock('@/lib/rate-limit', () => ({
+  enforceRateLimit: vi.fn().mockResolvedValue(null),
+}));
+
 import { GET } from '@/app/api/scenario-packs/route';
 import { SCENARIO_PACKS } from '@/lib/scenario-packs';
+
+const req = () => new Request('http://localhost/api/scenario-packs');
 
 // Deterministic: the route has no DB / auth / secret dependency — it serialises
 // the pure pack catalog. Verifies the public contract end-to-end (handler →
@@ -8,7 +17,7 @@ import { SCENARIO_PACKS } from '@/lib/scenario-packs';
 // hidden-mechanic boundary at the HTTP boundary (defence in depth for R-021).
 describe('GET /api/scenario-packs', () => {
   it('returns 200 with a public, cacheable pack catalog', async () => {
-    const res = await GET();
+    const res = await GET(req());
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toContain('max-age=300');
 
@@ -22,7 +31,7 @@ describe('GET /api/scenario-packs', () => {
   });
 
   it('never leaks a scenario script (persona / objective / hints)', async () => {
-    const res = await GET();
+    const res = await GET(req());
     const text = JSON.stringify(await res.json());
     expect(text).not.toMatch(/customerPersona/);
     expect(text).not.toMatch(/customerObjective/);

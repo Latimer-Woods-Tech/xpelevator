@@ -10,6 +10,11 @@ const sqlMock = vi.fn();
 vi.mock('@/lib/db', () => ({
   sql: (...args: unknown[]) => sqlMock(...args),
 }));
+// The per-IP rate limiter (#157) is a pass-through here so the sqlMock queue is
+// consumed only by the branding SELECT; the limiter is tested in its own suites.
+vi.mock('@/lib/rate-limit', () => ({
+  enforceRateLimit: vi.fn().mockResolvedValue(null),
+}));
 
 import { GET } from '@/app/api/branding/[slug]/route';
 

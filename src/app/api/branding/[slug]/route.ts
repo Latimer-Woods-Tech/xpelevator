@@ -25,6 +25,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { toPublicBranding } from '@/lib/branding';
+import { enforceRateLimit } from '@/lib/rate-limit';
 
 // A slug is lowercase alphanumerics + hyphens (see `slugify` in
 // `src/lib/org-hierarchy.ts`). Bounding the input keeps a malformed or oversized
@@ -40,10 +41,15 @@ interface PublicBrandingRow {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ slug: string }> }
 ) {
   try {
+    // Anonymous, always-public enumeration point (#157): throttle per-IP before
+    // any DB work so a slug-guessing sweep can't run unbounded.
+    const limited = await enforceRateLimit(request, 'branding');
+    if (limited) return limited;
+
     const { slug } = await params;
 
     if (typeof slug !== 'string' || slug.length === 0 || slug.length > MAX_SLUG_LEN) {

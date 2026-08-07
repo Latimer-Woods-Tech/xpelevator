@@ -32,6 +32,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { toPublicBranding } from '@/lib/branding';
 import { resolveOperatorSlugFromHost } from '@/lib/host';
+import { enforceRateLimit } from '@/lib/rate-limit';
 
 interface PublicBrandingRow {
   slug: string;
@@ -43,6 +44,10 @@ interface PublicBrandingRow {
 
 export async function GET(request: Request) {
   try {
+    // Shares the anonymous 'branding' budget with the slug read (#157).
+    const limited = await enforceRateLimit(request, 'branding');
+    if (limited) return limited;
+
     const slug = resolveOperatorSlugFromHost(request.headers.get('host'));
 
     if (slug === null) {
