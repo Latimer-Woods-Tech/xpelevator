@@ -23,12 +23,21 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { recordAudit } from '@/lib/audit';
 import {
   canManageOrgBranding,
   parseBrandingBody,
   mergeBranding,
   type Branding,
 } from '@/lib/branding';
+
+/** The branding fields, for a before/after diff (audit records real changes only). */
+const BRANDING_FIELDS = ['displayName', 'logoUrl', 'primaryColor', 'accentColor'] as const;
+
+/** Names of the branding fields whose value actually changed. */
+function changedBrandingFields(before: Branding, after: Branding): string[] {
+  return BRANDING_FIELDS.filter((f) => (before[f] ?? null) !== (after[f] ?? null));
+}
 
 interface OrgBrandingRow {
   id: string;
@@ -127,7 +136,8 @@ export async function PUT(
       );
     }
 
-    const merged = mergeBranding(rowToBranding(org), parsed.patch);
+    const before = rowToBranding(org);
+    const merged = mergeBranding(before, parsed.patch);
 
     const updated = await sql`
       UPDATE organizations
@@ -146,7 +156,27 @@ export async function PUT(
         brand_accent_color  as "brandAccentColor"
     `;
 
-    return NextResponse.json(rowToBranding(updated[0] as OrgBrandingRow));
+    const after = rowToBranding(updated[0] as OrgBrandingRow);
+
+    // Audit only a REAL change (issue #157 §10): a PUT that merges to the same
+    // values (e.g. re-saving the form unchanged, or only omitted fields) alters
+    // nothing, so it writes no audit row. Metadata carries the changed field
+    // NAMES only — a logo URL / colour is not a secret but the trail needs the
+    // "what changed", not the values.
+    const changed = changedBrandingFields(before, after);
+    if (changed.length > 0) {
+      await recordAudit({
+        action: 'org.branding.update',
+        actorUserId: session.user.dbUserId,
+        actorEmail: session.user.email,
+        orgId: id,
+        targetType: 'organization',
+        targetId: id,
+        metadata: { changed },
+      });
+    }
+
+    return NextResponse.json(after);
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
