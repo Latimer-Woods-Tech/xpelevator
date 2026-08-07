@@ -115,3 +115,52 @@ export function stripEndSignal(content: string): string {
 export function isControlSignal(content: string): boolean {
   return isStartSignal(content) || isEndSignal(content);
 }
+
+/**
+ * How many prior conversation messages the simulated customer is given as
+ * context on each turn. Every generated turn re-sends the transcript to Groq,
+ * so an un-capped history grows the prompt (and therefore token cost AND the
+ * per-turn latency the trainee feels — issue #16 founder note "half-speed
+ * sparring", #155 P3b-7) as O(turns²) over a long session. This cap bounds the
+ * context to a fixed window.
+ *
+ * Deliberately generous: a real training session is a handful of exchanges
+ * (the scoring canary drives ~7), so a typical conversation is shorter than the
+ * window and {@link windowConversation} returns it untouched — the cap engages
+ * only on pathologically long sessions, where it also caps worst-case latency.
+ * The scenario persona / objective / hidden mechanics live in the SYSTEM prompt
+ * (`buildSessionSystemPrompt`), not the transcript, so windowing the transcript
+ * never drops the customer's character.
+ */
+export const MAX_CONVERSATION_CONTEXT_MESSAGES = 24;
+
+/**
+ * Bounds a conversation transcript to the most recent {@link
+ * MAX_CONVERSATION_CONTEXT_MESSAGES} messages before it is sent to the model,
+ * killing the O(turns²) token growth of re-sending an ever-longer history.
+ *
+ * Role-agnostic and purely positional so both hot paths can share it: the chat
+ * route passes `{ role: 'CUSTOMER' | 'AGENT' }` history and the phone webhook
+ * passes already-Groq-shaped `{ role: 'user' | 'assistant' }` messages. It only
+ * ever reads `.content`-carrying elements by index.
+ *
+ * When the transcript is within the window it is returned unchanged (identical
+ * reference-order), so short sessions behave exactly as before. When it is
+ * longer, the FIRST message (the customer's opening turn — the anchor of what
+ * the conversation is about) is always kept, followed by the last `max - 1`
+ * messages, so the model always sees both the opener and the freshest context
+ * including the trainee's current reply. Total length never exceeds `max`.
+ *
+ * @param messages full transcript in chronological order (oldest first)
+ * @param max      window size; values < 2 fall back to a plain last-`max` tail
+ */
+export function windowConversation<T extends { content: string }>(
+  messages: readonly T[],
+  max: number = MAX_CONVERSATION_CONTEXT_MESSAGES
+): T[] {
+  if (messages.length <= max) return messages.slice();
+  if (max < 2) return messages.slice(Math.max(0, messages.length - Math.max(0, max)));
+  // Keep the opener + the freshest (max - 1) messages. Because length > max,
+  // index 0 is never inside that tail, so there is no duplication.
+  return [messages[0], ...messages.slice(messages.length - (max - 1))];
+}
