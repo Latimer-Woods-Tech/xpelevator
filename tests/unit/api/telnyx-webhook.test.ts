@@ -86,6 +86,7 @@ import { POST } from '@/app/api/telnyx/webhook/route';
 // resolves to a benign shape.
 let sqlState: {
   idempotencyRows: unknown[];
+  webhookClaimRows: unknown[];
   scenarioAnswered: unknown[];
   scenarioScript: unknown[];
   sessionStatus: unknown[];
@@ -102,6 +103,10 @@ function configureSql() {
     }
     if (q.includes('UPDATE chat_messages')) return Promise.resolve([]);
     if (q.includes('UPDATE simulation_sessions')) return Promise.resolve([]);
+    // Event-ID idempotency claim (src/lib/idempotency.ts). A returned row =
+    // first-seen (handler runs); [] = the id was already claimed (duplicate →
+    // handler skipped). Only reached when the event carries a `data.id`.
+    if (q.includes('INSERT INTO webhook_events')) return Promise.resolve(sqlState.webhookClaimRows);
     if (q.includes('SELECT id FROM chat_messages')) return Promise.resolve(sqlState.idempotencyRows);
     if (q.includes('SELECT id, script FROM scenarios')) return Promise.resolve(sqlState.scenarioAnswered);
     if (q.includes('SELECT script FROM scenarios')) return Promise.resolve(sqlState.scenarioScript);
@@ -165,6 +170,7 @@ beforeEach(() => {
   savedIdCounter = 0;
   sqlState = {
     idempotencyRows: [],
+    webhookClaimRows: [{ event_id: 'evt-first' }],
     scenarioAnswered: [{ id: 'scn-1', script: { difficulty: 'easy' } }],
     scenarioScript: [{ script: { difficulty: 'easy' } }],
     sessionStatus: [{ status: 'IN_PROGRESS' }],
@@ -284,6 +290,45 @@ describe('call.answered', () => {
     await post(event('call.answered'));
     expect(ranInsertCustomer('[SPEAK_ERROR] telnyx 502')).toBe(true);
     expect(callHangupMock).toHaveBeenCalledWith('cc-1');
+  });
+});
+
+// ── event-ID idempotency (withIdempotency) ───────────────────────────────────
+
+describe('event-ID idempotency', () => {
+  // Attach a Telnyx event `data.id` so the generic idempotency claim runs (the
+  // other tests omit it, exercising the no-id fall-through).
+  function withId(evt: { data: Record<string, unknown> }, id: string) {
+    return { data: { ...evt.data, id } };
+  }
+
+  it('PROOF-OF-REJECTION: a duplicate event id skips the handler entirely', async () => {
+    // The claim insert returns no row → this exact event was already processed
+    // by an earlier delivery → NONE of the handler side effects may re-run
+    // (no second opening spoken, no doubled model turn).
+    sqlState.webhookClaimRows = [];
+    const res = await post(withId(event('call.answered'), 'evt-dup-1'));
+    expect(res.status).toBe(200);
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+    expect(callSpeakMock).not.toHaveBeenCalled();
+  });
+
+  it('processes normally on the first delivery of an event id', async () => {
+    sqlState.webhookClaimRows = [{ event_id: 'evt-new-1' }];
+    groqReply('Opening line');
+    const res = await post(withId(event('call.answered'), 'evt-new-1'));
+    expect(res.status).toBe(200);
+    expect(callSpeakMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails OPEN: still processes when the claim write throws (DB blip)', async () => {
+    // The claim INSERT is the first sql call for an id-bearing event; make it
+    // reject once. A dropped live-call event is worse than a rare double.
+    sqlMock.mockImplementationOnce(() => Promise.reject(new Error('neon blip')));
+    groqReply('Opening line');
+    const res = await post(withId(event('call.answered'), 'evt-blip-1'));
+    expect(res.status).toBe(200);
+    expect(callSpeakMock).toHaveBeenCalledTimes(1);
   });
 });
 

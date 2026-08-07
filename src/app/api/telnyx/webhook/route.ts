@@ -36,6 +36,7 @@ import {
   encodeClientState,
 } from '@/lib/telnyx';
 import { verifyTelnyxWebhook } from '@/lib/auth-api';
+import { withIdempotency } from '@/lib/idempotency';
 import { windowConversation } from '@/lib/limits';
 import {
   classifyPhoneTurn,
@@ -56,6 +57,10 @@ interface TelnyxClientState {
 
 interface TelnyxWebhookPayload {
   data: {
+    // Stable, per-event UUID assigned by Telnyx. The idempotency key: a retried
+    // delivery of the same event carries the same `id`, so claiming it once
+    // collapses duplicates (see `withIdempotency`).
+    id?: string;
     event_type: string;
     payload: {
       call_control_id: string;
@@ -99,7 +104,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
-  const { event_type, payload } = body.data;
+  const { id: eventId, event_type, payload } = body.data;
   const { call_control_id, client_state } = payload;
 
   // Decode session context from client_state
@@ -119,7 +124,18 @@ export async function POST(request: Request) {
   // other, making the call permanently silent.
   //
   // ctx.waitUntil() keeps the CF Worker alive after the response is sent.
-  const processingPromise = handleEvent(event_type, payload, state, call_control_id, client_state);
+  //
+  // IDEMPOTENCY: Telnyx delivers AT-LEAST-ONCE (a lost 200 ACK or an edge retry
+  // re-sends the same event `id`). Since we return 200 up-front and process in
+  // the background, a duplicate would otherwise re-run the full handler — two
+  // gather/speak requests racing on one live call (the conflicting-gather bug
+  // this route header warns about), a doubled model turn, or a second scoring
+  // pass. Claiming the event id once (fail-open on a DB blip) collapses every
+  // retry of one event to a single execution, covering ALL event types — the
+  // per-branch `call.answered` content-guard below is now the second layer.
+  const processingPromise = withIdempotency(eventId, () =>
+    handleEvent(event_type, payload, state, call_control_id, client_state),
+  );
   try {
     const { ctx } = getCloudflareContext();
     ctx.waitUntil(processingPromise.catch(err =>
