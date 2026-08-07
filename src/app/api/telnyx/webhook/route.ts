@@ -36,6 +36,7 @@ import {
   encodeClientState,
 } from '@/lib/telnyx';
 import { verifyTelnyxWebhook } from '@/lib/auth-api';
+import { windowConversation } from '@/lib/limits';
 import {
   classifyPhoneTurn,
   phoneTurnTelemetry,
@@ -337,12 +338,19 @@ async function handleEvent(
         // Build conversation for Groq
         // AGENT = trainee speaking to AI customer → Groq 'user'
         // CUSTOMER = AI virtual customer → Groq 'assistant'
-        const groqMessages = (messages as any).map((m: { role: string; content: string }) => ({
+        const groqMessages: Array<{ role: 'user' | 'assistant'; content: string }> = (
+          messages as Array<{ role: string; content: string }>
+        ).map((m) => ({
           role: m.role === 'AGENT' ? ('user' as const) : ('assistant' as const),
           content: m.content,
         }));
         // Append the current agent turn so Groq has it in context
         groqMessages.push({ role: 'user' as const, content: transcript });
+        // Cap the re-sent context to a fixed window (#155 P3b-7) — same lever as
+        // the chat path. Short calls are unchanged; long ones keep the opener +
+        // freshest turns so token cost / latency don't grow O(turns²). Scoring
+        // still reloads the FULL transcript from the DB on [RESOLVED].
+        const windowedMessages = windowConversation(groqMessages);
 
         // Same conversation-speed lever as the opening leg (R-059): route the
         // reply turn by difficulty rather than always paying the 70B latency.
@@ -353,7 +361,7 @@ async function handleEvent(
           model: customerModel,
           messages: [
             { role: 'system', content: systemPromptGather },
-            ...groqMessages,
+            ...windowedMessages,
           ],
           max_tokens: 150,
           temperature: 0.8,

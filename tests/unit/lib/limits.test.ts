@@ -20,6 +20,8 @@ import {
   isEndSignal,
   isControlSignal,
   stripEndSignal,
+  windowConversation,
+  MAX_CONVERSATION_CONTEXT_MESSAGES,
 } from '@/lib/limits';
 
 describe('limits constants', () => {
@@ -135,5 +137,89 @@ describe('parsePagination', () => {
   it('floors offset at 0 and falls back on garbage', () => {
     expect(p('offset=-10').offset).toBe(0);
     expect(p('limit=abc&offset=xyz')).toEqual({ limit: DEFAULT_PAGE_SIZE, offset: 0 });
+  });
+});
+
+describe('windowConversation (transcript context cap — #155 P3b-7)', () => {
+  const msg = (i: number) => ({ role: i % 2 === 0 ? 'CUSTOMER' : 'AGENT', content: `m${i}` });
+  const build = (n: number) => Array.from({ length: n }, (_, i) => msg(i));
+
+  it('has a generous default cap (longer than a real training session)', () => {
+    // The scoring canary drives ~7 messages; the cap must never bite a real
+    // trainee. If this is ever lowered below a normal session, revisit.
+    expect(MAX_CONVERSATION_CONTEXT_MESSAGES).toBeGreaterThanOrEqual(12);
+  });
+
+  it('returns a short conversation unchanged (typical session — zero behavior change)', () => {
+    const conv = build(8);
+    const out = windowConversation(conv);
+    expect(out).toEqual(conv);
+    expect(out.length).toBe(8);
+  });
+
+  it('returns a conversation exactly at the cap unchanged', () => {
+    const conv = build(MAX_CONVERSATION_CONTEXT_MESSAGES);
+    expect(windowConversation(conv)).toEqual(conv);
+  });
+
+  it('caps an over-long conversation to the window size', () => {
+    const conv = build(MAX_CONVERSATION_CONTEXT_MESSAGES + 20);
+    const out = windowConversation(conv);
+    // PROOF-OF-REJECTION (Standing Law 1): without the cap this stays 44; the
+    // cap must shrink it to exactly the window. Neutering windowConversation to
+    // `return messages.slice()` fails this assertion.
+    expect(out.length).toBe(MAX_CONVERSATION_CONTEXT_MESSAGES);
+  });
+
+  it('keeps the opener + the freshest turns, drops the stale middle', () => {
+    const n = MAX_CONVERSATION_CONTEXT_MESSAGES + 10;
+    const conv = build(n);
+    const out = windowConversation(conv);
+    // Opener (the anchor of what the conversation is about) is preserved.
+    expect(out[0]).toBe(conv[0]);
+    // The current/freshest turn is preserved (last element).
+    expect(out[out.length - 1]).toBe(conv[n - 1]);
+    // An early non-opener message (index 1) is dropped, not carried.
+    expect(out).not.toContain(conv[1]);
+    // No duplication of the opener into the tail.
+    expect(out.filter((m) => m === conv[0]).length).toBe(1);
+  });
+
+  it('is role-agnostic — works on Groq-shaped {user|assistant} messages (phone path)', () => {
+    const conv = Array.from({ length: MAX_CONVERSATION_CONTEXT_MESSAGES + 5 }, (_, i) => ({
+      role: i % 2 === 0 ? 'assistant' : 'user',
+      content: `g${i}`,
+    }));
+    const out = windowConversation(conv);
+    expect(out.length).toBe(MAX_CONVERSATION_CONTEXT_MESSAGES);
+    expect(out[0]).toBe(conv[0]);
+    expect(out[out.length - 1]).toBe(conv[conv.length - 1]);
+  });
+
+  it('honors an explicit smaller window', () => {
+    const conv = build(10);
+    const out = windowConversation(conv, 4);
+    expect(out.length).toBe(4);
+    expect(out[0]).toBe(conv[0]); // opener
+    expect(out.slice(1)).toEqual(conv.slice(-3)); // freshest 3
+  });
+
+  it('degrades to a plain tail for degenerate windows (< 2)', () => {
+    const conv = build(5);
+    expect(windowConversation(conv, 1)).toEqual([conv[4]]);
+    expect(windowConversation(conv, 0)).toEqual([]);
+  });
+
+  it('handles empty and single-message transcripts', () => {
+    expect(windowConversation([])).toEqual([]);
+    const one = build(1);
+    expect(windowConversation(one)).toEqual(one);
+  });
+
+  it('does not mutate the input array', () => {
+    const conv = build(MAX_CONVERSATION_CONTEXT_MESSAGES + 3);
+    const copy = conv.slice();
+    windowConversation(conv);
+    expect(conv).toEqual(copy);
   });
 });

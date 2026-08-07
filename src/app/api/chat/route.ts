@@ -17,6 +17,7 @@ import {
   isEndSignal,
   isControlSignal,
   stripEndSignal,
+  windowConversation,
 } from '@/lib/limits';
 import { finalizeAndScoreSession } from '@/lib/session-scoring';
 
@@ -211,13 +212,18 @@ export async function POST(request: Request) {
     const routeReason = routeReasonForDifficulty(difficulty);
 
     // Include the just-saved agent message in history (skip [START] signal)
-    const history = [
+    const fullHistory = [
       ...session.messages.map((m: { role: string; content: string }) => ({
         role: m.role as 'CUSTOMER' | 'AGENT',
         content: m.content,
       })),
       ...(isStart ? [] : [{ role: 'AGENT' as const, content: content.trim() }]),
     ];
+    // Conversation-speed / cost lever: cap the context re-sent to the model each
+    // turn (#155 P3b-7). Short sessions are unchanged; only long ones are
+    // windowed to the opener + freshest turns. Scoring is unaffected — it reads
+    // the FULL transcript from the DB, not this generation context.
+    const history = windowConversation(fullHistory);
 
     // ── 5. Stream AI response ─────────────────────────────────────────────────
     const encoder = new TextEncoder();
