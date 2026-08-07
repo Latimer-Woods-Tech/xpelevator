@@ -421,7 +421,7 @@ jobs:
           fail=0
           for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
             echo "== $BASE =="
-            for path in /api/scenarios /api/jobs /api/criteria; do
+            for path in /api/scenarios /api/jobs /api/criteria /api/audit; do
               code=000
               for i in 1 2 3 4 5; do
                 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$path" || echo 000)

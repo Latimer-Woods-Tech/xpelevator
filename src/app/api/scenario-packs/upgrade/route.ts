@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { recordAudit } from '@/lib/audit';
 import {
   getScenarioPack,
   buildPackUpgradePlan,
@@ -164,6 +165,28 @@ export async function POST(request: Request) {
           if (r.length > 0) inserted += 1;
         }
       }
+    }
+
+    // Audit only a REAL re-sync (issue #157 §10): a clean no-op (nothing stale,
+    // nothing missing → updated=0, inserted=0) changed nothing, so it writes no
+    // audit row — same principle as the import route's no-op guard. Dry-run and
+    // the not-imported no-op already returned above without reaching here.
+    if (updated > 0 || inserted > 0) {
+      await recordAudit({
+        action: 'pack.upgrade',
+        actorUserId: session.user.dbUserId,
+        actorEmail: session.user.email,
+        orgId,
+        targetType: 'scenario_pack',
+        targetId: pack.id,
+        metadata: {
+          targetVersion: plan.targetVersion,
+          updated,
+          inserted,
+          unchanged: plan.unchangedKeys.length,
+          orphaned: plan.orphanedKeys.length,
+        },
+      });
     }
 
     // 200 always — upgrade is a re-sync; when everything was already current the

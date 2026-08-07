@@ -28,6 +28,11 @@ vi.mock('@/lib/db', () => ({
   sql: (...args: unknown[]) => sqlMock(...args),
 }));
 
+const recordAuditMock = vi.fn();
+vi.mock('@/lib/audit', () => ({
+  recordAudit: (...args: unknown[]) => recordAuditMock(...args),
+}));
+
 import { POST } from '@/app/api/scenario-packs/upgrade/route';
 import { AuthError } from '@/lib/auth-api';
 import { SCENARIO_PACKS, PACK_CATALOG_VERSION } from '@/lib/scenario-packs';
@@ -63,6 +68,7 @@ function routeSql(cases: Array<[RegExp, (values: unknown[]) => unknown[]]>) {
 beforeEach(() => {
   requireAuthMock.mockReset();
   sqlMock.mockReset();
+  recordAuditMock.mockReset();
 });
 
 describe('POST /api/scenario-packs/upgrade — auth gate', () => {
@@ -129,6 +135,7 @@ describe('POST /api/scenario-packs/upgrade — not imported', () => {
     expect(body.targetVersion).toBe(PACK_CATALOG_VERSION);
     // only the read ran — no UPDATE / INSERT
     expect(sqlMock).toHaveBeenCalledTimes(1);
+    expect(recordAuditMock).not.toHaveBeenCalled(); // not-imported no-op records nothing
   });
 });
 
@@ -154,6 +161,7 @@ describe('POST /api/scenario-packs/upgrade — dry run', () => {
     expect(JSON.stringify(body)).not.toMatch(/customerPersona|customerObjective|"hints"/);
     // only the read ran
     expect(sqlMock).toHaveBeenCalledTimes(1);
+    expect(recordAuditMock).not.toHaveBeenCalled(); // dry-run wrote nothing → no audit
   });
 });
 
@@ -175,6 +183,8 @@ describe('POST /api/scenario-packs/upgrade — write path', () => {
     expect(body.scenarios.unchanged).toBe(KEYS.length);
     // no UPDATE / INSERT statements issued
     expect(sqlMock).toHaveBeenCalledTimes(1);
+    // A clean no-op re-sync changed nothing → no audit row (issue #157 §10).
+    expect(recordAuditMock).not.toHaveBeenCalled();
   });
 
   it('stale rows → each is UPDATE-d and counted', async () => {
@@ -191,6 +201,17 @@ describe('POST /api/scenario-packs/upgrade — write path', () => {
     const body = await res.json();
     expect(body.scenarios.updated).toBe(KEYS.length);
     expect(body.scenarios.inserted).toBe(0);
+    // A real re-sync records one governance audit row (issue #157 §10).
+    expect(recordAuditMock).toHaveBeenCalledTimes(1);
+    expect(recordAuditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'pack.upgrade',
+        orgId: 'org-1',
+        targetType: 'scenario_pack',
+        targetId: PACK.id,
+        metadata: expect.objectContaining({ updated: KEYS.length, inserted: 0 }),
+      })
+    );
   });
 
   it('a missing catalog scenario → inserted under the resolved pack job title', async () => {

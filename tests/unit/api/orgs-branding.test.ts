@@ -29,6 +29,11 @@ vi.mock('@/lib/db', () => ({
   sql: (...args: unknown[]) => sqlMock(...args),
 }));
 
+const recordAuditMock = vi.fn();
+vi.mock('@/lib/audit', () => ({
+  recordAudit: (...args: unknown[]) => recordAuditMock(...args),
+}));
+
 import { GET, PUT } from '@/app/api/orgs/[id]/branding/route';
 import { AuthError } from '@/lib/auth-api';
 
@@ -83,6 +88,7 @@ function routeSql(cases: Array<[RegExp, (values: unknown[]) => unknown[]]>) {
 beforeEach(() => {
   requireAuthMock.mockReset();
   sqlMock.mockReset();
+  recordAuditMock.mockReset();
 });
 
 describe('GET /api/orgs/[id]/branding — auth + tenant isolation', () => {
@@ -172,6 +178,7 @@ describe('PUT /api/orgs/[id]/branding — validation + merge write', () => {
     ]);
     const res = await PUT(putReq({ displayName: 'X' }), params());
     expect(res.status).toBe(403);
+    expect(recordAuditMock).not.toHaveBeenCalled(); // rejected path records nothing
     expect(updated).toBe(false);
   });
 
@@ -192,6 +199,30 @@ describe('PUT /api/orgs/[id]/branding — validation + merge write', () => {
     expect(writtenValues).toContain('https://cdn/x.png');
     expect(writtenValues).toContain('#111111');
     expect(await res.json()).toMatchObject({ displayName: 'Fresh' });
+    // A real field change records one governance audit row (issue #157 §10).
+    expect(recordAuditMock).toHaveBeenCalledTimes(1);
+    expect(recordAuditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'org.branding.update',
+        orgId: ORG,
+        targetType: 'organization',
+        targetId: ORG,
+        metadata: expect.objectContaining({ changed: expect.arrayContaining(['displayName']) }),
+      })
+    );
+  });
+
+  it('a no-op PUT (merges to the same values) writes no audit row', async () => {
+    // Re-saving the form unchanged alters nothing → the "record real mutations
+    // only" guard must skip the audit write even though a 200 is returned.
+    asAdmin(ORG);
+    routeSql([
+      [/UPDATE/, () => [orgRow({ brandDisplayName: 'Same', brandLogoUrl: 'https://cdn/x.png' })]],
+      [/SELECT/, () => [orgRow({ brandDisplayName: 'Same', brandLogoUrl: 'https://cdn/x.png' })]],
+    ]);
+    const res = await PUT(putReq({ displayName: 'Same', logoUrl: 'https://cdn/x.png' }), params());
+    expect(res.status).toBe(200);
+    expect(recordAuditMock).not.toHaveBeenCalled();
   });
 
   it('a null clears a field via the merge', async () => {

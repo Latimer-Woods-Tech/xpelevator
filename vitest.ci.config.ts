@@ -77,6 +77,9 @@ export default defineConfig({
         'src/app/api/plans/route.ts',
         'src/app/api/me/route.ts',
         'src/app/api/health/route.ts',
+        // Governance audit-trail read surface (issue #157 §10) — ADMIN-only,
+        // org-scoped; the read side of the append-only log written by src/lib/audit.ts.
+        'src/app/api/audit/route.ts',
         'src/app/api/reports/sessions/route.ts',
         // Operator-hierarchy + white-label + SKU surfaces (the R-043 routes that
         // had live cross-tenant bugs in runs 30/31/32) — each already ≥ floor.
