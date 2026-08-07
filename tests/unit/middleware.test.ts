@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import middleware from '@/middleware';
 
@@ -77,5 +77,44 @@ describe('middleware auth gate', () => {
     // is not accidentally opened.
     const res = middleware(anonRequest('/api/me'));
     expect(res.status).toBe(401);
+  });
+});
+
+// ── Proof-of-removal: the DISABLE_AUTH backdoor (Standing Law 1, R-080) ────────
+//
+// The auth-bypass footgun (`DISABLE_AUTH` → synthetic ADMIN, once at
+// middleware.ts:56 / auth-api.ts:58) was retired with the credential-bound
+// `tests/integration` tier. `requireAuth` already carries its own proof-of-
+// removal (`tests/unit/lib/auth-api.test.ts`). This is the matching guard at
+// the OTHER cited layer — the middleware gate: no env flag may open it. The
+// module is re-imported with `DISABLE_AUTH=true` set so a bypass reintroduced
+// at EITHER module-load OR request time is caught. `middleware.ts` reads no env
+// at all today, so an anonymous caller to a protected route must still 401.
+describe('middleware — DISABLE_AUTH backdoor stays retired (R-080)', () => {
+  afterEach(() => {
+    delete process.env.DISABLE_AUTH;
+    vi.resetModules();
+  });
+
+  it('ignores DISABLE_AUTH=true and still 401s anonymous callers on protected routes', async () => {
+    process.env.DISABLE_AUTH = 'true';
+    vi.resetModules();
+    // Fresh import with the env flag set — catches a load-time bypass too.
+    const freshMiddleware = (await import('@/middleware')).default;
+    for (const path of ['/api/scenarios', '/api/jobs', '/api/criteria', '/api/me', '/api/orgs']) {
+      const res = freshMiddleware(anonRequest(path));
+      expect(res.status, `${path} must stay gated even with DISABLE_AUTH=true`).toBe(401);
+    }
+  });
+
+  it('ignores DISABLE_AUTH=true and still redirects anonymous page callers to sign-in', async () => {
+    process.env.DISABLE_AUTH = 'true';
+    vi.resetModules();
+    const freshMiddleware = (await import('@/middleware')).default;
+    const res = freshMiddleware(anonRequest('/admin/scenarios'));
+    // A protected page: 3xx redirect to /auth/signin, never a synthetic pass-through.
+    expect(res.status).toBeGreaterThanOrEqual(300);
+    expect(res.status).toBeLessThan(400);
+    expect(res.headers.get('location')).toContain('/auth/signin');
   });
 });
