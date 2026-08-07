@@ -228,6 +228,22 @@ model ApiRateLimit {
   @@map("api_rate_limits")
 }
 
+// Event-ID idempotency ledger for inbound provider webhooks (Telnyx Call
+// Control, issue #157). Telnyx delivers AT-LEAST-ONCE, so one event's stable
+// `data.id` can arrive twice; the webhook handler returns 200 up-front and works
+// in the background, so a duplicate would re-run the whole handler (racing
+// gather/speak on a live call). One row per event id — first delivery claims it,
+// retries hit the PK and skip. Accessed via the neon `sql` client in
+// src/lib/idempotency.ts; this model exists only so the migration is tracked in
+// the Prisma history (same posture as ApiRateLimit above).
+model WebhookEvent {
+  eventId String   @id @map("event_id")
+  seenAt  DateTime @default(now()) @map("seen_at")
+
+  @@index([seenAt])
+  @@map("webhook_events")
+}
+
 enum SimulationType {
   PHONE
   CHAT
