@@ -33,6 +33,14 @@ vi.mock('@/lib/db', () => ({
   sql: (...args: unknown[]) => sqlMock(...args),
 }));
 
+// Audit wiring (issue #157 §10): member.add / member.remove record one event on
+// a completed change; rejected paths record none. Mocked so the best-effort
+// writer never reaches the strict sql matcher below.
+const recordAuditMock = vi.fn();
+vi.mock('@/lib/audit', () => ({
+  recordAudit: (...args: unknown[]) => recordAuditMock(...args),
+}));
+
 import { GET, POST, DELETE } from '@/app/api/orgs/[id]/members/route';
 import { AuthError } from '@/lib/auth-api';
 
@@ -116,6 +124,7 @@ function routeSql(opts: {
 beforeEach(() => {
   requireAuthMock.mockReset();
   sqlMock.mockReset();
+  recordAuditMock.mockReset();
 });
 
 describe('POST /api/orgs/[id]/members — cross-tenant member-hijack guard', () => {
@@ -156,6 +165,7 @@ describe('POST /api/orgs/[id]/members — cross-tenant member-hijack guard', () 
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe('USER_IN_ANOTHER_ORG');
     expect(state.inserted).toBe(false); // the hijack upsert never ran
+    expect(recordAuditMock).not.toHaveBeenCalled(); // rejected → no audit row
   });
 
   it('creates a brand-new user (no existing email) → 201', async () => {
@@ -164,6 +174,10 @@ describe('POST /api/orgs/[id]/members — cross-tenant member-hijack guard', () 
     const res = await POST(postReq({ email: 'new@org-b.com' }), params());
     expect(res.status).toBe(201);
     expect(state.inserted).toBe(true);
+    // Audits the membership add against the new user (issue #157 §10).
+    expect(recordAuditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'member.add', orgId: DEST, targetId: 'new-user' }),
+    );
   });
 
   it('re-invites a user already in this org → 201 (same-org, guard skipped)', async () => {
@@ -259,6 +273,7 @@ describe('DELETE /api/orgs/[id]/members — auth + destination isolation', () =>
     const res = await DELETE(deleteReq({ userId: 'u9' }), params());
     expect(res.status).toBe(403);
     expect(state.orgIdCleared).toBe(false);
+    expect(recordAuditMock).not.toHaveBeenCalled(); // rejected → no audit row
   });
 
   it('own-org admin removes a member in the org → 204', async () => {
@@ -267,6 +282,10 @@ describe('DELETE /api/orgs/[id]/members — auth + destination isolation', () =>
     const res = await DELETE(deleteReq({ userId: 'u9' }), params());
     expect(res.status).toBe(204);
     expect(state.orgIdCleared).toBe(true);
+    // Audits the removal against the evicted user (issue #157 §10).
+    expect(recordAuditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'member.remove', orgId: DEST, targetId: 'u9' }),
+    );
   });
 
   it('member not in this org → 404', async () => {

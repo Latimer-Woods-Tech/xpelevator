@@ -6,6 +6,7 @@ import {
   buildPackImportPlan,
   packModalityProfile,
 } from '@/lib/scenario-packs';
+import { recordAudit } from '@/lib/audit';
 
 // POST /api/scenario-packs/import
 // Body: { packId: string, dryRun?: boolean }
@@ -149,6 +150,26 @@ export async function POST(request: Request) {
 
     // 201 when anything new landed, 200 when the import was a full no-op re-run.
     const status = jobTitleCreated || created > 0 ? 201 : 200;
+
+    // Audit only a REAL import (issue #157 §10) — a full no-op re-run (200)
+    // changed nothing, so it writes no audit row. A dry-run already returned
+    // above without touching the DB.
+    if (status === 201) {
+      await recordAudit({
+        action: 'pack.import',
+        actorUserId: session.user.dbUserId,
+        actorEmail: session.user.email,
+        orgId,
+        targetType: 'scenario_pack',
+        targetId: pack.id,
+        metadata: {
+          packVersion: plan.packVersion,
+          jobTitleId,
+          scenariosCreated: created,
+        },
+      });
+    }
+
     return NextResponse.json(
       {
         packId: pack.id,

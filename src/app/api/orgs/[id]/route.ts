@@ -10,6 +10,7 @@ import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessOrg, canSetOrgPlan, canDeleteOrg } from '@/lib/org-hierarchy';
 import { getOrgGovernanceTarget } from '@/lib/org-guard';
 import { isOrgPlan } from '@/lib/plans';
+import { recordAudit } from '@/lib/audit';
 
 // Per-caller, tenant-scoped governance surface — never cache a response.
 export const dynamic = 'force-dynamic';
@@ -149,7 +150,7 @@ export async function PUT(
     `;
     
     const orgRows = await sql`
-      SELECT 
+      SELECT
         id,
         name,
         slug,
@@ -159,6 +160,22 @@ export async function PUT(
       WHERE id = ${id}
     `;
     const org: any = orgRows[0];
+
+    // Audit the completed governance mutation (issue #157 §10). `plan` is the
+    // seat-tier every entitlement gate reads, so a change to it is the most
+    // security-relevant field to capture; a bare rename is recorded too.
+    const changed: string[] = [];
+    if (body.name != null) changed.push('name');
+    if (body.plan != null) changed.push('plan');
+    await recordAudit({
+      action: 'org.update',
+      actorUserId: session.user.dbUserId,
+      actorEmail: session.user.email,
+      orgId: id,
+      targetType: 'organization',
+      targetId: id,
+      metadata: { changed, ...(body.plan != null ? { plan: body.plan } : {}) },
+    });
 
     return NextResponse.json(org);
   } catch (error) {
@@ -216,6 +233,18 @@ export async function DELETE(
     }
 
     await sql`DELETE FROM organizations WHERE id = ${id}`;
+
+    // Audit the deletion (issue #157 §10). The audit_log row is FK-free on
+    // purpose, so this record survives the org it describes being gone.
+    await recordAudit({
+      action: 'org.delete',
+      actorUserId: session.user.dbUserId,
+      actorEmail: session.user.email,
+      orgId: id,
+      targetType: 'organization',
+      targetId: id,
+    });
+
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     if (error instanceof AuthError) {

@@ -33,7 +33,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { requireAuthMock, sqlMock, FakeAuthError } = vi.hoisted(() => {
+const { requireAuthMock, sqlMock, recordAuditMock, FakeAuthError } = vi.hoisted(() => {
   class FakeAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -42,11 +42,15 @@ const { requireAuthMock, sqlMock, FakeAuthError } = vi.hoisted(() => {
       this.name = 'AuthError';
     }
   }
-  return { requireAuthMock: vi.fn(), sqlMock: vi.fn(), FakeAuthError };
+  return { requireAuthMock: vi.fn(), sqlMock: vi.fn(), recordAuditMock: vi.fn(), FakeAuthError };
 });
 
 vi.mock('@/lib/auth-api', () => ({ requireAuth: requireAuthMock, AuthError: FakeAuthError }));
 vi.mock('@/lib/db', () => ({ sql: sqlMock, default: sqlMock }));
+// Audit wiring (issue #157 §10): a completed org.update / org.delete records one
+// governance event; a rejected/no-op mutation records none. Mocked so the real
+// best-effort writer never touches the shared sqlMock.
+vi.mock('@/lib/audit', () => ({ recordAudit: (...a: unknown[]) => recordAuditMock(...a) }));
 
 // The routes import the REAL tenant-guard predicates (`org-hierarchy`) and the
 // REAL governance-target lookup (`org-guard`, which reads the mocked `sql`), and
@@ -137,6 +141,7 @@ function wireOrg(
 beforeEach(() => {
   requireAuthMock.mockReset();
   sqlMock.mockReset();
+  recordAuditMock.mockReset();
 });
 
 describe('GET /api/orgs — admin-only, scoped org list', () => {
@@ -309,6 +314,8 @@ describe('PUT /api/orgs/[id] — access + canSetOrgPlan (self-upgrade) guard', (
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toMatchObject({ code: 'PLAN_CHANGE_FORBIDDEN' });
     expect(ran('UPDATE organizations')).toBe(false);
+    // Rejected mutation → no audit row (issue #157 §10).
+    expect(recordAuditMock).not.toHaveBeenCalled();
   });
 
   it('ALLOWS an operator admin to set a CLIENT’s plan → 200 + UPDATE ran', async () => {
@@ -317,6 +324,15 @@ describe('PUT /api/orgs/[id] — access + canSetOrgPlan (self-upgrade) guard', (
     const res = await PUT(mutateReq('PUT', { plan: 'ENTERPRISE' }), idParams('orgC'));
     expect(res.status).toBe(200);
     expect(ran('UPDATE organizations')).toBe(true);
+    // Audits the completed plan change with the plan in metadata (issue #157 §10).
+    expect(recordAuditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'org.update',
+        orgId: 'orgC',
+        targetId: 'orgC',
+        metadata: expect.objectContaining({ changed: ['plan'], plan: 'ENTERPRISE' }),
+      }),
+    );
   });
 
   it('ALLOWS an org OWN admin a name-only rename (no plan) → 200 + UPDATE ran', async () => {
@@ -325,6 +341,10 @@ describe('PUT /api/orgs/[id] — access + canSetOrgPlan (self-upgrade) guard', (
     const res = await PUT(mutateReq('PUT', { name: 'Renamed' }), idParams('orgA'));
     expect(res.status).toBe(200);
     expect(ran('UPDATE organizations')).toBe(true);
+    // A rename records `changed: ['name']` and no plan key.
+    expect(recordAuditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'org.update', metadata: { changed: ['name'] } }),
+    );
   });
 
   it('ALLOWS a platform (null-org) admin to set any org’s plan → 200', async () => {
@@ -374,6 +394,7 @@ describe('DELETE /api/orgs/[id] — access + canDeleteOrg + session-safety guard
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toMatchObject({ code: 'ORG_DELETE_FORBIDDEN' });
     expect(ran('DELETE FROM organizations')).toBe(false);
+    expect(recordAuditMock).not.toHaveBeenCalled();
   });
 
   it('409s when an owned client still has sessions (no DELETE)', async () => {
@@ -390,6 +411,10 @@ describe('DELETE /api/orgs/[id] — access + canDeleteOrg + session-safety guard
     const res = await DELETE(mutateReq('DELETE'), idParams('orgC'));
     expect(res.status).toBe(204);
     expect(ran('DELETE FROM organizations')).toBe(true);
+    // Audits the deletion — the FK-free row outlives the org (issue #157 §10).
+    expect(recordAuditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'org.delete', orgId: 'orgC', targetId: 'orgC' }),
+    );
   });
 
   it('ALLOWS a platform (null-org) admin to delete a session-free org → 204', async () => {

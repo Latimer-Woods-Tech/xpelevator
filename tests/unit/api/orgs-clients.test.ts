@@ -29,6 +29,14 @@ vi.mock('@/lib/db', () => ({
   sql: (...args: unknown[]) => sqlMock(...args),
 }));
 
+// Audit wiring (issue #157 §10): a completed client.create records one event;
+// rejected paths record none. Mocked so the writer never reaches the strict
+// sql matcher below.
+const recordAuditMock = vi.fn();
+vi.mock('@/lib/audit', () => ({
+  recordAudit: (...args: unknown[]) => recordAuditMock(...args),
+}));
+
 import { GET, POST } from '@/app/api/orgs/[id]/clients/route';
 import { AuthError } from '@/lib/auth-api';
 
@@ -66,6 +74,7 @@ function routeSql(cases: Array<[RegExp, (values: unknown[]) => unknown[]]>) {
 beforeEach(() => {
   requireAuthMock.mockReset();
   sqlMock.mockReset();
+  recordAuditMock.mockReset();
 });
 
 describe('POST /api/orgs/[id]/clients — auth + tenant isolation', () => {
@@ -88,6 +97,7 @@ describe('POST /api/orgs/[id]/clients — auth + tenant isolation', () => {
     const res = await POST(req({ name: 'Acme' }), params(OPERATOR));
     expect(res.status).toBe(403);
     expect(sqlMock).not.toHaveBeenCalled();
+    expect(recordAuditMock).not.toHaveBeenCalled(); // rejected → no audit row
   });
 });
 
@@ -133,6 +143,15 @@ describe('POST /api/orgs/[id]/clients — write path', () => {
     expect(b.parentOrgId).toBe(OPERATOR);
     expect(b.slug).toBe('acme');
     expect(promoted).toBe(true);
+    // Audits the created client org, tying it back to its operator parent.
+    expect(recordAuditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'client.create',
+        orgId: 'c1',
+        targetId: 'c1',
+        metadata: expect.objectContaining({ parentOrgId: OPERATOR, slug: 'acme' }),
+      }),
+    );
   });
 
   it('slug conflict on first try → falls back to a suffixed slug (201)', async () => {
