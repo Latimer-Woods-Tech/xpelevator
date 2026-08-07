@@ -1192,25 +1192,34 @@ jobs:
           set -e
           PROBE="__ratelimit_probe_${{ github.run_id }}__"
           BASE="https://xpelevator.com"
-          saw404=0; saw429=0; code=000
-          for i in $(seq 1 140); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/branding/$PROBE?_=$i" || echo 000)
+          saw404=0; saw429=0; sawretry=0; code=000
+          # Capture headers of EVERY request; when one 429s we read Retry-After
+          # from that exact response. (A separate follow-up request can land in a
+          # new 60s window with the counter reset — that flaked run 31144418179.)
+          # Budget is 100/min; a single mid-loop window rollover can cost up to
+          # ~100 requests, so allow generous headroom to still cross the cap.
+          for i in $(seq 1 260); do
+            code=$(curl -s -D /tmp/rl-hdr.txt -o /dev/null -w '%{http_code}' "$BASE/api/branding/$PROBE?_=$i" || echo 000)
             [ "$code" = "404" ] && saw404=1
-            if [ "$code" = "429" ]; then saw429=1; echo "→ 429 after $i anonymous requests"; break; fi
+            if [ "$code" = "429" ]; then
+              saw429=1
+              echo "→ 429 after $i anonymous requests"
+              grep -iE 'HTTP/|^retry-after:|^cache-control:' /tmp/rl-hdr.txt || true
+              grep -iq '^retry-after:' /tmp/rl-hdr.txt && sawretry=1
+              break
+            fi
           done
-          echo "branded domain: saw404=$saw404 saw429=$saw429 last=$code"
+          echo "branded domain: saw404=$saw404 saw429=$saw429 sawretry=$sawretry last=$code"
           if [ "$saw404" != "1" ]; then
             echo "::error::/api/branding/[slug] never 404'd for an unknown slug (last=$code) — route/limiter wiring is wrong"
             exit 1
           fi
           if [ "$saw429" != "1" ]; then
-            echo "::error::rate limiter never engaged after 140 anonymous requests — the public surface is unthrottled (#157)"
+            echo "::error::rate limiter never engaged after 260 anonymous requests — the public surface is unthrottled (#157)"
             exit 1
           fi
-          # Prove it is OUR limiter (Retry-After + no-store), not an edge 429.
-          hdr=$(curl -s -D - -o /dev/null "$BASE/api/branding/$PROBE?_=hdr" || echo '')
-          printf '%s\n' "$hdr" | grep -iE 'HTTP/|^retry-after:|^cache-control:' || true
-          if ! printf '%s' "$hdr" | grep -iq '^retry-after:'; then
+          # Retry-After on the 429 proves it is OUR limiter, not an edge 429.
+          if [ "$sawretry" != "1" ]; then
             echo "::error::429 present but missing Retry-After — not the app limiter"
             exit 1
           fi
