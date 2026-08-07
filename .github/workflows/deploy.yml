@@ -1175,3 +1175,48 @@ jobs:
             exit 1
           fi
           echo "✅ Security headers present on both hosts (document + API)"
+
+      - name: Verify public-route rate limiting engages (429) — #157
+        # #157: the ANONYMOUS public routes (the brand-render reads + the public
+        # catalogs) took unbounded traffic. src/lib/rate-limit.ts now throttles
+        # per client-IP against a shared Neon counter (DB-backed on purpose:
+        # Workers run many isolates/colos, so in-memory under-counts). This is
+        # the permanent live proof-of-rejection: hammer the always-public
+        # enumeration point (GET /api/branding/[slug]) from one IP and assert an
+        # unknown slug 404s first (route + limiter wired, under budget) and then
+        # flips to 429 once the per-IP budget (100/min) is crossed. A unique
+        # slug + cache-buster per request guarantees every hit reaches the origin
+        # (never a CDN-cached 404). The counter is keyed on IP+window (not host),
+        # so the *.pages.dev alias is limited within the same tripped window too.
+        run: |
+          set -e
+          PROBE="__ratelimit_probe_${{ github.run_id }}__"
+          BASE="https://xpelevator.com"
+          saw404=0; saw429=0; code=000
+          for i in $(seq 1 140); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/branding/$PROBE?_=$i" || echo 000)
+            [ "$code" = "404" ] && saw404=1
+            if [ "$code" = "429" ]; then saw429=1; echo "→ 429 after $i anonymous requests"; break; fi
+          done
+          echo "branded domain: saw404=$saw404 saw429=$saw429 last=$code"
+          if [ "$saw404" != "1" ]; then
+            echo "::error::/api/branding/[slug] never 404'd for an unknown slug (last=$code) — route/limiter wiring is wrong"
+            exit 1
+          fi
+          if [ "$saw429" != "1" ]; then
+            echo "::error::rate limiter never engaged after 140 anonymous requests — the public surface is unthrottled (#157)"
+            exit 1
+          fi
+          # Prove it is OUR limiter (Retry-After + no-store), not an edge 429.
+          hdr=$(curl -s -D - -o /dev/null "$BASE/api/branding/$PROBE?_=hdr" || echo '')
+          printf '%s\n' "$hdr" | grep -iE 'HTTP/|^retry-after:|^cache-control:' || true
+          if ! printf '%s' "$hdr" | grep -iq '^retry-after:'; then
+            echo "::error::429 present but missing Retry-After — not the app limiter"
+            exit 1
+          fi
+          # Cross-host: the counter is shared (IP+window), so the alias should be
+          # limited in the same window. Informational only (a window-boundary
+          # roll between the loop and this probe must not flake the gate).
+          alias_code=$(curl -s -o /dev/null -w '%{http_code}' "https://${CF_PROJECT}.pages.dev/api/branding/$PROBE?_=alias" || echo 000)
+          echo "pages.dev alias within the tripped window -> $alias_code (informational)"
+          echo "✅ #157 public-route rate limiting engaged (429 + Retry-After) on the branded domain"

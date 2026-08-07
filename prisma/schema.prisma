@@ -212,6 +212,22 @@ model Score {
   @@map("scores")
 }
 
+// Fixed-window IP rate-limit counter for the ANONYMOUS public routes (issue
+// #157). One row per (route, ip-hash, time-window); `bucket` encodes all three
+// so a fresh window is a fresh row. DB-backed rather than in-memory because
+// Workers run many isolates/colos and an in-memory counter under-counts (same
+// rationale as src/lib/limits.ts). The runtime accesses it via the neon `sql`
+// client in src/lib/rate-limit.ts; this model exists only so the migration is
+// tracked in the Prisma history.
+model ApiRateLimit {
+  bucket    String   @id
+  count     Int      @default(0)
+  expiresAt DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("api_rate_limits")
+}
+
 enum SimulationType {
   PHONE
   CHAT

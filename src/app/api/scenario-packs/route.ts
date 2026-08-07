@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPublicPackCatalog } from '@/lib/scenario-packs';
+import { enforceRateLimit } from '@/lib/rate-limit';
 
 // GET /api/scenario-packs — public, read-only catalog of the starter
 // scenario-library packs (Phase 4: operators need sellable day-one inventory).
@@ -12,7 +13,12 @@ import { getPublicPackCatalog } from '@/lib/scenario-packs';
 //
 // Must be listed in middleware PUBLIC_ROUTES, or the /api/:path* matcher gates
 // anonymous callers with a 401 before this handler ever runs.
-export async function GET() {
+export async function GET(request: Request) {
+  // Per-IP rate limited (#157); fails OPEN so a DB blip never darkens the
+  // public catalog.
+  const limited = await enforceRateLimit(request, 'scenario-packs');
+  if (limited) return limited;
+
   return NextResponse.json(getPublicPackCatalog(), {
     headers: { 'Cache-Control': 'public, max-age=300' },
   });
