@@ -9,6 +9,7 @@ import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessOrg } from '@/lib/org-hierarchy';
 import { getOrgGovernanceTarget } from '@/lib/org-guard';
+import { recordAudit } from '@/lib/audit';
 
 // Per-caller, tenant-scoped governance surface — never cache a response.
 export const dynamic = 'force-dynamic';
@@ -134,6 +135,18 @@ export async function POST(
       createdAt: string;
     };
 
+    // Audit the membership change (issue #157 §10) — records the invited/relocated
+    // user as the target, with the granted role.
+    await recordAudit({
+      action: 'member.add',
+      actorUserId: session.user.dbUserId,
+      actorEmail: session.user.email,
+      orgId,
+      targetType: 'user',
+      targetId: user.id,
+      metadata: { email: user.email, role: user.role },
+    });
+
     return NextResponse.json(user, { status: 201 });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -184,6 +197,17 @@ export async function DELETE(
       SET org_id = NULL
       WHERE id = ${userId}
     `;
+
+    // Audit the removal (issue #157 §10) — `orgId` is the org the user was
+    // removed FROM, `targetId` the removed user.
+    await recordAudit({
+      action: 'member.remove',
+      actorUserId: session.user.dbUserId,
+      actorEmail: session.user.email,
+      orgId,
+      targetType: 'user',
+      targetId: userId,
+    });
 
     return new NextResponse(null, { status: 204 });
   } catch (error) {

@@ -23,6 +23,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canManageOrgClients, slugify, suffixSlug } from '@/lib/org-hierarchy';
+import { recordAudit } from '@/lib/audit';
 
 interface ClientRow {
   id: string;
@@ -170,6 +171,18 @@ export async function POST(
         { status: 409 }
       );
     }
+
+    // Audit the client-org creation (issue #157 §10). `orgId` is the new client
+    // org; `metadata.parentOrgId` ties it back to the operator that created it.
+    await recordAudit({
+      action: 'client.create',
+      actorUserId: session.user.dbUserId,
+      actorEmail: session.user.email,
+      orgId: created.id,
+      targetType: 'organization',
+      targetId: created.id,
+      metadata: { parentOrgId: id, slug: created.slug },
+    });
 
     return NextResponse.json(created, { status: 201 });
   } catch (error) {

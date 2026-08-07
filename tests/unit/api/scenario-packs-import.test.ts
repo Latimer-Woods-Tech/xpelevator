@@ -29,6 +29,14 @@ vi.mock('@/lib/db', () => ({
   sql: (...args: unknown[]) => sqlMock(...args),
 }));
 
+// Audit wiring (issue #157 §10): a REAL import (201) records one pack.import
+// event; a full no-op re-run (200) and a dry-run record none. Mocked so the
+// writer never reaches the strict sql matcher below.
+const recordAuditMock = vi.fn();
+vi.mock('@/lib/audit', () => ({
+  recordAudit: (...args: unknown[]) => recordAuditMock(...args),
+}));
+
 import { POST } from '@/app/api/scenario-packs/import/route';
 import { AuthError } from '@/lib/auth-api';
 import { SCENARIO_PACKS } from '@/lib/scenario-packs';
@@ -63,6 +71,7 @@ function routeSql(cases: Array<[RegExp, (values: unknown[]) => unknown[]]>) {
 beforeEach(() => {
   requireAuthMock.mockReset();
   sqlMock.mockReset();
+  recordAuditMock.mockReset();
 });
 
 describe('POST /api/scenario-packs/import — auth gate', () => {
@@ -118,6 +127,7 @@ describe('POST /api/scenario-packs/import — dry run', () => {
     // preview never leaks the hidden mechanics
     expect(JSON.stringify(body)).not.toMatch(/customerPersona|customerObjective|"hints"/);
     expect(sqlMock).not.toHaveBeenCalled();
+    expect(recordAuditMock).not.toHaveBeenCalled(); // dry-run wrote nothing → no audit
   });
 });
 
@@ -136,6 +146,18 @@ describe('POST /api/scenario-packs/import — write path', () => {
     expect(body.scenarios.skipped).toBe(0);
     expect(body.scenarios.total).toBe(PACK.scenarios.length);
     expect(body.packVersion).toBe(1);
+    // Audits the real import against the pack (issue #157 §10).
+    expect(recordAuditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'pack.import',
+        orgId: 'org-1',
+        targetId: PACK.id,
+        metadata: expect.objectContaining({
+          jobTitleId: 'jt-1',
+          scenariosCreated: PACK.scenarios.length,
+        }),
+      }),
+    );
   });
 
   it('re-import (all conflicts) → 200 no-op, job title + scenarios skipped', async () => {
@@ -152,6 +174,8 @@ describe('POST /api/scenario-packs/import — write path', () => {
     expect(body.jobTitle.id).toBe('jt-existing');
     expect(body.scenarios.created).toBe(0);
     expect(body.scenarios.skipped).toBe(PACK.scenarios.length);
+    // A full no-op re-run changed nothing → no audit row (issue #157 §10).
+    expect(recordAuditMock).not.toHaveBeenCalled();
   });
 
   it('partial re-import (role exists, one new scenario) → 201', async () => {

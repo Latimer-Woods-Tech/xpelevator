@@ -244,6 +244,35 @@ model WebhookEvent {
   @@map("webhook_events")
 }
 
+// Append-only audit trail for mutating admin/governance routes (issue #157 §10).
+// One row per COMPLETED governance mutation — actor (id + email snapshot),
+// `action` (e.g. `org.update`), target (`targetType`/`targetId`), tenant
+// (`orgId`), and a small structured `metadata` blob. Written best-effort AFTER
+// the mutation by src/lib/audit.ts (accessed via the neon `sql` client — this
+// model exists only so the migration is tracked in the Prisma history, same
+// posture as ApiRateLimit / WebhookEvent above).
+//
+// DELIBERATELY FK-FREE: an audit row must outlive the org/user it describes (the
+// `org.delete` record must survive the org's deletion), so `actorEmail` is a
+// snapshot and there are no relations to Organization/User. Append-only — the
+// app never updates or deletes these rows; retention/pruning is a separate
+// founder-gated follow-on (issue #157 §10 / docs/PII_INVENTORY.md).
+model AuditLog {
+  id          String   @id @default(uuid())
+  action      String
+  actorUserId String?  @map("actor_user_id")
+  actorEmail  String?  @map("actor_email")
+  orgId       String?  @map("org_id")
+  targetType  String?  @map("target_type")
+  targetId    String?  @map("target_id")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([orgId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_log")
+}
+
 enum SimulationType {
   PHONE
   CHAT
