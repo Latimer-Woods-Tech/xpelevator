@@ -29,6 +29,8 @@ import {
   sanitizeTranscriptLine,
   isSuspiciousScoreSet,
 } from '@/lib/ai';
+import { isGroqTokenUsage } from '@/lib/groq-fetch';
+import type { GroqTokenUsage } from '@/lib/groq-fetch';
 
 // ── fetch response helpers ────────────────────────────────────────────────────
 
@@ -71,6 +73,37 @@ function streamResponse(deltas: Array<string | null>) {
             : { choices: [{ delta: { content: d } }] };
         controller.enqueue(enc.encode(`data: ${JSON.stringify(frame)}\n\n`));
       }
+      controller.enqueue(enc.encode('data: [DONE]\n\n'));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200 });
+}
+
+/**
+ * Build a streaming (SSE) Groq Response that ends with a terminal usage chunk —
+ * empty `choices` + a `usage` block — exactly as Groq emits when
+ * `stream_options.include_usage` is set (R-132, #155). `usage: null` emits a
+ * malformed terminal chunk (no usage) to exercise the guard's rejection path.
+ */
+function streamResponseWithUsage(
+  deltas: Array<string | null>,
+  usage: GroqTokenUsage | null
+) {
+  const enc = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const d of deltas) {
+        const frame =
+          d === null
+            ? { choices: [{ delta: {} }] }
+            : { choices: [{ delta: { content: d } }] };
+        controller.enqueue(enc.encode(`data: ${JSON.stringify(frame)}\n\n`));
+      }
+      // Terminal usage chunk (empty choices). When `usage` is null we still emit
+      // the empty-choices chunk but with no usage block, so the sink must NOT fire.
+      const tail = usage === null ? { choices: [] } : { choices: [], usage };
+      controller.enqueue(enc.encode(`data: ${JSON.stringify(tail)}\n\n`));
       controller.enqueue(enc.encode('data: [DONE]\n\n'));
       controller.close();
     },
@@ -760,5 +793,89 @@ describe('lib/ai — resolveScenarioDifficulty', () => {
     expect(
       customerModelForDifficulty(resolveScenarioDifficulty({ difficulty: 'medium' }))
     ).toBe('llama-3.1-8b-instant');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-turn Groq token-usage capture (R-132, issue #155).
+//
+// LLM cost was previously unmeasured. The chat (streaming) path now asks Groq
+// for a terminal usage chunk (`stream_options.include_usage`) and surfaces it via
+// an `onUsage` sink so the reply row can persist prompt/completion/total tokens
+// beside its latency telemetry — the input the Phase-4 wholesale-seat margin
+// needs. These guard both the request flag and the sink's fire/skip behaviour.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('lib/ai — streaming token-usage capture (R-132)', () => {
+  it('requests the usage stream option so Groq emits a usage chunk', async () => {
+    fetchMock.mockResolvedValueOnce(streamResponseWithUsage(['ok'], null));
+    for await (const _ of streamNextCustomerMessage('prompt', [])) {
+      /* drain */
+    }
+    const [, init] = fetchMock.mock.calls[0];
+    const sent = JSON.parse((init as RequestInit).body as string);
+    expect(sent.stream_options).toEqual({ include_usage: true });
+  });
+
+  it('surfaces the terminal usage chunk through the onUsage sink', async () => {
+    const usage: GroqTokenUsage = {
+      prompt_tokens: 321,
+      completion_tokens: 42,
+      total_tokens: 363,
+    };
+    fetchMock.mockResolvedValueOnce(
+      streamResponseWithUsage(['My ', 'internet ', 'is down.'], usage)
+    );
+
+    const seen: GroqTokenUsage[] = [];
+    const tokens: string[] = [];
+    for await (const token of streamNextCustomerMessage('prompt', [], undefined, (u) => {
+      seen.push(u);
+    })) {
+      tokens.push(token);
+    }
+
+    // Content stream is unaffected by the usage plumbing …
+    expect(tokens.join('')).toBe('My internet is down.');
+    // … and the sink received exactly the terminal usage block.
+    expect(seen).toEqual([usage]);
+  });
+
+  it('PROOF-OF-REJECTION: the sink never fires when the stream carries no usage block', async () => {
+    fetchMock.mockResolvedValueOnce(
+      streamResponseWithUsage(['Hello!'], null)
+    );
+
+    const seen: GroqTokenUsage[] = [];
+    const tokens: string[] = [];
+    for await (const token of streamNextCustomerMessage('prompt', [], undefined, (u) => {
+      seen.push(u);
+    })) {
+      tokens.push(token);
+    }
+
+    expect(tokens).toEqual(['Hello!']);
+    expect(seen).toEqual([]); // no usage chunk → sink stays silent, no throw
+  });
+});
+
+describe('lib/groq-fetch — isGroqTokenUsage guard', () => {
+  it('accepts a well-formed usage block', () => {
+    expect(
+      isGroqTokenUsage({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 })
+    ).toBe(true);
+  });
+
+  it('PROOF-OF-REJECTION: rejects missing, non-numeric, or non-finite fields', () => {
+    expect(isGroqTokenUsage(undefined)).toBe(false);
+    expect(isGroqTokenUsage(null)).toBe(false);
+    expect(isGroqTokenUsage({})).toBe(false);
+    expect(isGroqTokenUsage({ prompt_tokens: 10, completion_tokens: 5 })).toBe(false);
+    expect(
+      isGroqTokenUsage({ prompt_tokens: '10', completion_tokens: 5, total_tokens: 15 })
+    ).toBe(false);
+    expect(
+      isGroqTokenUsage({ prompt_tokens: NaN, completion_tokens: 5, total_tokens: 15 })
+    ).toBe(false);
   });
 });

@@ -133,6 +133,24 @@ function streamThrows(err: Error) {
     yield '';
   };
 }
+type Usage = { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+/**
+ * Like {@link streamOf}, but fires the route's `onUsage` sink (4th arg) with a
+ * token-usage block after the last chunk — mirroring the terminal usage chunk
+ * Groq emits under `stream_options.include_usage` (R-132, #155). Lets a test
+ * assert the CUSTOMER reply row persists the token columns.
+ */
+function streamOfWithUsage(usage: Usage, ...chunks: string[]) {
+  return async function* (
+    _prompt?: unknown,
+    _history?: unknown,
+    _model?: unknown,
+    onUsage?: (u: Usage) => void
+  ) {
+    for (const c of chunks) yield c;
+    onUsage?.(usage);
+  };
+}
 
 /** Drain an SSE Response body to completion and return the parsed data frames. */
 async function collectSSE(res: Response): Promise<Array<Record<string, unknown>>> {
@@ -260,6 +278,40 @@ describe('POST /api/chat — streaming + terminal', () => {
       queryText(c[0]).includes("'CUSTOMER'")
     );
     expect(insertedCustomer).toBe(true);
+  });
+
+  it('persists per-turn Groq token usage on the CUSTOMER reply row (R-132)', async () => {
+    asUser('u1', 'o1');
+    const usage: Usage = { prompt_tokens: 321, completion_tokens: 42, total_tokens: 363 };
+    aiMock.streamNextCustomerMessage.mockImplementation(
+      streamOfWithUsage(usage, 'All ', 'good')
+    );
+    wireSql({ postLoad: [sessionRow()], insertCustomer: [] });
+
+    await collectSSE(await POST(postReq({ sessionId: 'sess1', content: '[START]' })));
+
+    // The CUSTOMER INSERT interpolates its values in column order; the three
+    // token columns are the final three interpolations.
+    const custCall = sqlMock.mock.calls.find((c) =>
+      queryText(c[0]).includes("'CUSTOMER'")
+    );
+    expect(custCall).toBeDefined();
+    const values = custCall!.slice(1);
+    expect(values.slice(-3)).toEqual([321, 42, 363]);
+  });
+
+  it('leaves the token columns NULL when the model returns no usage', async () => {
+    asUser('u1', 'o1');
+    // streamOf never fires onUsage → turnUsage stays null.
+    aiMock.streamNextCustomerMessage.mockImplementation(streamOf('All ', 'good'));
+    wireSql({ postLoad: [sessionRow()], insertCustomer: [] });
+
+    await collectSSE(await POST(postReq({ sessionId: 'sess1', content: '[START]' })));
+
+    const custCall = sqlMock.mock.calls.find((c) =>
+      queryText(c[0]).includes("'CUSTOMER'")
+    );
+    expect(custCall!.slice(1).slice(-3)).toEqual([null, null, null]);
   });
 
   it('[START] opener streams without inserting an AGENT message', async () => {

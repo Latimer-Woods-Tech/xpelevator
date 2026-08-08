@@ -7,6 +7,7 @@ import {
   resolveScenarioDifficulty,
 } from '@/lib/ai';
 import { classifyTurnLatency, routeReasonForDifficulty } from '@/lib/latency';
+import type { GroqTokenUsage } from '@/lib/groq-fetch';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
 import { sanitizeSessionScenario } from '@/lib/scenario-safety';
@@ -238,8 +239,11 @@ export async function POST(request: Request) {
         const turnStart = Date.now();
         let ttftMs = 0;
         let firstChunkSeen = false;
+        // Per-turn Groq token usage (R-132, #155), captured from the stream's
+        // terminal usage chunk and persisted beside this turn's latency telemetry.
+        let turnUsage: GroqTokenUsage | null = null;
         try {
-          for await (const chunk of streamNextCustomerMessage(systemPrompt, history, customerModel)) {
+          for await (const chunk of streamNextCustomerMessage(systemPrompt, history, customerModel, (u) => { turnUsage = u; })) {
             if (!firstChunkSeen) {
               firstChunkSeen = true;
               ttftMs = Date.now() - turnStart;
@@ -274,13 +278,19 @@ export async function POST(request: Request) {
           // Save the full AI message to DB, stamping this turn's latency telemetry
           // (R-066) so the felt-speed metric becomes a durable, queryable record —
           // not just a live badge (R-060) + an ephemeral log line (R-057).
+          // `turnUsage` is set inside the stream callback above; TS can't
+          // track a closure assignment through the async iterator, so read it
+          // back through an explicitly-typed local for the token columns.
+          const usage = turnUsage as GroqTokenUsage | null;
           await sql`
             INSERT INTO chat_messages
               (id, session_id, role, content, timestamp,
-               ttft_ms, total_ms, latency_tier, model, route_reason)
+               ttft_ms, total_ms, latency_tier, model, route_reason,
+               prompt_tokens, completion_tokens, total_tokens)
             VALUES
               (gen_random_uuid(), ${sessionId}, 'CUSTOMER', ${cleanedResponse}, NOW(),
-               ${timing.ttftMs}, ${timing.totalMs}, ${timing.tier}, ${customerModel}, ${routeReason})
+               ${timing.ttftMs}, ${timing.totalMs}, ${timing.tier}, ${customerModel}, ${routeReason},
+               ${usage?.prompt_tokens ?? null}, ${usage?.completion_tokens ?? null}, ${usage?.total_tokens ?? null})
           `;
 
           if (isResolved) {
