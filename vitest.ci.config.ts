@@ -87,6 +87,11 @@ export default defineConfig({
         // clientOrgId operator→client (404/403/200) / malformed-window 400 /
         // since+until composition all deterministically covered.
         'src/app/api/reports/spend/route.ts',
+        // Monthly LLM budget report (#155) — ADMIN-only, org-scoped read that
+        // evaluates month-to-date Groq spend against the seat-tier ceiling the
+        // POST /api/simulations gate enforces. Anon 401 / non-admin 403 /
+        // own-org scope / tier-from-plan / over-ceiling status / 500 covered.
+        'src/app/api/reports/budget/route.ts',
         // Operator-hierarchy + white-label + SKU surfaces (the R-043 routes that
         // had live cross-tenant bugs in runs 30/31/32) — each already ≥ floor.
         'src/app/api/branding/[slug]/route.ts',

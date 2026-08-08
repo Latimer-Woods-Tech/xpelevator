@@ -1044,6 +1044,37 @@ jobs:
           fi
           echo "✅ /api/reports/spend rejects anonymous callers (401) on both hosts"
 
+      - name: Verify budget report is auth-gated (#155)
+        # The monthly LLM budget report (GET /api/reports/budget) shows a
+        # tenant's month-to-date Groq spend against its seat-tier ceiling —
+        # ADMIN-only and org-scoped, and must NEVER be readable anonymously
+        # (a 200 here would leak per-tenant cost/margin data). The /api/*
+        # middleware matcher gates it and the handler additionally requires
+        # role=ADMIN. Permanent regression gate: an anonymous caller must get
+        # 401 on both hosts. Checked on the pages.dev alias (authoritative for
+        # this deploy) and the branded domain.
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/reports/budget" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/reports/budget -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/reports/budget must require auth (got $code) — budget report would leak tenant cost data"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Budget report auth-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /api/reports/budget rejects anonymous callers (401) on both hosts"
+
       - name: Verify home page is copy-clean (org copy rule, Phase 4)
         # The public home page (`/`) previously described "AI-generated
         # performance scores". Phase 4 copy pass rewrote it to craft vocabulary
