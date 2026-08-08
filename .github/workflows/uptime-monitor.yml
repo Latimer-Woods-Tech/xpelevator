@@ -115,5 +115,7 @@ jobs:
             const reason =
               'The end-to-end scoring canary failed against https://xpelevator.com — a full ' +
               'authenticated session did NOT produce a non-null score (the Phase-1 core-loop ' +
-              'acceptance). See the run log for the failing step.';
+              'acceptance) OR the scored session recorded NO per-turn Groq token usage ' +
+              '(R-132 / #155 — the Phase-4 wholesale-seat margin input). See the run log for ' +
+              'the failing step.';
             await require('./scripts/monitor-alert.cjs')({ github, context, reason, job: 'scoring-canary' });

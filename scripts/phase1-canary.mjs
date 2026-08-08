@@ -29,6 +29,7 @@
  */
 import { neon } from '@neondatabase/serverless';
 import { encode } from 'next-auth/jwt';
+import { evaluateTokenUsage } from './lib/token-usage-check.mjs';
 
 const BASE = (process.env.BASE_URL || '').replace(/\/$/, '');
 const AUTH_SECRET = process.env.AUTH_SECRET?.replace(/\r/g, '');
@@ -242,6 +243,33 @@ async function main() {
   }
   console.log(`   Non-null criteria scored: ${numeric.length}/${scores.length}; simple avg ${avg}/10`);
   console.log('\nSCORING ENGINE IS LIVE — a full session produced non-null scores.');
+
+  // ── 6. Verify per-turn token usage POPULATED live (R-132, #155) ────────────
+  // Run 99 (#218) shipped per-CUSTOMER-reply Groq token accounting but left the
+  // live population unobserved (existing sessions predate the deploy and stay
+  // NULL by design; only a fresh scored session fills the columns). This driven
+  // session is that fresh session — so assert at least one CUSTOMER reply row
+  // carries a non-null positive total_tokens. This makes token accounting a
+  // monitored live gate (Standing Law 1): a regression that stops recording
+  // usage (a dropped Groq `usage` block, a missing include_usage, a column
+  // rename) turns this canary red instead of silently nulling the Phase-4
+  // wholesale-seat margin input, exactly as the expired-key incident once
+  // silently nulled every score.
+  const usageRows = await sql`
+    SELECT total_tokens AS "totalTokens",
+           prompt_tokens AS "promptTokens",
+           completion_tokens AS "completionTokens"
+    FROM chat_messages
+    WHERE session_id = ${sessionId} AND role = 'CUSTOMER'
+    ORDER BY timestamp
+  `;
+  const tok = evaluateTokenUsage(usageRows);
+  if (!tok.ok) fail(tok.reason, JSON.stringify(usageRows, null, 2));
+  console.log(
+    `✓ token usage persisted: ${tok.withTokens}/${usageRows.length} CUSTOMER ` +
+      `replies carry usage; session total ${tok.total} tokens.`
+  );
+  console.log('TOKEN ACCOUNTING IS LIVE — per-turn Groq usage recorded on the reply rows.');
 }
 
 main().catch((e) => fail('unexpected error', e?.stack || String(e)));
