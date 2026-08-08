@@ -11,13 +11,19 @@ datasource db {
 // ── Organisation / multi-tenant models ──────────────────────────────────────────
 
 model Organization {
-  id          String   @id @default(uuid())
+  // id / created_at carry DB-level defaults introspected from the retrofit
+  // baseline (issue #215): the id column DEFAULTs `gen_random_uuid()::text` and
+  // created_at is `timestamptz`. Declared here so schema.prisma matches the
+  // migration-produced DB (the `migrate diff` drift gate stays green). Runtime
+  // inserts are raw SQL that supply id explicitly, so this is schema-of-record
+  // only — no behavior change.
+  id          String   @id @default(dbgenerated("(gen_random_uuid())::text"))
   name        String
   slug        String   @unique
   plan        OrgPlan  @default(FREE)
   kind        OrgKind  @default(STANDALONE)
   parentOrgId String?  @map("parent_org_id") // set when this org is a CLIENT owned by an OPERATOR
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   // White-label operator branding (issue #16, Phase 4, R-044). All nullable —
   // NULL means "fall back to the platform default". Colors are stored as
@@ -30,7 +36,10 @@ model Organization {
 
   // Operator→client hierarchy (issue #16, Phase 4). A CLIENT org points at the
   // OPERATOR org that owns it; an OPERATOR org has many client children.
-  parent   Organization?  @relation("OrgHierarchy", fields: [parentOrgId], references: [id])
+  // onDelete: Restrict matches the DB FK (an operator with live clients cannot
+  // be silently orphaned — see 20260712180000_add_org_hierarchy). Explicit here
+  // so it does not drift from the migration (issue #215).
+  parent   Organization?  @relation("OrgHierarchy", fields: [parentOrgId], references: [id], onDelete: Restrict)
   children Organization[] @relation("OrgHierarchy")
 
   users       User[]
@@ -44,12 +53,15 @@ model Organization {
 }
 
 model User {
-  id        String   @id @default(uuid())
+  // See Organization above (issue #215): id / created_at carry the retrofit
+  // baseline's DB-level defaults + timestamptz type. Schema-of-record only —
+  // runtime inserts are raw SQL that supply id explicitly.
+  id        String   @id @default(dbgenerated("(gen_random_uuid())::text"))
   orgId     String?  @map("org_id")       // nullable — users without an org use personal workspace
   email     String   @unique
   name      String?
   role      UserRole @default(MEMBER)
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   org      Organization? @relation(fields: [orgId], references: [id])
   sessions SimulationSession[]
