@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import middleware from '@/middleware';
+import { REQUEST_ID_HEADER } from '@/lib/log';
 
 // The middleware `matcher` covers `/api/:path*`, so EVERY /api route passes
 // through this gate. A route handler declaring itself "public" is not enough —
@@ -8,9 +9,9 @@ import middleware from '@/middleware';
 // the handler ever runs. These tests exercise the gate itself (the handler-only
 // tests in api/plans.test.ts bypass it) so a public/protected mismatch is caught.
 
-function anonRequest(path: string): NextRequest {
+function anonRequest(path: string, headers?: Record<string, string>): NextRequest {
   // No session cookie set → simulates an anonymous caller.
-  return new NextRequest(new URL(`http://localhost${path}`));
+  return new NextRequest(new URL(`http://localhost${path}`), { headers });
 }
 
 /** NextResponse.next() sets this header; a 401 block does not. */
@@ -116,5 +117,48 @@ describe('middleware — DISABLE_AUTH backdoor stays retired (R-080)', () => {
     expect(res.status).toBeGreaterThanOrEqual(300);
     expect(res.status).toBeLessThan(400);
     expect(res.headers.get('location')).toContain('/auth/signin');
+  });
+});
+
+// ── Request-ID correlation propagation (R-111) ─────────────────────────────────
+//
+// The middleware mints/propagates an `x-request-id` on EVERY response path so a
+// single request is traceable end-to-end (client header ↔ structured logs). This
+// guards all three exits: public pass-through, the /api 401, and the page
+// redirect — plus the caller-supplied-id honour path.
+describe('middleware — x-request-id correlation (R-111)', () => {
+  it('stamps an x-request-id on a public pass-through response', () => {
+    const res = middleware(anonRequest('/api/health'));
+    expect(passedThrough(res)).toBe(true);
+    expect(res.headers.get(REQUEST_ID_HEADER)).toMatch(/[0-9a-f-]{36}/i);
+  });
+
+  it('stamps an x-request-id on the anonymous /api 401', () => {
+    const res = middleware(anonRequest('/api/scenarios'));
+    expect(res.status).toBe(401);
+    expect(res.headers.get(REQUEST_ID_HEADER)).toMatch(/[0-9a-f-]{36}/i);
+  });
+
+  it('stamps an x-request-id on the page sign-in redirect', () => {
+    const res = middleware(anonRequest('/admin/scenarios'));
+    expect(res.status).toBeGreaterThanOrEqual(300);
+    expect(res.status).toBeLessThan(400);
+    expect(res.headers.get(REQUEST_ID_HEADER)).toMatch(/[0-9a-f-]{36}/i);
+  });
+
+  it('honours a caller-supplied x-request-id (upstream trace continuity)', () => {
+    const supplied = 'upstream-trace-abc123';
+    for (const path of ['/api/health', '/api/scenarios']) {
+      const res = middleware(anonRequest(path, { [REQUEST_ID_HEADER]: supplied }));
+      expect(res.headers.get(REQUEST_ID_HEADER), path).toBe(supplied);
+    }
+  });
+
+  it('mints a DISTINCT id per request when none is supplied', () => {
+    const a = middleware(anonRequest('/api/health')).headers.get(REQUEST_ID_HEADER);
+    const b = middleware(anonRequest('/api/health')).headers.get(REQUEST_ID_HEADER);
+    expect(a).toBeTruthy();
+    expect(b).toBeTruthy();
+    expect(a).not.toBe(b);
   });
 });
