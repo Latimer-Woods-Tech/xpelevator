@@ -166,10 +166,12 @@ jobs:
   #      `migrate deploy` ever runs it against production;
   #   2. (HARD, Standing Law 1 proof-of-rejection) a deliberately broken
   #      migration is REJECTED — the gate is provably not a no-op;
-  #   3. (ADVISORY, Standing Law 5 ratchet — issue #215) schema<->migration
-  #      drift is reported but does NOT block, because organizations/users carry
-  #      pre-existing retrofit-baseline drift (DB-level gen_random_uuid() id
-  #      defaults + created_at type). Flips to a hard gate when the diff is empty.
+  #   3. (HARD, Standing Law 5 ratchet PROMOTED — issue #215) schema<->migration
+  #      drift is ZERO. The organizations/users retrofit-baseline drift was
+  #      reconciled (schema.prisma now declares the DB-level gen_random_uuid() id
+  #      defaults, timestamptz created_at, and the parent_org_id onDelete FK), so
+  #      the migration history is once again the single source of truth and any
+  #      drift — including an RLS migration that doesn't diff clean — fails CI.
   migrations:
     name: Migration integrity (ephemeral Postgres)
     runs-on: ubuntu-latest
@@ -234,13 +236,15 @@ jobs:
           fi
           echo "proof-of-rejection OK — broken migration rejected (exit $code)"
 
-      # ADVISORY (Standing Law 5 ratchet — issue #215). Reports schema<->migration
-      # drift without blocking: organizations/users carry pre-existing retrofit
-      # drift, so a hard gate here would red-block every PR against unrelated
-      # debt. Never silent — the drift prints in the log every run; promote to a
-      # hard gate (drop continue-on-error) once `migrate diff` is empty.
-      - name: Schema↔migration drift (advisory — reports, never blocks) [#215]
-        continue-on-error: true
+      # HARD GATE 3 — schema<->migration drift must be ZERO (Standing Law 5
+      # ratchet promoted — issue #215). The organizations/users retrofit-baseline
+      # drift was reconciled (schema.prisma now declares the DB-level
+      # gen_random_uuid() id defaults, timestamptz created_at, and the
+      # parent_org_id onDelete: Restrict FK), so `migrate diff` returns empty.
+      # From here the migration history is the single source of truth: any PR
+      # that lets schema.prisma drift from the migrations — including a future
+      # RLS migration that doesn't diff clean — fails this job.
+      - name: Schema↔migration drift must be empty [#215]
         run: |
           npx prisma migrate diff \
             --from-url "$DATABASE_URL" \
