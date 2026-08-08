@@ -156,6 +156,97 @@ jobs:
       - name: Build
         run: npm run build
 
+  # Migration-integrity gate (issue #16 Phase 3 / #156 "no staging: migrate
+  # deploy hits the live prod Neon DB directly"). Every PR replays the FULL
+  # migration history against a throwaway Postgres service container — no
+  # secrets, nothing touches Neon — proving:
+  #   1. (HARD) the history applies cleanly from an EMPTY database, so the DB is
+  #      reconstructable from migrations and any NEW migration (e.g. the pending
+  #      RLS work, #157) is known to apply from scratch BEFORE deploy.yml's
+  #      `migrate deploy` ever runs it against production;
+  #   2. (HARD, Standing Law 1 proof-of-rejection) a deliberately broken
+  #      migration is REJECTED — the gate is provably not a no-op;
+  #   3. (ADVISORY, Standing Law 5 ratchet — issue #215) schema<->migration
+  #      drift is reported but does NOT block, because organizations/users carry
+  #      pre-existing retrofit-baseline drift (DB-level gen_random_uuid() id
+  #      defaults + created_at type). Flips to a hard gate when the diff is empty.
+  migrations:
+    name: Migration integrity (ephemeral Postgres)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: prisma
+          POSTGRES_PASSWORD: prisma
+          POSTGRES_DB: xpelevator_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U prisma"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://prisma:prisma@localhost:5432/xpelevator_ci
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # HARD GATE 1 — the whole migration history must apply cleanly from empty.
+      - name: Replay all migrations from an empty DB (prisma migrate deploy)
+        run: npx prisma migrate deploy
+
+      # HARD GATE 2 — proof-of-rejection (Standing Law 1): a broken migration
+      # MUST fail `migrate deploy`. Runs against a SEPARATE scratch database and
+      # a throwaway copy of the migrations tree, so it never perturbs the tree
+      # gate 1 validated. Fails the job if a broken migration is accepted.
+      - name: Proof-of-rejection — a broken migration must be rejected
+        run: |
+          set -euo pipefail
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "DROP DATABASE IF EXISTS negctl;" -c "CREATE DATABASE negctl;"
+          tmp="$(mktemp -d)"
+          cp -r prisma "$tmp/prisma"
+          printf 'provider = "postgresql"\n' > "$tmp/prisma/migrations/migration_lock.toml"
+          bad="$tmp/prisma/migrations/29990101000000_negctl_broken"
+          mkdir -p "$bad"
+          echo 'ALTER TABLE "table_that_does_not_exist" ADD COLUMN "x" TEXT;' > "$bad/migration.sql"
+          set +e
+          DATABASE_URL="postgresql://prisma:prisma@localhost:5432/negctl" \
+            npx prisma migrate deploy --schema "$tmp/prisma/schema.prisma"
+          code=$?
+          set -e
+          if [ "$code" = "0" ]; then
+            echo "::error::migrate deploy ACCEPTED a broken migration — the gate is a no-op"
+            exit 1
+          fi
+          echo "proof-of-rejection OK — broken migration rejected (exit $code)"
+
+      # ADVISORY (Standing Law 5 ratchet — issue #215). Reports schema<->migration
+      # drift without blocking: organizations/users carry pre-existing retrofit
+      # drift, so a hard gate here would red-block every PR against unrelated
+      # debt. Never silent — the drift prints in the log every run; promote to a
+      # hard gate (drop continue-on-error) once `migrate diff` is empty.
+      - name: Schema↔migration drift (advisory — reports, never blocks) [#215]
+        continue-on-error: true
+        run: |
+          npx prisma migrate diff \
+            --from-url "$DATABASE_URL" \
+            --to-schema-datamodel prisma/schema.prisma \
+            --exit-code
+
   # NOTE: the DETERMINISTIC tiers — unit (tests/unit, 73 tests) and ui
   # (tests/ui, 21 tests, React render in happy-dom) — are wired as required
   # gates above. All deps are mocked (auth/next-auth/next-navigation/fetch), so
@@ -176,7 +267,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [quality, unit-tests, ui-tests, coverage, build, audit]
+    needs: [quality, unit-tests, ui-tests, coverage, build, audit, migrations]
     runs-on: ubuntu-latest
     steps:
       - name: Require every gate to have succeeded
