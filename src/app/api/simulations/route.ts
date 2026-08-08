@@ -7,8 +7,14 @@ import { MAX_SESSIONS_PER_DAY, parsePagination } from '@/lib/limits';
 import {
   planUnlocksModality,
   minimumTierForModality,
+  tierForPlan,
   type SimulationType,
 } from '@/lib/plans';
+import {
+  summarizeSpend,
+  evaluateBudget,
+  type MonthlySpendGroup,
+} from '@/lib/budget';
 
 const SIMULATION_TYPES = ['CHAT', 'VOICE', 'PHONE'] as const;
 
@@ -95,6 +101,59 @@ export async function POST(request: Request) {
         { error: 'Daily session limit reached — try again tomorrow' },
         { status: 429 }
       );
+    }
+
+    // Org-level monthly Groq-spend ceiling (#155 — "LLM cost is unbounded").
+    // `MAX_SESSIONS_PER_DAY` above caps one user; this caps the whole tenant's
+    // aggregate LLM cost this calendar month, the missing org-level bound. This
+    // is a per-SESSION check (session start, not per turn), so it adds no cost
+    // to the per-turn hot path Run 100 optimized. Runs only when an `orgId` is
+    // present — platform staff / test mode (null org) are ungated, exactly like
+    // the modality gate — and FAILS OPEN: any error reading the spend ledger
+    // logs and allows the session, so a query hiccup never blocks a real
+    // trainee. The ceiling is a generous runaway guard (`@/lib/budget`), far
+    // above any real training workload; the block body carries no cost figures
+    // (those live behind the ADMIN-only /api/reports/budget).
+    if (orgId) {
+      try {
+        const spendRows = await sql`
+          SELECT
+            cm.model                                     as "model",
+            COALESCE(SUM(cm.prompt_tokens), 0)::int      as "promptTokens",
+            COALESCE(SUM(cm.completion_tokens), 0)::int  as "completionTokens",
+            COALESCE(SUM(cm.total_tokens), 0)::int       as "totalTokens"
+          FROM simulation_sessions ss
+          JOIN chat_messages cm ON cm.session_id = ss.id
+          WHERE ss.org_id = ${orgId}
+            AND cm.total_tokens IS NOT NULL
+            AND ss.created_at >= date_trunc('month', now())
+          GROUP BY cm.model
+        `;
+        const summary = summarizeSpend(
+          spendRows as unknown as MonthlySpendGroup[],
+        );
+        const budget = evaluateBudget(
+          summary.costMicroUsd,
+          tierForPlan(refs.orgPlan),
+        );
+        if (budget.status === 'over') {
+          return NextResponse.json(
+            {
+              error:
+                'Monthly usage ceiling reached for this workspace — it resets at the start of next month',
+              code: 'BUDGET_EXCEEDED',
+            },
+            { status: 429 }
+          );
+        }
+      } catch (budgetError) {
+        // Fail OPEN: a spend-ledger read failure must never block a legitimate
+        // session. Log and continue to session creation.
+        console.error(
+          'Monthly budget check failed (allowing session):',
+          budgetError instanceof Error ? budgetError.message : String(budgetError)
+        );
+      }
     }
 
     // Create session using raw SQL (compatible with Cloudflare Workers)
