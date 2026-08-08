@@ -2,6 +2,7 @@ import type { ComponentType } from 'react';
 import { auth, signOut } from '@/auth';
 import { PageShell, Container, Card, Wordmark } from '@/components/ui';
 import { TopNav } from '@/components/ui/TopNav';
+import { PortfolioFooter } from '@/components/ui/PortfolioFooter';
 import { TargetIcon, BarChartIcon, SettingsIcon, TrendingUpIcon, BuildingIcon } from '@/components/ui/icons';
 
 const CARDS: Array<{
@@ -113,6 +114,8 @@ export default async function Home() {
           </section>
         </Container>
       </main>
+
+      <PortfolioFooter />
     </PageShell>
   );
 }
