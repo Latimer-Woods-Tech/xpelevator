@@ -17,6 +17,32 @@ export interface ChatCompletionRequest {
   stream?: boolean;
 }
 
+/**
+ * Groq token-usage block (OpenAI-compatible field names). Returned on every
+ * non-streaming completion, and on the terminal chunk of a stream when
+ * `stream_options.include_usage` is set. Persisted per reply turn (R-132, #155)
+ * so per-turn LLM spend becomes a durable, queryable record.
+ */
+export interface GroqTokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+/** Runtime guard: a value is a usable token-usage block (three finite numbers). */
+export function isGroqTokenUsage(v: unknown): v is GroqTokenUsage {
+  if (typeof v !== 'object' || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.prompt_tokens === 'number' &&
+    Number.isFinite(o.prompt_tokens) &&
+    typeof o.completion_tokens === 'number' &&
+    Number.isFinite(o.completion_tokens) &&
+    typeof o.total_tokens === 'number' &&
+    Number.isFinite(o.total_tokens)
+  );
+}
+
 export interface ChatCompletionResponse {
   id: string;
   object: string;
@@ -30,6 +56,7 @@ export interface ChatCompletionResponse {
     };
     finish_reason: string;
   }>;
+  usage?: GroqTokenUsage;
 }
 
 export class GroqFetchClient {
@@ -58,14 +85,24 @@ export class GroqFetchClient {
     return response.json();
   }
 
-  async* chatCompletionStream(request: ChatCompletionRequest): AsyncGenerator<string> {
+  async* chatCompletionStream(
+    request: ChatCompletionRequest,
+    onUsage?: (usage: GroqTokenUsage) => void,
+  ): AsyncGenerator<string> {
     const response = await fetch(`${this.baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ ...request, stream: true }),
+      // `stream_options.include_usage` asks Groq to emit a terminal chunk (empty
+      // choices) carrying the token `usage` block, so per-turn spend can be
+      // metered without a second billable call (R-132, #155).
+      body: JSON.stringify({
+        ...request,
+        stream: true,
+        stream_options: { include_usage: true },
+      }),
     });
 
     if (!response.ok) {
@@ -100,6 +137,11 @@ export class GroqFetchClient {
               const content = parsed.choices?.[0]?.delta?.content;
               if (content) {
                 yield content;
+              }
+              // The terminal usage chunk has empty `choices` + a `usage` block;
+              // surface it via the sink without disturbing the content stream.
+              if (onUsage && isGroqTokenUsage(parsed.usage)) {
+                onUsage(parsed.usage);
               }
             } catch {
               // Skip unparseable lines

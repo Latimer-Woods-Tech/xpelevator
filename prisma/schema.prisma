@@ -202,6 +202,16 @@ model ChatMessage {
   model       String? @map("model")         // model that generated the reply
   routeReason String? @map("route_reason")  // why that model (difficulty->model, R-059)
 
+  // Per-turn Groq token usage (R-132, issue #155). Populated on the CUSTOMER
+  // reply turn beside the latency telemetry above, from Groq's `usage` block
+  // (streaming chat via stream_options.include_usage; non-streaming phone
+  // directly). NULL on AGENT rows, pre-instrumentation history, and any turn
+  // where the model errored before returning usage. Makes per-turn LLM spend a
+  // durable, queryable record so the Phase-4 wholesale-seat margin is measurable.
+  promptTokens     Int? @map("prompt_tokens")      // context tokens sent
+  completionTokens Int? @map("completion_tokens")  // tokens generated for the reply
+  totalTokens      Int? @map("total_tokens")       // prompt + completion (billed)
+
   session   SimulationSession @relation(fields: [sessionId], references: [id])
 
   @@index([sessionId])

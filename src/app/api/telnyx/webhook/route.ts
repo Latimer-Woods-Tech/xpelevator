@@ -20,6 +20,7 @@
 import { NextResponse } from 'next/server';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { getGroqClient } from '@/lib/groq-fetch';
+import type { GroqTokenUsage } from '@/lib/groq-fetch';
 import {
   buildSessionSystemPrompt,
   customerModelForDifficulty,
@@ -235,6 +236,7 @@ async function handleEvent(
           await stampTurnTelemetry(
             openingMsgId,
             phoneTurnTelemetry(openTiming, customerModel, openRouteReason),
+            opening.usage,
           );
           console.log('[telnyx] latency', {
             sessionId: state.sessionId.slice(0, 8),
@@ -433,6 +435,7 @@ async function handleEvent(
         await stampTurnTelemetry(
           replyMsgId,
           phoneTurnTelemetry(replyTiming, customerModel, replyRouteReason),
+          aiReply.usage,
         );
         console.log('[telnyx] latency', {
           sessionId: state.sessionId.slice(0, 8),
@@ -485,14 +488,21 @@ async function saveMessage(
  * columns R-066 persists at the chat path's CUSTOMER INSERT. AGENT rows and any
  * turn where dispatch never completes stay NULL, exactly like the chat path.
  */
-async function stampTurnTelemetry(messageId: string, t: PersistedTurnTelemetry) {
+async function stampTurnTelemetry(
+  messageId: string,
+  t: PersistedTurnTelemetry,
+  usage?: GroqTokenUsage | null,
+) {
   await sql`
     UPDATE chat_messages
     SET ttft_ms = ${t.ttftMs},
         total_ms = ${t.totalMs},
         latency_tier = ${t.latencyTier},
         model = ${t.model},
-        route_reason = ${t.routeReason}
+        route_reason = ${t.routeReason},
+        prompt_tokens = ${usage?.prompt_tokens ?? null},
+        completion_tokens = ${usage?.completion_tokens ?? null},
+        total_tokens = ${usage?.total_tokens ?? null}
     WHERE id = ${messageId}
   `;
 }

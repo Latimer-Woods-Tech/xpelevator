@@ -156,6 +156,13 @@ function groqReply(content: string) {
   chatCompletionMock.mockResolvedValueOnce({ choices: [{ message: { content } }] });
 }
 
+function groqReplyWithUsage(
+  content: string,
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number },
+) {
+  chatCompletionMock.mockResolvedValueOnce({ choices: [{ message: { content } }], usage });
+}
+
 function ranInsertCustomer(text?: string) {
   return sqlMock.mock.calls.some((c) => {
     const q = Array.isArray(c[0]) ? c[0].join(' ') : '';
@@ -255,6 +262,31 @@ describe('call.answered', () => {
     );
     expect(stamped).toBe(true);
     expect(callHangupMock).not.toHaveBeenCalled();
+  });
+
+  it('stamps per-turn Groq token usage on the CUSTOMER turn (R-132)', async () => {
+    groqReplyWithUsage('Hi there', {
+      prompt_tokens: 210,
+      completion_tokens: 18,
+      total_tokens: 228,
+    });
+    await post(event('call.answered'));
+    // The telemetry stamp UPDATE interpolates values in column order, ending
+    // with the three token columns then the row id (WHERE id = ...).
+    const stampCall = sqlMock.mock.calls.find(
+      (c) => Array.isArray(c[0]) && c[0].join(' ').includes('UPDATE chat_messages'),
+    );
+    expect(stampCall).toBeDefined();
+    expect(stampCall!.slice(1).slice(-4, -1)).toEqual([210, 18, 228]);
+  });
+
+  it('stamps NULL token columns when the model returns no usage', async () => {
+    groqReply('Hi there'); // no usage field on the completion
+    await post(event('call.answered'));
+    const stampCall = sqlMock.mock.calls.find(
+      (c) => Array.isArray(c[0]) && c[0].join(' ').includes('UPDATE chat_messages'),
+    );
+    expect(stampCall!.slice(1).slice(-4, -1)).toEqual([null, null, null]);
   });
 
   it('strips the [RESOLVED] sentinel from the spoken opening', async () => {
