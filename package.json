@@ -25,6 +25,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@latimer-woods-tech/seo": "^0.3.0",
     "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-neon": "^6.19.2",
     "@prisma/client": "^6.9.0",
