@@ -1180,17 +1180,29 @@ jobs:
         # Observability foundation (#154, Phase 3): the middleware mints /
         # propagates a per-request x-request-id on EVERY response path so a
         # request is traceable end-to-end (client-visible header ↔ structured
-        # logs). Permanent regression gate on the freshly-deployed build —
-        # asserts, on the pages.dev alias (authoritative) AND the branded domain:
+        # logs). Permanent regression gate on the freshly-deployed build.
+        #
+        # On BOTH the pages.dev alias (authoritative for this deploy) AND the
+        # branded domain, assert the properties that survive Cloudflare's edge:
         #   1. a public pass-through (/api/health 200) carries a non-empty id;
         #   2. two calls mint DISTINCT ids (per-request, not a static value);
-        #   3. a caller-supplied id is ECHOED back (upstream-trace continuity);
         #   4. the anonymous /api 401 path (/api/scenarios) also carries an id.
+        #
+        # The "honour a caller-supplied id" property (3) is an ORIGIN-WORKER
+        # behaviour and is asserted on the pages.dev alias ONLY. The branded
+        # domain sits behind the full CF proxy, which manages/strips inbound
+        # custom correlation headers before they reach the worker — so a
+        # client-supplied x-request-id cannot be echoed there (verified: the
+        # branded domain mints server-side, which is also the safer public
+        # posture — a public client must not be able to choose its own trace id).
+        # Unit tests (tests/unit/middleware.test.ts) pin the honour-supplied-id
+        # logic at the code layer.
         run: |
           set -e
           fail=0
           rid() { printf '%s' "$1" | grep -i '^x-request-id:' | head -1 | tr -d '\r' | awk '{print $2}'; }
-          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+          ALIAS="https://${CF_PROJECT}.pages.dev"
+          for BASE in "$ALIAS" "https://xpelevator.com"; do
             echo "== $BASE =="
             # (1) public pass-through carries a non-empty id (retry until live).
             id1=""
@@ -1210,13 +1222,19 @@ jobs:
             else
               echo "  ✓ distinct per request ($id1 != $id2)"
             fi
-            # (3) a caller-supplied id is echoed back.
-            want="ci-trace-${{ github.run_id }}"
-            got=$(rid "$(curl -sS -D - -o /dev/null -H "x-request-id: $want" "$BASE/api/health" || echo '')")
-            if [ "$got" != "$want" ]; then
-              echo "::error::$BASE did not echo supplied x-request-id (want=$want got=${got:-<none>})"; fail=1
+            # (3) a caller-supplied id is echoed back — ORIGIN-WORKER property,
+            # asserted at the worker-direct alias only (the CF edge in front of
+            # the branded domain manages inbound correlation headers).
+            if [ "$BASE" = "$ALIAS" ]; then
+              want="ci-trace-${{ github.run_id }}"
+              got=$(rid "$(curl -sS -D - -o /dev/null -H "x-request-id: $want" "$BASE/api/health" || echo '')")
+              if [ "$got" != "$want" ]; then
+                echo "::error::$BASE did not echo supplied x-request-id (want=$want got=${got:-<none>})"; fail=1
+              else
+                echo "  ✓ echoes caller-supplied id ($want)"
+              fi
             else
-              echo "  ✓ echoes caller-supplied id ($want)"
+              echo "  – echo check skipped (CF edge manages inbound x-request-id; proven at the alias + unit tests)"
             fi
             # (4) the anonymous /api 401 path also carries an id.
             H401=$(curl -sS -D - -o /dev/null "$BASE/api/scenarios" || echo '')
@@ -1232,7 +1250,7 @@ jobs:
             echo "::error::R-111 x-request-id correlation verification failed"
             exit 1
           fi
-          echo "✅ x-request-id correlation header present + propagated on both hosts (#154)"
+          echo "✅ x-request-id correlation present + distinct on both hosts; caller-id echo proven at the worker-direct alias (#154)"
 
       - name: Verify public-route rate limiting engages (429) — #157
         # #157: the ANONYMOUS public routes (the brand-render reads + the public
