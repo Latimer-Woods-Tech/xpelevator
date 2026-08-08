@@ -81,6 +81,12 @@ export default defineConfig({
         // org-scoped; the read side of the append-only log written by src/lib/audit.ts.
         'src/app/api/audit/route.ts',
         'src/app/api/reports/sessions/route.ts',
+        // LLM spend ledger (#155) — ADMIN-only, org-scoped read that prices the
+        // persisted per-turn token usage into per-session/tenant Groq spend. Anon
+        // 401 / non-admin 403 / own-org + null-org owner-only scope /
+        // clientOrgId operator→client (404/403/200) / malformed-window 400 /
+        // since+until composition all deterministically covered.
+        'src/app/api/reports/spend/route.ts',
         // Operator-hierarchy + white-label + SKU surfaces (the R-043 routes that
         // had live cross-tenant bugs in runs 30/31/32) — each already ≥ floor.
         'src/app/api/branding/[slug]/route.ts',

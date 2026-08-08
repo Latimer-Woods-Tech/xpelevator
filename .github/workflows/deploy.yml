@@ -1006,6 +1006,44 @@ jobs:
           fi
           echo "✅ /api/reports/sessions (detail + portfolio summary, CSV + PDF) rejects anonymous callers (401) on both hosts"
 
+      - name: Verify spend ledger is auth-gated (#155)
+        # The LLM spend ledger (GET /api/reports/spend) returns a tenant's
+        # per-session Groq token spend — ADMIN-only and org-scoped, and must
+        # NEVER be readable anonymously. The /api/* middleware matcher gates it
+        # and the handler additionally requires role=ADMIN. Permanent regression
+        # gate: an anonymous caller must get 401 on both hosts (a 200 here would
+        # leak cross-tenant spend/margin data). Checked on the pages.dev alias
+        # (authoritative for this deploy) and the branded domain.
+        run: |
+          set -e
+          fail=0
+          # The bare ledger AND the operator client-scoped variant both read
+          # tenant-scoped spend, so both must reject anon.
+          for PATH_Q in \
+            "/api/reports/spend" \
+            "/api/reports/spend?clientOrgId=any"; do
+            for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+              code=000
+              for i in 1 2 3 4 5; do
+                code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$PATH_Q" || echo 000)
+                # 401 is the pass; anything else (esp. 200) is retried while the
+                # fresh deploy propagates, then failed below.
+                if [ "$code" = "401" ]; then break; fi
+                sleep 6
+              done
+              echo "GET $BASE$PATH_Q -> HTTP $code"
+              if [ "$code" != "401" ]; then
+                echo "::error::$BASE$PATH_Q must require auth (got $code) — spend ledger would leak tenant spend"
+                fail=1
+              fi
+            done
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Spend ledger auth-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /api/reports/spend rejects anonymous callers (401) on both hosts"
+
       - name: Verify home page is copy-clean (org copy rule, Phase 4)
         # The public home page (`/`) previously described "AI-generated
         # performance scores". Phase 4 copy pass rewrote it to craft vocabulary
