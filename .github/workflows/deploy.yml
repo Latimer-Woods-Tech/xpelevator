@@ -1176,6 +1176,64 @@ jobs:
           fi
           echo "✅ Security headers present on both hosts (document + API)"
 
+      - name: Verify x-request-id correlation header (R-111, #154)
+        # Observability foundation (#154, Phase 3): the middleware mints /
+        # propagates a per-request x-request-id on EVERY response path so a
+        # request is traceable end-to-end (client-visible header ↔ structured
+        # logs). Permanent regression gate on the freshly-deployed build —
+        # asserts, on the pages.dev alias (authoritative) AND the branded domain:
+        #   1. a public pass-through (/api/health 200) carries a non-empty id;
+        #   2. two calls mint DISTINCT ids (per-request, not a static value);
+        #   3. a caller-supplied id is ECHOED back (upstream-trace continuity);
+        #   4. the anonymous /api 401 path (/api/scenarios) also carries an id.
+        run: |
+          set -e
+          fail=0
+          rid() { printf '%s' "$1" | grep -i '^x-request-id:' | head -1 | tr -d '\r' | awk '{print $2}'; }
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            echo "== $BASE =="
+            # (1) public pass-through carries a non-empty id (retry until live).
+            id1=""
+            for i in 1 2 3 4 5 6 7 8; do
+              id1=$(rid "$(curl -sS -D - -o /dev/null "$BASE/api/health" || echo '')")
+              [ -n "$id1" ] && break
+              sleep 6
+            done
+            if [ -z "$id1" ]; then
+              echo "::error::$BASE/api/health has no x-request-id header"; fail=1; continue
+            fi
+            echo "  ✓ /api/health x-request-id=$id1"
+            # (2) a second call mints a DISTINCT id.
+            id2=$(rid "$(curl -sS -D - -o /dev/null "$BASE/api/health" || echo '')")
+            if [ -z "$id2" ] || [ "$id1" = "$id2" ]; then
+              echo "::error::$BASE minted a non-distinct x-request-id (id1=$id1 id2=$id2)"; fail=1
+            else
+              echo "  ✓ distinct per request ($id1 != $id2)"
+            fi
+            # (3) a caller-supplied id is echoed back.
+            want="ci-trace-${{ github.run_id }}"
+            got=$(rid "$(curl -sS -D - -o /dev/null -H "x-request-id: $want" "$BASE/api/health" || echo '')")
+            if [ "$got" != "$want" ]; then
+              echo "::error::$BASE did not echo supplied x-request-id (want=$want got=${got:-<none>})"; fail=1
+            else
+              echo "  ✓ echoes caller-supplied id ($want)"
+            fi
+            # (4) the anonymous /api 401 path also carries an id.
+            H401=$(curl -sS -D - -o /dev/null "$BASE/api/scenarios" || echo '')
+            code=$(printf '%s' "$H401" | grep -iE '^HTTP/' | tail -1 | awk '{print $2}')
+            id401=$(rid "$H401")
+            if [ "$code" != "401" ] || [ -z "$id401" ]; then
+              echo "::error::$BASE/api/scenarios 401 path missing x-request-id (code=${code:-<none>} id=${id401:-<none>})"; fail=1
+            else
+              echo "  ✓ 401 path carries x-request-id=$id401"
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::R-111 x-request-id correlation verification failed"
+            exit 1
+          fi
+          echo "✅ x-request-id correlation header present + propagated on both hosts (#154)"
+
       - name: Verify public-route rate limiting engages (429) — #157
         # #157: the ANONYMOUS public routes (the brand-render reads + the public
         # catalogs) took unbounded traffic. src/lib/rate-limit.ts now throttles

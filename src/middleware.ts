@@ -21,6 +21,7 @@
  */
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { REQUEST_ID_HEADER, log, requestIdFrom } from '@/lib/log';
 
 // Routes that don't require authentication.
 // Note: /api/jobs, /api/scenarios and /api/criteria are deliberately NOT here —
@@ -53,12 +54,27 @@ const PUBLIC_PREFIX_ROUTES = ['/api/auth', '/api/branding'];
 export default function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // Resolve a per-request correlation id (R-111): honour a caller-supplied
+  // x-request-id, else mint one. Forwarded to downstream handlers as a request
+  // header AND stamped on every response so a request is traceable end-to-end.
+  const requestId = requestIdFrom(req.headers);
+  const forwardHeaders = new Headers(req.headers);
+  forwardHeaders.set(REQUEST_ID_HEADER, requestId);
+
+  // Pass-through that preserves the forwarded id on the request and echoes it
+  // on the response.
+  const passThrough = (): NextResponse => {
+    const res = NextResponse.next({ request: { headers: forwardHeaders } });
+    res.headers.set(REQUEST_ID_HEADER, requestId);
+    return res;
+  };
+
   // Allow public routes — exact match, plus the explicit prefix allow-list.
   if (
     PUBLIC_EXACT_ROUTES.includes(pathname) ||
     PUBLIC_PREFIX_ROUTES.some((route) => pathname === route || pathname.startsWith(route + '/'))
   ) {
-    return NextResponse.next();
+    return passThrough();
   }
 
   // Check for session cookie
@@ -69,19 +85,27 @@ export default function middleware(req: NextRequest) {
   if (!sessionToken) {
     // For API routes, return 401 JSON
     if (pathname.startsWith('/api/')) {
-      return NextResponse.json(
+      // Structured security-observability signal (R-112) — the id ties this
+      // denial to the client-visible x-request-id on the same response.
+      log('warn', 'auth.denied', { requestId, path: pathname, kind: 'api' });
+      const res = NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       );
+      res.headers.set(REQUEST_ID_HEADER, requestId);
+      return res;
     }
 
     // For pages, redirect to sign-in
+    log('warn', 'auth.denied', { requestId, path: pathname, kind: 'page' });
     const signInUrl = new URL('/auth/signin', req.url);
     signInUrl.searchParams.set('callbackUrl', req.url);
-    return NextResponse.redirect(signInUrl);
+    const res = NextResponse.redirect(signInUrl);
+    res.headers.set(REQUEST_ID_HEADER, requestId);
+    return res;
   }
 
-  return NextResponse.next();
+  return passThrough();
 }
 
 export const config = {
