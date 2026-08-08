@@ -55,3 +55,9 @@ secrets.txt
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Playwright smoke tier (issue #156)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
