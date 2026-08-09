@@ -37,6 +37,7 @@ vi.mock('@/lib/db', () => ({ sql: h.sql, default: h.sql }));
 vi.mock('@/lib/auth-api', () => ({ requireAuth: h.requireAuth, AuthError: h.AuthError }));
 
 import { GET } from '@/app/api/analytics/latency/route';
+import { MAX_ANALYTICS_SCAN_ROWS } from '@/lib/limits';
 
 function req(query = ''): Request {
   return new Request(`http://localhost/api/analytics/latency${query}`);
@@ -156,6 +157,33 @@ describe('GET /api/analytics/latency', () => {
       'model-a',
     ]);
     expect(body.byModality).toHaveLength(2);
+    // P3b-2: a normal (under-cap) scan is never truncated.
+    expect(body.truncated).toBe(false);
+  });
+
+  it('bounds an over-cap scan to MAX_ANALYTICS_SCAN_ROWS and flags truncated (P3b-2)', async () => {
+    authedAs('org-1');
+    // The query SELECTs `LIMIT max + 1`; simulate a tenant with more turns than
+    // the cap by returning max + 1 measured rows.
+    const overCap = Array.from({ length: MAX_ANALYTICS_SCAN_ROWS + 1 }, () => ({
+      ttftMs: 100,
+      totalMs: 200,
+      tier: 'realtime',
+      model: 'model-a',
+      routeReason: 'default',
+      modality: 'CHAT',
+    }));
+    routeSql(overCap);
+
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    // PROOF-OF-REJECTION (Standing Law 1): the summary is computed over exactly
+    // `max` turns, not the full `max + 1` the DB returned, and the caller is told
+    // the view is truncated. Removing the boundScan wiring fails both assertions.
+    expect(body.truncated).toBe(true);
+    expect(body.measuredTurns).toBe(MAX_ANALYTICS_SCAN_ROWS);
   });
 
   it('scopes an org-less caller to their OWN null-org turns — never the shared null-org pool (session-access doctrine)', async () => {

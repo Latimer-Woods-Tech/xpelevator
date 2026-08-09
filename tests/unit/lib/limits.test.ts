@@ -14,6 +14,8 @@ import {
   MIN_TURN_INTERVAL_MS,
   MAX_PAGE_SIZE,
   DEFAULT_PAGE_SIZE,
+  MAX_ANALYTICS_SCAN_ROWS,
+  boundScan,
   exceedsTurnRate,
   parsePagination,
   isStartSignal,
@@ -221,5 +223,48 @@ describe('windowConversation (transcript context cap — #155 P3b-7)', () => {
     const copy = conv.slice();
     windowConversation(conv);
     expect(conv).toEqual(copy);
+  });
+});
+
+describe('boundScan (P3b-2 analytics scan cap)', () => {
+  it('MAX_ANALYTICS_SCAN_ROWS is a generous runaway guard, not a page size', () => {
+    // Far above any realistic training volume, and far above a page.
+    expect(MAX_ANALYTICS_SCAN_ROWS).toBeGreaterThan(MAX_PAGE_SIZE * 100);
+  });
+
+  it('returns the input unchanged (a copy) with truncated:false when under the cap', () => {
+    const rows = [1, 2, 3];
+    const out = boundScan(rows, 10);
+    expect(out.truncated).toBe(false);
+    expect(out.rows).toEqual([1, 2, 3]);
+    expect(out.rows).not.toBe(rows); // a copy, not the same reference
+  });
+
+  it('returns all rows with truncated:false at exactly the cap (boundary)', () => {
+    const rows = [1, 2, 3, 4, 5];
+    const out = boundScan(rows, 5);
+    expect(out.truncated).toBe(false);
+    expect(out.rows).toHaveLength(5);
+  });
+
+  // Standing Law 1 — proof-of-rejection: fails the instant the cap is removed.
+  it('trims to the cap and flags truncated:true when the source is larger', () => {
+    const rows = Array.from({ length: 7 }, (_, i) => i);
+    const out = boundScan(rows, 5);
+    expect(out.truncated).toBe(true);
+    expect(out.rows).toHaveLength(5);
+    expect(out.rows).toEqual([0, 1, 2, 3, 4]); // keeps the first `max` (query pre-orders)
+  });
+
+  it('defaults to MAX_ANALYTICS_SCAN_ROWS when no cap is passed', () => {
+    const under = boundScan(Array.from({ length: 3 }, (_, i) => i));
+    expect(under.truncated).toBe(false);
+    const over = boundScan(Array.from({ length: MAX_ANALYTICS_SCAN_ROWS + 1 }, (_, i) => i));
+    expect(over.truncated).toBe(true);
+    expect(over.rows).toHaveLength(MAX_ANALYTICS_SCAN_ROWS);
+  });
+
+  it('handles an empty scan', () => {
+    expect(boundScan([], 5)).toEqual({ rows: [], truncated: false });
   });
 });

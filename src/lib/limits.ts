@@ -47,6 +47,44 @@ export function parsePagination(params: URLSearchParams): { limit: number; offse
 }
 
 /**
+ * Hard cap on the number of rows a request may pull into the Worker for an
+ * in-memory analytics aggregation (P3b-2 — "no LIMIT/OFFSET anywhere").
+ *
+ * The latency read surface (`GET /api/analytics/latency`) SELECTs every measured
+ * reply turn (`chat_messages` rows) in the caller's tenant and computes the
+ * percentiles in JS — an O(messages) scan with no upper bound, the largest
+ * unbounded query in the app. On a large tenant that materialises every message
+ * ever sent into a single Worker isolate (memory + serialisation + a full sort
+ * for the percentile), which can OOM or time out the isolate. This bounds the
+ * rows *processed in-Worker*; the DB-side scan is a separate concern (query-shape
+ * indexes, P3b-3).
+ *
+ * Deliberately generous — far above any realistic near-term training volume (the
+ * scoring canary drives ~7 turns/session; a heavy org is low thousands of turns)
+ * — so it never bites real usage and normal responses are byte-identical. It is a
+ * runaway guard, not a page size.
+ */
+export const MAX_ANALYTICS_SCAN_ROWS = 20_000;
+
+/**
+ * Bound an in-memory scan to at most `max` rows, reporting whether the source was
+ * larger. Callers SELECT `LIMIT max + 1` so a full result set unambiguously
+ * signals there was more than `max`; this trims back to `max` and flags it. Pure
+ * and deterministic — the truncation decision is unit-testable without a DB.
+ *
+ * When `rows.length <= max` the input is returned unchanged (a copy) with
+ * `truncated: false`, so the common case is a no-op and any aggregate computed
+ * over the result is identical to one over the full set.
+ */
+export function boundScan<T>(
+  rows: readonly T[],
+  max: number = MAX_ANALYTICS_SCAN_ROWS
+): { rows: T[]; truncated: boolean } {
+  if (rows.length > max) return { rows: rows.slice(0, max), truncated: true };
+  return { rows: rows.slice(), truncated: false };
+}
+
+/**
  * Whether a new trainee turn arrives too soon after the previous one.
  * `lastAgentTimestamp` is the DB timestamp of the caller's most recent message
  * in this session (null/undefined when this is the first turn).
