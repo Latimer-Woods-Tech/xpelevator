@@ -45,6 +45,21 @@ import {
   routeReasonForDifficulty,
   type PersistedTurnTelemetry,
 } from '@/lib/latency';
+import { log, requestIdFrom } from '@/lib/log';
+
+/** Canonical path label attached to this route's structured log lines. */
+const ROUTE_PATH = '/api/telnyx/webhook';
+
+/**
+ * Serialize an unknown thrown value into structured log fields without leaking a
+ * stack trace into the drain — mirrors the chat route + middleware `auth.denied`
+ * shape so a phone-path request can be traced by its `requestId` (#154, R-111/R-112).
+ */
+function errorFields(err: unknown): { error: string; errorName?: string } {
+  return err instanceof Error
+    ? { error: err.message, errorName: err.name }
+    : { error: String(err) };
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -84,9 +99,15 @@ interface TelnyxWebhookPayload {
 // ── Handler ────────────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
+  // Resolve the per-request correlation id once (honours a middleware-forwarded
+  // `x-request-id`, else mints) so every structured log line on this webhook —
+  // including the background handler and both outer catches — shares one
+  // traceable id (#154, R-111/R-112).
+  const requestId = requestIdFrom(request.headers);
+
   // Clone request for signature verification (body can only be read once)
   const clonedRequest = request.clone();
-  
+
   let body: TelnyxWebhookPayload;
   try {
     body = (await request.json()) as TelnyxWebhookPayload;
@@ -95,13 +116,13 @@ export async function POST(request: Request) {
   }
 
   const eventType = body?.data?.event_type ?? 'unknown';
-  console.log(`[telnyx] incoming webhook: ${eventType}`);
+  log('info', 'telnyx.webhook_received', { requestId, path: ROUTE_PATH, method: 'POST', eventType });
 
   // Verify Telnyx webhook signature in production
   const rawBody = await clonedRequest.text();
   const signatureValid = await verifyTelnyxWebhook(clonedRequest.headers, rawBody);
   if (!signatureValid) {
-    console.warn(`[telnyx] signature verification FAILED for event: ${eventType}`);
+    log('warn', 'telnyx.signature_invalid', { requestId, path: ROUTE_PATH, method: 'POST', eventType });
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
@@ -114,7 +135,8 @@ export async function POST(request: Request) {
     try {
       state = decodeClientState<TelnyxClientState>(client_state);
     } catch {
-      console.warn('Could not decode client_state:', client_state);
+      // Log the failure, not the opaque blob itself — keep the drain clean.
+      log('warn', 'telnyx.client_state_decode_failed', { requestId, eventType });
     }
   }
 
@@ -135,17 +157,17 @@ export async function POST(request: Request) {
   // retry of one event to a single execution, covering ALL event types — the
   // per-branch `call.answered` content-guard below is now the second layer.
   const processingPromise = withIdempotency(eventId, () =>
-    handleEvent(event_type, payload, state, call_control_id, client_state),
+    handleEvent(event_type, payload, state, call_control_id, client_state, requestId),
   );
   try {
     const { ctx } = getCloudflareContext();
     ctx.waitUntil(processingPromise.catch(err =>
-      console.error(`[telnyx] webhook error (${event_type}):`, err)
+      log('error', 'telnyx.handler_failed', { requestId, path: ROUTE_PATH, method: 'POST', eventType: event_type, ...errorFields(err) })
     ));
   } catch {
     // Local dev — not in a CF Worker context; await directly
     await processingPromise.catch(err =>
-      console.error(`[telnyx] webhook error (${event_type}):`, err)
+      log('error', 'telnyx.handler_failed', { requestId, path: ROUTE_PATH, method: 'POST', eventType: event_type, ...errorFields(err) })
     );
   }
 
@@ -160,8 +182,14 @@ async function handleEvent(
   state: TelnyxClientState | null,
   call_control_id: string,
   client_state: string | undefined,
+  requestId: string,
 ) {
-  console.log(`[telnyx] event: ${event_type} | session: ${state?.sessionId ?? 'no-state'} | turn: ${state?.turnCount ?? 0}`);
+  log('info', 'telnyx.event', {
+    requestId,
+    eventType: event_type,
+    sessionId: state?.sessionId ?? null,
+    turn: state?.turnCount ?? 0,
+  });
   switch (event_type) {
       // ── Call answered — AI generates and speaks the opening line ──────────
       // NOTE: gather_using_speak is DTMF-only. Real STT uses start_transcription.
@@ -179,7 +207,7 @@ async function handleEvent(
           SELECT id FROM chat_messages WHERE session_id = ${state.sessionId} LIMIT 1
         `;
         if ((existingMsgs as any[]).length > 0) {
-          console.log('[telnyx] call.answered: already processed (idempotency skip), session:', state.sessionId);
+          log('info', 'telnyx.answered_idempotency_skip', { requestId, sessionId: state.sessionId });
           break;
         }
 
@@ -238,19 +266,20 @@ async function handleEvent(
             phoneTurnTelemetry(openTiming, customerModel, openRouteReason),
             opening.usage,
           );
-          console.log('[telnyx] latency', {
-            sessionId: state.sessionId.slice(0, 8),
+          log('info', 'telnyx.turn_latency', {
+            requestId,
+            sessionId: state.sessionId,
             leg: 'opening',
             model: customerModel,
             replyReadyMs: openTiming.replyReadyMs,
             speakDispatchMs: openTiming.speakDispatchMs,
             tier: openTiming.tier,
           });
-          console.log('[telnyx] call.answered: callSpeak succeeded, session:', state.sessionId);
+          log('info', 'telnyx.answered_speak_ok', { requestId, sessionId: state.sessionId });
         } catch (speakErr) {
           // Save the error as a visible DB record so we can diagnose without tail logs
           const errMsg = speakErr instanceof Error ? speakErr.message : String(speakErr);
-          console.error('[telnyx] call.answered: callSpeak FAILED:', errMsg);
+          log('error', 'telnyx.answered_speak_failed', { requestId, sessionId: state.sessionId, ...errorFields(speakErr) });
           await saveMessage(state.sessionId, 'CUSTOMER', `[SPEAK_ERROR] ${errMsg}`).catch(() => {});
           await callHangup(call_control_id).catch(() => {});
         }
@@ -267,7 +296,11 @@ async function handleEvent(
           SELECT status FROM simulation_sessions WHERE id = ${state.sessionId}
         `;
         const sessionSpeak: any = sessionRowsSpeak[0] ?? null;
-        console.log(`[telnyx] call.speak.ended: session status=${sessionSpeak?.status}, call_control_id=${call_control_id.slice(0, 20)}...`);
+        log('info', 'telnyx.speak_ended', {
+          requestId,
+          sessionId: state.sessionId,
+          sessionStatus: sessionSpeak?.status ?? null,
+        });
         if (sessionSpeak?.status === 'COMPLETED') {
           await callHangup(call_control_id);
           break;
@@ -277,16 +310,16 @@ async function handleEvent(
         await new Promise(r => setTimeout(r, 400));
 
         // Start real-time transcription — fires call.transcription webhooks
-        console.log('[telnyx] call.speak.ended: calling startTranscription...');
+        log('info', 'telnyx.start_transcription', { requestId, sessionId: state.sessionId });
         try {
           await startTranscription(call_control_id, {
             engine: 'Telnyx',
             track: 'inbound',  // only transcribe the caller's voice (not AI TTS)
             clientState: client_state,
           });
-          console.log('[telnyx] call.speak.ended: startTranscription succeeded');
+          log('info', 'telnyx.start_transcription_ok', { requestId, sessionId: state.sessionId });
         } catch (transcriptionErr) {
-          console.error('[telnyx] call.speak.ended: startTranscription FAILED:', transcriptionErr);
+          log('error', 'telnyx.start_transcription_failed', { requestId, sessionId: state.sessionId, ...errorFields(transcriptionErr) });
           // Hangup gracefully if transcription unavailable
           await callHangup(call_control_id).catch(() => {});
         }
@@ -303,7 +336,12 @@ async function handleEvent(
 
         const transcriptionData = payload.transcription_data;
         // Log metadata only — never the transcript text (caller PII).
-        console.log(`[telnyx] call.transcription: is_final=${transcriptionData?.is_final}, language=${transcriptionData?.language}`);
+        log('info', 'telnyx.transcription', {
+          requestId,
+          sessionId: state.sessionId,
+          isFinal: transcriptionData?.is_final ?? null,
+          language: transcriptionData?.language ?? null,
+        });
         if (!transcriptionData?.is_final) {
           // Partial result — ignore, wait for is_final=true
           break;
@@ -315,7 +353,10 @@ async function handleEvent(
         if (!transcript || wordCount < 2) {
           // Empty or single-word transcript — treat as silence/noise, re-listen
           const turn = state.turnCount ?? 0;
-          console.warn(`[telnyx] call.transcription: ignoring noise/silence ("${transcript}"). turn: ${turn}`);
+          // Metadata only — the transcript text is caller PII, so log its shape
+          // (word count), never the words. (The prior free-text line embedded the
+          // raw transcript, contradicting the metadata-only rule two branches up.)
+          log('warn', 'telnyx.transcription_noise', { requestId, sessionId: state.sessionId, turn, wordCount });
           try { await stopTranscription(call_control_id); } catch {}
           if (turn > 10) {
             await callHangup(call_control_id);
@@ -437,8 +478,9 @@ async function handleEvent(
           phoneTurnTelemetry(replyTiming, customerModel, replyRouteReason),
           aiReply.usage,
         );
-        console.log('[telnyx] latency', {
-          sessionId: state.sessionId.slice(0, 8),
+        log('info', 'telnyx.turn_latency', {
+          requestId,
+          sessionId: state.sessionId,
           leg: 'reply',
           model: customerModel,
           replyReadyMs: replyTiming.replyReadyMs,
