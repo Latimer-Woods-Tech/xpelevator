@@ -31,9 +31,9 @@ export default defineConfig({
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     exclude: ['tests/e2e/**', 'tests/voice/**', 'node_modules/**'],
     // NOTE: no coverage gate lives here on purpose. This config runs EVERY local
-    // tier — including the smoke tier, which hits live Neon + Groq via
-    // tests/setup.ts — so a coverage percentage measured through it is not a
-    // meaningful or reproducible floor. The authoritative coverage gate is
+    // tier (the deterministic unit + ui tests), so a coverage percentage measured
+    // through it is not the reproducible floor the CI gate enforces. The
+    // authoritative coverage gate is
     // `vitest.ci.config.ts` (run via `npm run test:coverage:ci`): deterministic
     // unit + ui tiers only, an explicit route allowlist, and the
     // PLATFORM_STANDARDS §3-4 floors (85 line / 90 fn / 85 branch / 85 stmt).
