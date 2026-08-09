@@ -2,9 +2,11 @@
  * Global Vitest setup — runs before every test file.
  *
  * Loads real credentials from .env when present, for the credential-bound
- * out-of-band suites (the `smoke` tier against a real SMOKE_BASE_URL, and the
- * standalone `test:e2e` script). The deterministic unit/ui tiers that run in CI
- * mock every seam and need none of this.
+ * out-of-band `test:e2e` script (`tests/e2e/full-simulation.ts`) — the only
+ * remaining live-credential suite. The deterministic unit/ui tiers that run in
+ * CI mock every seam and need none of this. (The old live-API `smoke` vitest
+ * tier was retired — issue #156; live smoke is now the deterministic Playwright
+ * tier in CI plus the `uptime-monitor` scoring canary against prod.)
  *
  * Unit tests that need isolated behaviour can still use vi.mock() locally.
  */
