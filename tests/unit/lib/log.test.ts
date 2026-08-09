@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   REQUEST_ID_HEADER,
+  errorFields,
   log,
   newRequestId,
   requestIdFrom,
@@ -56,6 +57,23 @@ describe('newRequestId()', () => {
     expect(a).toMatch(uuidV4);
     expect(b).toMatch(uuidV4);
     expect(a).not.toBe(b);
+  });
+});
+
+describe('errorFields()', () => {
+  it('extracts message + name from a real Error and NEVER the stack', () => {
+    const err = new TypeError('bad input');
+    const fields = errorFields(err);
+    expect(fields).toEqual({ error: 'bad input', errorName: 'TypeError' });
+    // Proof-of-rejection: a raw stack must never reach the drain.
+    expect(JSON.stringify(fields)).not.toContain('at ');
+    expect(Object.keys(fields)).not.toContain('stack');
+  });
+
+  it('stringifies a non-Error thrown value with no errorName', () => {
+    const fields = errorFields('plain string boom');
+    expect(fields).toEqual({ error: 'plain string boom' });
+    expect(fields.errorName).toBeUndefined();
   });
 });
 

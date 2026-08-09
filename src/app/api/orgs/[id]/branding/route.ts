@@ -30,6 +30,7 @@ import {
   mergeBranding,
   type Branding,
 } from '@/lib/branding';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 /** The branding fields, for a before/after diff (audit records real changes only). */
 const BRANDING_FIELDS = ['displayName', 'logoUrl', 'primaryColor', 'accentColor'] as const;
@@ -99,7 +100,8 @@ export async function GET(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to read org branding:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'org_branding.read_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to read org branding' }, { status: 500 });
   }
 }
@@ -181,7 +183,8 @@ export async function PUT(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to update org branding:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'org_branding.update_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to update org branding' }, { status: 500 });
   }
 }

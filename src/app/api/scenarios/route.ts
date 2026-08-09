@@ -3,6 +3,7 @@ import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { sanitizeScenarioScript } from '@/lib/scenario-safety';
 import { canReadResource } from '@/lib/tenant-guard';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 
 // GET /api/scenarios?jobTitleId=...
@@ -100,7 +101,8 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[scenarios] GET failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'scenarios.list_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to fetch scenarios' }, { status: 500 });
   }
 }
@@ -182,7 +184,8 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[scenarios] POST failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'scenarios.create_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to create scenario' }, { status: 500 });
   }
 }

@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     // Authenticated read, scoped to the caller's org.
     const { session } = await requireAuth();
@@ -46,7 +47,8 @@ export async function GET() {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to fetch criteria:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'criteria.list_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to fetch criteria' }, { status: 500 });
   }
 }
@@ -84,7 +86,8 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to create criteria:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'criteria.create_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to create criteria' }, { status: 500 });
   }
 }

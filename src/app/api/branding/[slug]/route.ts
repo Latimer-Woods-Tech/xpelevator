@@ -26,6 +26,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { toPublicBranding } from '@/lib/branding';
 import { enforceRateLimit } from '@/lib/rate-limit';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 // A slug is lowercase alphanumerics + hyphens (see `slugify` in
 // `src/lib/org-hierarchy.ts`). Bounding the input keeps a malformed or oversized
@@ -85,7 +86,8 @@ export async function GET(
       headers: { 'Cache-Control': 'public, max-age=300' },
     });
   } catch (error) {
-    console.error('Failed to read public branding:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'branding.public_read_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to read branding' }, { status: 500 });
   }
 }

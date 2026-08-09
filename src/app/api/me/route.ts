@@ -23,6 +23,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { toSelfContext, type RawOrgRow } from '@/lib/self-context';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 export async function GET(request: Request) {
   try {
@@ -56,7 +57,8 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to load self context:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'me.load_failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       { error: 'Failed to load self context' },
       { status: 500 }

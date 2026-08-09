@@ -7,6 +7,7 @@ import {
   packModalityProfile,
 } from '@/lib/scenario-packs';
 import { recordAudit } from '@/lib/audit';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 // POST /api/scenario-packs/import
 // Body: { packId: string, dryRun?: boolean }
@@ -185,7 +186,8 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[scenario-packs/import] POST failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'scenario_packs.import_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to import pack' }, { status: 500 });
   }
 }

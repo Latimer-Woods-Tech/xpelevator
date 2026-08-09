@@ -98,7 +98,7 @@ describe('GET /api/analytics', () => {
   it('returns 401 when the caller is unauthenticated', async () => {
     h.requireAuth.mockRejectedValue(new h.AuthError('Authentication required', 401));
 
-    const res = await GET();
+    const res = await GET(new Request('http://localhost/api/analytics'));
 
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: 'Authentication required' });
@@ -110,7 +110,7 @@ describe('GET /api/analytics', () => {
     authedAs('org-1');
     h.sql.mockResolvedValue(fixtureRows());
 
-    const res = await GET();
+    const res = await GET(new Request('http://localhost/api/analytics'));
 
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('private, max-age=60');
@@ -144,7 +144,7 @@ describe('GET /api/analytics', () => {
       return Promise.resolve([]);
     });
 
-    const res = await GET();
+    const res = await GET(new Request('http://localhost/api/analytics'));
 
     expect(res.status).toBe(200);
     // Org callers keep the existing `org OR global` pool — no user narrowing.
@@ -174,7 +174,7 @@ describe('GET /api/analytics', () => {
       return Promise.resolve([]);
     });
 
-    const res = await GET();
+    const res = await GET(new Request('http://localhost/api/analytics'));
 
     expect(res.status).toBe(200);
     // The security-critical assertion: the null-org branch filtered by the
@@ -190,7 +190,7 @@ describe('GET /api/analytics', () => {
       throw new Error('db unreachable');
     });
 
-    const res = await GET();
+    const res = await GET(new Request('http://localhost/api/analytics'));
 
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: 'Failed to load analytics' });

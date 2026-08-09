@@ -75,7 +75,7 @@ beforeEach(() => {
 describe('GET /api/criteria — authenticated, org-scoped read', () => {
   it('401s an unauthenticated caller (requireAuth throws)', async () => {
     authRejects(401);
-    const res = await GET();
+    const res = await GET(new Request('http://localhost/api/criteria'));
     expect(res.status).toBe(401);
     expect(sqlMock).not.toHaveBeenCalled();
   });
@@ -83,7 +83,7 @@ describe('GET /api/criteria — authenticated, org-scoped read', () => {
   it('queries org + global rows for an org member', async () => {
     authAs('MEMBER', 'orgA');
     sqlMock.mockResolvedValue([{ id: 'c1', name: 'Empathy', orgId: 'orgA' }]);
-    const res = await GET();
+    const res = await GET(new Request('http://localhost/api/criteria'));
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual([{ id: 'c1', name: 'Empathy', orgId: 'orgA' }]);
     // The org-scoped branch filters on the caller's org.
@@ -93,7 +93,7 @@ describe('GET /api/criteria — authenticated, org-scoped read', () => {
   it('queries the GLOBAL catalog only for an org-less caller', async () => {
     authAs('ADMIN', null);
     sqlMock.mockResolvedValue([{ id: 'g1', name: 'Global', orgId: null }]);
-    const res = await GET();
+    const res = await GET(new Request('http://localhost/api/criteria'));
     expect(res.status).toBe(200);
     // The null-org branch never binds an org filter — global rows only.
     expect(ran('org_id IS NULL')).toBe(true);
@@ -103,7 +103,7 @@ describe('GET /api/criteria — authenticated, org-scoped read', () => {
   it('maps an unexpected DB error to 500', async () => {
     authAs('MEMBER', 'orgA');
     sqlMock.mockRejectedValue(new Error('db down'));
-    const res = await GET();
+    const res = await GET(new Request('http://localhost/api/criteria'));
     expect(res.status).toBe(500);
   });
 });
