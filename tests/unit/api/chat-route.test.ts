@@ -609,3 +609,131 @@ describe('GET /api/chat?stream=true — phone transcript stream', () => {
     }
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Structured, request-correlated logging (#154, R-111/R-112)
+// ══════════════════════════════════════════════════════════════════════════════
+// The chat hot path replaced its ad-hoc `console.*` calls with the structured
+// `log()` primitive + the middleware-propagated `x-request-id`, so a single
+// request can be traced across handlers. These are the Standing-Law-1 proof-of-
+// rejection tests: each asserts the emitted line is ONE parseable JSON object
+// carrying `{ level, msg, requestId }` — which the previous free-text
+// `console.error('[Chat API] Session not found:', sessionId)` (two args, first
+// not JSON) would fail.
+describe('structured request-correlated logging (#154)', () => {
+  /** A POST request that carries a caller-supplied x-request-id header. */
+  function postReqWithId(body: unknown, requestId: string) {
+    return new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-request-id': requestId },
+      body: JSON.stringify(body),
+    });
+  }
+  /** Parse the single-arg JSON line the `log()` primitive writes to a console spy. */
+  function loggedLines(spy: ReturnType<typeof vi.spyOn>): Array<Record<string, unknown>> {
+    return spy.mock.calls
+      .map((c) => c[0])
+      .filter((a): a is string => typeof a === 'string')
+      .map((s) => {
+        try {
+          return JSON.parse(s) as Record<string, unknown>;
+        } catch {
+          return { __unparseable__: s };
+        }
+      });
+  }
+
+  it('POST session-not-found emits ONE structured JSON error line with a requestId', async () => {
+    asUser('u1', 'o1');
+    wireSql({ postLoad: [] });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await POST(postReq({ sessionId: 'missing', content: 'hi' }));
+      expect(res.status).toBe(404);
+      const line = loggedLines(errSpy).find((l) => l.msg === 'chat.session_not_found');
+      expect(line).toBeDefined();
+      expect(line).toMatchObject({
+        level: 'error',
+        msg: 'chat.session_not_found',
+        sessionId: 'missing',
+        path: '/api/chat',
+        method: 'POST',
+      });
+      expect(typeof line!.requestId).toBe('string');
+      expect((line!.requestId as string).length).toBeGreaterThan(0);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('honours a caller-supplied x-request-id so the log line correlates to the request', async () => {
+    asUser('u1', 'o1');
+    wireSql({ postLoad: [] });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await POST(postReqWithId({ sessionId: 'missing', content: 'hi' }, 'trace-abc-123'));
+      const line = loggedLines(errSpy).find((l) => l.msg === 'chat.session_not_found');
+      expect(line?.requestId).toBe('trace-abc-123');
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('POST 500 boundary emits a structured chat.post_failed line (no stack, message only)', async () => {
+    asUser('u1', 'o1');
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // Malformed body → request.json() throws → outer catch (non-AuthError) → 500.
+      const res = await POST(postReq('{ not json', true));
+      expect(res.status).toBe(500);
+      const line = loggedLines(errSpy).find((l) => l.msg === 'chat.post_failed');
+      expect(line).toBeDefined();
+      expect(line).toMatchObject({ level: 'error', method: 'POST', path: '/api/chat' });
+      expect(typeof line!.requestId).toBe('string');
+      // The structured field carries the error MESSAGE, never a raw Error object.
+      expect(typeof line!.error).toBe('string');
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('GET 500 boundary emits a structured chat.get_failed line with a requestId', async () => {
+    asUser('u1', 'o1');
+    sqlMock.mockRejectedValue(new Error('neon exploded'));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await GET(getReq('?sessionId=sess1'));
+      expect(res.status).toBe(500);
+      const line = loggedLines(errSpy).find((l) => l.msg === 'chat.get_failed');
+      expect(line).toMatchObject({ level: 'error', method: 'GET', path: '/api/chat' });
+      expect(typeof line!.requestId).toBe('string');
+      expect(line!.error).toBe('neon exploded');
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('the maxTurns auto-end emits a structured info line (console.log severity)', async () => {
+    asUser('u1', 'o1');
+    const old = new Date(Date.now() - 60_000).toISOString();
+    wireSql({
+      postLoad: [
+        sessionRow({
+          scenario: { id: 's1', name: 'x', script: { maxTurns: 2 } },
+          messages: [{ role: 'AGENT', content: 'earlier reply', timestamp: old }],
+        }),
+      ],
+      insertAgent: [],
+      endFinal: [{ id: 'sess1', status: 'COMPLETED', scoringStatus: 'SCORED', scenario: {}, jobTitle: {}, messages: [], scores: [] }],
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await POST(postReq({ sessionId: 'sess1', content: 'one more' }));
+      const line = loggedLines(logSpy).find((l) => l.msg === 'chat.max_turns_reached');
+      expect(line).toMatchObject({ level: 'info', msg: 'chat.max_turns_reached', maxTurns: 2 });
+      expect(typeof line!.requestId).toBe('string');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+});
