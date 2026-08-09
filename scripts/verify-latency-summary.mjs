@@ -167,6 +167,16 @@ async function main() {
       console.log(`  ✓ tierBreakdown = ${JSON.stringify(summary.tierBreakdown)}`);
     }
 
+    // P3b-2: the scan is now bounded (LIMIT MAX_ANALYTICS_SCAN_ROWS + 1). On the
+    // live build's real (tiny) dataset the cap is never hit, so the summary must
+    // report the additive `truncated: false` field — proving the field is wired
+    // and the aggregate still covers the full history.
+    if (summary.truncated !== false) {
+      fail('expected truncated === false on the live (under-cap) dataset', summary.truncated);
+    } else {
+      console.log('  ✓ truncated = false (scan bounded, full history covered)');
+    }
+
     // R-068: the modality split must be present and attribute the CHAT turn we
     // just drove to the CHAT modality (the seeded session is type=CHAT).
     if (!Array.isArray(summary.byModality) || summary.byModality.length === 0) {

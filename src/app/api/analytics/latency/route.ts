@@ -26,6 +26,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { summarizeLatency, type LatencyTurn } from '@/lib/latency-summary';
+import { boundScan, MAX_ANALYTICS_SCAN_ROWS } from '@/lib/limits';
 import { parseReportWindow } from '@/lib/report-window';
 import { errorFields, log, requestIdFrom } from '@/lib/log';
 
@@ -70,7 +71,15 @@ export async function GET(request: Request) {
     // org-less sessions. Only reply turns carry telemetry, so `ttft_ms IS NOT
     // NULL` restricts to measured CUSTOMER rows (AGENT + pre-R-066 rows are NULL).
     // `ss.type` is the conversation modality (CHAT | VOICE | PHONE) for R-068.
-    const rows = await sql`
+    // Bound the rows pulled into this isolate (P3b-2). This scan is O(messages)
+    // over the whole tenant with no other limit — the app's largest unbounded
+    // query. `ORDER BY timestamp DESC` + `LIMIT max + 1` means: on any realistic
+    // tenant every row is returned (total <= max), so the summary is identical to
+    // an unbounded scan (percentiles are order-independent); on a pathological
+    // tenant only the most-recent `max` turns are materialised and `boundScan`
+    // flags `truncated`, so the summary degrades to a recent-window estimate
+    // instead of OOM-ing the isolate.
+    const rawRows = await sql`
       SELECT
         cm.ttft_ms      AS "ttftMs",
         cm.total_ms     AS "totalMs",
@@ -81,9 +90,15 @@ export async function GET(request: Request) {
       FROM chat_messages cm
       JOIN simulation_sessions ss ON ss.id = cm.session_id
       WHERE ${filter}
+      ORDER BY cm.timestamp DESC
+      LIMIT ${MAX_ANALYTICS_SCAN_ROWS + 1}
     `;
+    const { rows, truncated } = boundScan(
+      rawRows as unknown as Array<Record<string, unknown>>,
+      MAX_ANALYTICS_SCAN_ROWS
+    );
 
-    const turns = (rows as unknown as Array<Record<string, unknown>>).map((r) => ({
+    const turns = rows.map((r) => ({
       ttftMs: Number(r.ttftMs),
       totalMs: Number(r.totalMs),
       tier: (r.tier as string | null) ?? null,
@@ -92,7 +107,10 @@ export async function GET(request: Request) {
       modality: (r.modality as string | null) ?? null,
     })) as LatencyTurn[];
 
-    return NextResponse.json(summarizeLatency(turns));
+    // `truncated` tells a consumer the summary was computed over the most-recent
+    // MAX_ANALYTICS_SCAN_ROWS turns rather than the full history (false on any
+    // realistic tenant). Additive field — existing consumers ignore it.
+    return NextResponse.json({ ...summarizeLatency(turns), truncated });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
