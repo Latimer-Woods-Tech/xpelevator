@@ -24,6 +24,7 @@ import { initiateCall, encodeClientState } from '@/lib/telnyx';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
 import { planUnlocksModality, minimumTierForModality } from '@/lib/plans';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 
 export async function POST(request: Request) {
@@ -174,7 +175,8 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Telnyx call initiation error:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'telnyx_call.initiation_failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to initiate call' },
       { status: 500 }

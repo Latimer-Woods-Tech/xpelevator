@@ -60,6 +60,7 @@ import {
 } from '@/lib/report';
 import { canAccessOrgReport, resolveOperatorRollup } from '@/lib/org-hierarchy';
 import { parseReportWindow } from '@/lib/report-window';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 export async function GET(request: Request) {
   try {
@@ -235,8 +236,8 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('Failed to build sessions report:', msg);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'reports.sessions_failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       { error: 'Failed to build report' },
       { status: 500 }

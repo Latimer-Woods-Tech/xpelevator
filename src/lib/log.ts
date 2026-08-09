@@ -38,6 +38,18 @@ export function log(level: LogLevel, message: string, fields: LogFields = {}): v
   }
 }
 
+/**
+ * Normalize an unknown thrown value into structured, drain-safe fields. Emits the
+ * message and (for real `Error`s) the class name only — never a raw `Error`
+ * instance or a stack trace, which would leak internals/PII into the log drain.
+ * Spread into a `log()` call's fields: `log('error', 'x.failed', { ...errorFields(err) })`.
+ */
+export function errorFields(err: unknown): { error: string; errorName?: string } {
+  return err instanceof Error
+    ? { error: err.message, errorName: err.name }
+    : { error: String(err) };
+}
+
 /** Mint a fresh request-correlation id (RFC-4122 v4 via Web Crypto). */
 export function newRequestId(): string {
   return crypto.randomUUID();

@@ -33,6 +33,7 @@ import { sql } from '@/lib/db';
 import { toPublicBranding } from '@/lib/branding';
 import { resolveOperatorSlugFromHost } from '@/lib/host';
 import { enforceRateLimit } from '@/lib/rate-limit';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 interface PublicBrandingRow {
   slug: string;
@@ -87,7 +88,8 @@ export async function GET(request: Request) {
       headers: { 'Cache-Control': 'public, max-age=300' },
     });
   } catch (error) {
-    console.error('Failed to read host-resolved branding:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'branding.host_read_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to read branding' }, { status: 500 });
   }
 }

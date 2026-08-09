@@ -45,21 +45,10 @@ import {
   routeReasonForDifficulty,
   type PersistedTurnTelemetry,
 } from '@/lib/latency';
-import { log, requestIdFrom } from '@/lib/log';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 /** Canonical path label attached to this route's structured log lines. */
 const ROUTE_PATH = '/api/telnyx/webhook';
-
-/**
- * Serialize an unknown thrown value into structured log fields without leaking a
- * stack trace into the drain — mirrors the chat route + middleware `auth.denied`
- * shape so a phone-path request can be traced by its `requestId` (#154, R-111/R-112).
- */
-function errorFields(err: unknown): { error: string; errorName?: string } {
-  return err instanceof Error
-    ? { error: err.message, errorName: err.name }
-    : { error: String(err) };
-}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

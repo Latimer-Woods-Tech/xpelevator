@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canMutateResource, canReadResource } from '@/lib/tenant-guard';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 /**
  * Loads a job title's org and enforces the tenant rule for link mutations:
@@ -70,7 +71,8 @@ export async function GET(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[jobs/[id]/criteria] GET failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'job_criteria.list_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to fetch criteria' }, { status: 500 });
   }
 }
@@ -136,7 +138,8 @@ export async function POST(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[jobs/[id]/criteria] POST failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'job_criteria.link_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to link criteria' }, { status: 500 });
   }
 }
@@ -175,7 +178,8 @@ export async function DELETE(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[jobs/[id]/criteria] DELETE failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'job_criteria.unlink_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to unlink criteria' }, { status: 500 });
   }
 }

@@ -3,6 +3,7 @@ import { getGroqClient } from '@/lib/groq-fetch';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { enforceRateLimit, type RateLimitOptions } from '@/lib/rate-limit';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 // Test endpoint to diagnose Groq API issues
 // GET /api/debug/groq — admin only
@@ -15,6 +16,7 @@ import { enforceRateLimit, type RateLimitOptions } from '@/lib/rate-limit';
 const DEBUG_GROQ_RATE_LIMIT: RateLimitOptions = { limit: 6, windowMs: 60_000 };
 
 export async function GET(request: NextRequest) {
+  const requestId = requestIdFrom(request.headers);
   try {
     await requireAuth(request, 'ADMIN');
   } catch (error) {
@@ -41,10 +43,10 @@ export async function GET(request: NextRequest) {
   };
   
   try {
-    console.log('[Debug Groq] Starting Groq API test call...');
+    log('info', 'debug_groq.start', { requestId });
     const client = getGroqClient();
     
-    console.log('[Debug Groq] Groq client initialized, making test API call...');
+    log('info', 'debug_groq.client_ready', { requestId });
     const completion = await client.chatCompletion({
       model: 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: 'Say "test successful" and nothing else.' }],
@@ -52,13 +54,13 @@ export async function GET(request: NextRequest) {
       max_tokens: 20,
     });
     
-    console.log('[Debug Groq] API call completed successfully');
+    log('info', 'debug_groq.call_ok', { requestId });
     result.success = true;
     result.response = completion.choices[0]?.message?.content || '(empty response)';
     result.model = completion.model;
     
   } catch (error) {
-    console.error('[Debug Groq] API call failed:', error);
+    log('error', 'debug_groq.call_failed', { requestId, ...errorFields(error) });
     result.success = false;
     result.error = {
       message: error instanceof Error ? error.message : String(error),

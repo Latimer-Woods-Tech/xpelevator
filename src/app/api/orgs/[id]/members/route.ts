@@ -10,6 +10,7 @@ import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessOrg } from '@/lib/org-hierarchy';
 import { getOrgGovernanceTarget } from '@/lib/org-guard';
 import { recordAudit } from '@/lib/audit';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 // Per-caller, tenant-scoped governance surface — never cache a response.
 export const dynamic = 'force-dynamic';
@@ -52,7 +53,8 @@ export async function GET(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to list members:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'org_members.list_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to list members' }, { status: 500 });
   }
 }
@@ -152,7 +154,8 @@ export async function POST(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to add member:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'org_members.add_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to add member' }, { status: 500 });
   }
 }
@@ -214,7 +217,8 @@ export async function DELETE(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to remove member:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'org_members.remove_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to remove member' }, { status: 500 });
   }
 }

@@ -24,6 +24,7 @@ import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canManageOrgClients, slugify, suffixSlug } from '@/lib/org-hierarchy';
 import { recordAudit } from '@/lib/audit';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 interface ClientRow {
   id: string;
@@ -93,7 +94,8 @@ export async function GET(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to list client orgs:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'org_clients.list_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to list client orgs' }, { status: 500 });
   }
 }
@@ -189,7 +191,8 @@ export async function POST(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to create client org:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'org_clients.create_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to create client org' }, { status: 500 });
   }
 }

@@ -29,6 +29,7 @@ import {
 } from '@/lib/budget';
 import { tierForPlan, type SeatTierId } from '@/lib/plans';
 import { PRICING_AS_OF, PRICING_SOURCE, formatUsd } from '@/lib/cost';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 export async function GET(request: Request) {
   try {
@@ -98,8 +99,8 @@ export async function GET(request: Request) {
         { status: error.status },
       );
     }
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('Failed to build budget report:', msg);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'reports.budget_failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       { error: 'Failed to build budget report' },
       { status: 500 },

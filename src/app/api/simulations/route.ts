@@ -15,11 +15,13 @@ import {
   evaluateBudget,
   type MonthlySpendGroup,
 } from '@/lib/budget';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 const SIMULATION_TYPES = ['CHAT', 'VOICE', 'PHONE'] as const;
 
 // Start a new simulation session
 export async function POST(request: Request) {
+  const requestId = requestIdFrom(request.headers);
   try {
     // Require authentication to create sessions
     const authResult = await requireAuth();
@@ -149,10 +151,10 @@ export async function POST(request: Request) {
       } catch (budgetError) {
         // Fail OPEN: a spend-ledger read failure must never block a legitimate
         // session. Log and continue to session creation.
-        console.error(
-          'Monthly budget check failed (allowing session):',
-          budgetError instanceof Error ? budgetError.message : String(budgetError)
-        );
+        log('error', 'simulations.budget_check_failed_open', {
+          requestId,
+          ...errorFields(budgetError),
+        });
       }
     }
 
@@ -221,7 +223,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     const msg = error instanceof Error ? error.message : String(error);
-    console.error('Failed to create simulation:', msg);
+    log('error', 'simulations.create_failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       { error: 'Failed to create simulation', detail: process.env.NODE_ENV !== 'production' ? msg : undefined },
       { status: 500 }
@@ -231,6 +233,7 @@ export async function POST(request: Request) {
 
 // List simulation sessions
 export async function GET(request: Request) {
+  const requestId = requestIdFrom(request.headers);
   try {
     // Require authentication to list sessions
     const authResult = await requireAuth();
@@ -357,8 +360,7 @@ export async function GET(request: Request) {
     );
     return NextResponse.json(safe);
   } catch (error) {
-    console.error('[simulations/GET] ERROR:', error);
-    console.error('[simulations/GET] ERROR Stack:', error instanceof Error ? error.stack : 'No stack trace');
+    log('error', 'simulations.get_failed', { requestId, ...errorFields(error) });
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

@@ -27,6 +27,7 @@ import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { summarizeLatency, type LatencyTurn } from '@/lib/latency-summary';
 import { parseReportWindow } from '@/lib/report-window';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 export async function GET(request: Request) {
   try {
@@ -96,7 +97,8 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Latency summary error:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'analytics.latency_failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       { error: 'Failed to load latency summary' },
       { status: 500 }

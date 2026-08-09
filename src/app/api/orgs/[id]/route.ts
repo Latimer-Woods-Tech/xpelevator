@@ -11,6 +11,7 @@ import { canAccessOrg, canSetOrgPlan, canDeleteOrg } from '@/lib/org-hierarchy';
 import { getOrgGovernanceTarget } from '@/lib/org-guard';
 import { isOrgPlan } from '@/lib/plans';
 import { recordAudit } from '@/lib/audit';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 // Per-caller, tenant-scoped governance surface — never cache a response.
 export const dynamic = 'force-dynamic';
@@ -93,7 +94,8 @@ export async function GET(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to get organization:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'orgs.get_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to get organization' }, { status: 500 });
   }
 }
@@ -182,7 +184,8 @@ export async function PUT(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to update organization:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'orgs.update_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to update organization' }, { status: 500 });
   }
 }
@@ -250,7 +253,8 @@ export async function DELETE(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to delete organization:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'orgs.delete_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to delete organization' }, { status: 500 });
   }
 }

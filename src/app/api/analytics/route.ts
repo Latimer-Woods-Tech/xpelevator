@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { computeAnalytics, type SessionFull, type ScoreFull } from '@/lib/analytics';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 /** Shape of a row returned by the analytics SELECT below (before date mapping). */
 interface RawAnalyticsRow {
@@ -14,7 +15,7 @@ interface RawAnalyticsRow {
   scores: ScoreFull[];
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     // Require authentication — analytics is sensitive data
     const { session: authSession } = await requireAuth();
@@ -90,7 +91,8 @@ export async function GET() {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Analytics error:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'analytics.summary_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to load analytics' }, { status: 500 });
   }
 }

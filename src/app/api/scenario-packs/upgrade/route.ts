@@ -9,6 +9,7 @@ import {
   PACK_CATALOG_VERSION,
   type StoredPackScenario,
 } from '@/lib/scenario-packs';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 // POST /api/scenario-packs/upgrade
 // Body: { packId: string, dryRun?: boolean }
@@ -210,7 +211,8 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[scenario-packs/upgrade] POST failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'scenario_packs.upgrade_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to upgrade pack' }, { status: 500 });
   }
 }

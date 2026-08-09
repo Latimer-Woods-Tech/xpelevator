@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canMutateResource } from '@/lib/tenant-guard';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 
 export async function PUT(
@@ -60,7 +61,8 @@ export async function PUT(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to update criteria:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'criteria.update_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to update criteria' }, { status: 500 });
   }
 }
@@ -96,7 +98,8 @@ export async function DELETE(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to delete criteria:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'criteria.delete_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to delete criteria' }, { status: 500 });
   }
 }

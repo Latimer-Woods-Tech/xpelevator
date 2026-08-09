@@ -21,18 +21,7 @@ import {
   windowConversation,
 } from '@/lib/limits';
 import { finalizeAndScoreSession } from '@/lib/session-scoring';
-import { log, requestIdFrom } from '@/lib/log';
-
-/**
- * Serialize an unknown thrown value into structured log fields without leaking a
- * stack trace into the drain — mirrors the middleware's `auth.denied` shape so a
- * request can be traced across handlers by its `requestId` (#154, R-111/R-112).
- */
-function errorFields(err: unknown): { error: string; errorName?: string } {
-  return err instanceof Error
-    ? { error: err.message, errorName: err.name }
-    : { error: String(err) };
-}
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 
 // POST /api/chat

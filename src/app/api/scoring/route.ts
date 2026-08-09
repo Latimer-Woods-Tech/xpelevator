@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessSession } from '@/lib/session-access';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 
 // Score a simulation session.
@@ -87,7 +88,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     const msg = error instanceof Error ? error.message : String(error);
-    console.error('Failed to score simulation:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'scoring.failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       { error: 'Failed to score simulation', detail: process.env.NODE_ENV !== 'production' ? msg : undefined },
       { status: 500 }

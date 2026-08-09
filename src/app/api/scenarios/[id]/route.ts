@@ -3,6 +3,7 @@ import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canMutateResource } from '@/lib/tenant-guard';
 import { sanitizeScenarioScript } from '@/lib/scenario-safety';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 
 export async function GET(
@@ -46,7 +47,8 @@ export async function GET(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[scenarios/[id]] GET failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'scenarios.get_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to fetch scenario' }, { status: 500 });
   }
 }
@@ -109,7 +111,8 @@ export async function PUT(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[scenarios/[id]] PUT failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'scenarios.update_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to update scenario' }, { status: 500 });
   }
 }
@@ -145,7 +148,8 @@ export async function DELETE(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[scenarios/[id]] DELETE failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'scenarios.delete_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to delete scenario' }, { status: 500 });
   }
 }

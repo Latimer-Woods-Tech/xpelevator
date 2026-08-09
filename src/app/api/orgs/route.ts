@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { isPlatformAdmin } from '@/lib/org-hierarchy';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 // This surface returns PER-CALLER data (the list is scoped to the caller's own
 // org + owned clients; a platform admin sees all). A parameterless GET route
@@ -25,7 +26,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     // Require admin role for listing organizations
     const { session } = await requireAuth(undefined, 'ADMIN');
@@ -84,7 +85,8 @@ export async function GET() {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to list organizations:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'orgs.list_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to list organizations' }, { status: 500 });
   }
 }
@@ -134,7 +136,8 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to create organization:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'orgs.create_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to create organization' }, { status: 500 });
   }
 }
