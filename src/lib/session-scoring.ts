@@ -11,6 +11,7 @@
 
 import { sql } from '@/lib/db';
 import { scoreSession, type ScoringCriterion } from '@/lib/ai';
+import { log, errorFields } from '@/lib/log';
 import type { ScoreResult } from '@/types';
 
 /** A session needs at least this many messages to be worth scoring. */
@@ -127,7 +128,7 @@ export async function finalizeAndScoreSession(
     try {
       scores = await scoreSession(transcript, criteria);
     } catch (err) {
-      console.error('[scoring] Auto-scoring failed:', err);
+      log('error', 'scoring.autoscore_failed', { sessionId, ...errorFields(err) });
     }
   }
 

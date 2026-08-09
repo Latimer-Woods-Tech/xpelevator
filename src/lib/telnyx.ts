@@ -11,6 +11,7 @@
  */
 
 import { getCloudflareContext } from '@opennextjs/cloudflare';
+import { log } from '@/lib/log';
 
 const TELNYX_BASE = 'https://api.telnyx.com/v2';
 
@@ -175,7 +176,10 @@ export async function startTranscription(callControlId: string, options: {
     transcription_tracks: options.track ?? 'inbound',  // 'inbound' = caller voice only, not AI TTS
     client_state: options.clientState,
   };
-  console.log('[telnyx] transcription_start request body:', JSON.stringify({ ...body, client_state: '<redacted>' }));
+  log('info', 'telnyx.transcription_start_request', {
+    callControlId,
+    body: { ...body, client_state: '<redacted>' },
+  });
   const res = await fetch(`${TELNYX_BASE}/calls/${callControlId}/actions/transcription_start`, {
     method: 'POST',
     headers: telnyxHeaders(),
@@ -185,7 +189,11 @@ export async function startTranscription(callControlId: string, options: {
   if (!res.ok) {
     throw new Error(`Telnyx start_transcription failed: ${res.status} ${responseText}`);
   }
-  console.log('[telnyx] transcription_start response:', res.status, responseText.slice(0, 200));
+  log('info', 'telnyx.transcription_start_response', {
+    callControlId,
+    status: res.status,
+    body: responseText.slice(0, 200),
+  });
   return JSON.parse(responseText);
 }
 

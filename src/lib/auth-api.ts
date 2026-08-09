@@ -14,6 +14,7 @@ import { auth } from '@/auth';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getTelnyxPublicKey } from '@/lib/telnyx';
+import { log, errorFields } from '@/lib/log';
 
 export type UserRole = 'ADMIN' | 'MEMBER';
 
@@ -157,7 +158,7 @@ export async function verifyTelnyxWebhook(
   // misconfigured secret silently accepts forged webhook events.
   if (!publicKey) {
     if (process.env.NODE_ENV === 'production') {
-      console.error('[Telnyx] TELNYX_PUBLIC_KEY not set — rejecting webhook (fail closed)');
+      log('error', 'telnyx.webhook_public_key_missing', { reason: 'rejecting webhook (fail closed)' });
       return false;
     }
     return true;
@@ -167,7 +168,7 @@ export async function verifyTelnyxWebhook(
   const timestamp = headers.get('telnyx-timestamp');
 
   if (!signature || !timestamp) {
-    console.warn('[Telnyx] Missing signature headers');
+    log('warn', 'telnyx.webhook_signature_headers_missing');
     return false;
   }
 
@@ -175,7 +176,7 @@ export async function verifyTelnyxWebhook(
   const timestampMs = parseInt(timestamp, 10) * 1000;
   const now = Date.now();
   if (Math.abs(now - timestampMs) > 5 * 60 * 1000) {
-    console.warn('[Telnyx] Timestamp too old or in future');
+    log('warn', 'telnyx.webhook_timestamp_out_of_window');
     return false;
   }
 
@@ -205,12 +206,12 @@ export async function verifyTelnyxWebhook(
     );
 
     if (!valid) {
-      console.warn('[Telnyx] Invalid webhook signature');
+      log('warn', 'telnyx.webhook_signature_invalid');
     }
 
     return valid;
   } catch (error) {
-    console.error('[Telnyx] Signature verification error:', error);
+    log('error', 'telnyx.webhook_signature_verify_error', { ...errorFields(error) });
     return false;
   }
 }

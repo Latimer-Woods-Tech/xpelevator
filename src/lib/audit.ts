@@ -20,8 +20,8 @@
  * logged and swallowed — an audit-write failure must NEVER break a legitimate
  * governance mutation the caller is already authorized to make. The mutation has
  * its own authz; losing one audit row to a DB hiccup is strictly better than
- * 500-ing a valid admin action. The failure is `console.error`-logged so it is
- * observable rather than silent. (A stricter fail-closed posture — refuse the
+ * 500-ing a valid admin action. The failure is `log('error', …)`-emitted so it
+ * is observable rather than silent. (A stricter fail-closed posture — refuse the
  * mutation if it cannot be audited — is a deliberate future hardening, not the
  * default at this stage.)
  *
@@ -30,6 +30,7 @@
  * a log of what actually changed, not of every request that reached a handler.
  */
 import { sql as defaultSql } from '@/lib/db';
+import { log, errorFields } from '@/lib/log';
 
 /** A neon-style tagged-template query function. */
 export type SqlClient = (
@@ -105,6 +106,6 @@ export async function recordAudit(
     `;
   } catch (err) {
     // Fail OPEN — an audit-write failure must not break a valid mutation.
-    console.error(`[audit] failed to record "${entry.action}":`, err);
+    log('error', 'audit.record_failed', { action: entry.action, ...errorFields(err) });
   }
 }
