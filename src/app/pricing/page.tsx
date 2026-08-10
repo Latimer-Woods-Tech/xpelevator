@@ -146,7 +146,7 @@ export default function PricingPage() {
         </section>
 
         {/* Billing note — sourced from the catalog, no hard-coded money */}
-        <p className="text-center text-xs text-slate-500 mt-10 max-w-2xl mx-auto">
+        <p className="text-center text-xs text-slate-400 mt-10 max-w-2xl mx-auto">
           {catalog.billing.note} Seats are billed monthly per active trainee.
           Higher tiers include every modality below them. Wholesale rates are set
           per operator agreement — <Link href="/auth/signin" className="text-blue-400 hover:underline">get in touch</Link> to onboard your workspace.

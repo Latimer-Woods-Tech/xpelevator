@@ -122,7 +122,7 @@ export default function SimulatePage() {
           <p className="text-slate-400">Loading job titles...</p>
         ) : fetchError ? (
           <div className="text-center py-12">
-            <p className="text-2xl mb-3">⚠️</p>
+            <p className="text-2xl mb-3" aria-hidden="true">⚠️</p>
             <p className="text-red-400 mb-2 font-medium">Could not load job titles</p>
             <p className="text-slate-400 text-sm mb-6">{fetchError}</p>
             <button
@@ -159,7 +159,7 @@ export default function SimulatePage() {
                     {job.description && (
                       <p className="text-slate-400 text-sm">{job.description}</p>
                     )}
-                    <p className="text-slate-500 text-xs mt-2">
+                    <p className="text-slate-400 text-xs mt-2">
                       {(job.scenarios ?? []).length} scenario{(job.scenarios ?? []).length !== 1 ? 's' : ''}
                     </p>
                   </button>
@@ -179,7 +179,7 @@ export default function SimulatePage() {
                 )}
 
                 {(selectedJob.scenarios ?? []).length === 0 ? (
-                  <p className="text-slate-500">
+                  <p className="text-slate-400">
                     No scenarios available for this job title.
                   </p>
                 ) : (

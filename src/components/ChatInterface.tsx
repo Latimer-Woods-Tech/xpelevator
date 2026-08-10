@@ -136,10 +136,10 @@ export default function ChatInterface({
       <div className="flex-1 overflow-y-auto px-6 py-6" role="log" aria-label="Conversation transcript">
         <div className="max-w-3xl mx-auto space-y-4">
           {messages.length === 0 && !streamingText && !sending && (
-            <div className="text-center text-slate-500 py-8">
+            <div className="text-center text-slate-400 py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4" />
               <p>Starting conversation…</p>
-              <p className="text-xs text-slate-600 mt-1">
+              <p className="text-xs text-slate-400 mt-1">
                 If this takes too long, check the browser console for errors.
               </p>
             </div>
@@ -204,7 +204,7 @@ export default function ChatInterface({
               Send
             </button>
           </form>
-          <p className="text-xs text-slate-600 mt-2 text-center">
+          <p className="text-xs text-slate-400 mt-2 text-center">
             You are the employee. Respond to the virtual customer above.
           </p>
         </div>

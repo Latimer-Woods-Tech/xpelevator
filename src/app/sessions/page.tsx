@@ -126,7 +126,7 @@ export default function SessionsPage() {
                     )}
 
                     <div className="mt-3 flex items-center justify-between">
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-slate-400">
                         {new Date(session.createdAt).toLocaleString()}
                       </div>
                       <div className="flex gap-4">

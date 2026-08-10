@@ -71,7 +71,7 @@ interface LatencyData {
 }
 
 function ScoreBar({ value, max = 10 }: { value: number | null; max?: number }) {
-  if (value === null) return <span className="text-slate-500 text-sm">—</span>;
+  if (value === null) return <span className="text-slate-400 text-sm">—</span>;
   const pct = (value / max) * 100;
   // Shared score scale (score-color.ts) — was a divergent 3-tier threshold.
   return (
@@ -89,7 +89,7 @@ function ScoreBar({ value, max = 10 }: { value: number | null; max?: number }) {
 function TrendChart({ points }: { points: TrendPoint[] }) {
   if (points.length === 0) {
     return (
-      <p className="text-slate-500 text-sm text-center py-8">No data yet.</p>
+      <p className="text-slate-400 text-sm text-center py-8">No data yet.</p>
     );
   }
 
@@ -120,7 +120,7 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
               />
               {points.length <= 30 && (
                 <span
-                  className="text-slate-500 mt-1 select-none"
+                  className="text-slate-400 mt-1 select-none"
                   style={{ fontSize: 9, writingMode: 'vertical-rl', transform: 'rotate(180deg)', lineHeight: 1 }}
                 >
                   {label}
@@ -282,7 +282,7 @@ export default function AnalyticsPage() {
             <Section title="Performance by Criteria">
               <p className="text-slate-400 text-xs mb-4">Sorted weakest → strongest.</p>
               {data.byCriteria.length === 0 ? (
-                <p className="text-slate-500 text-sm">No scored sessions yet.</p>
+                <p className="text-slate-400 text-sm">No scored sessions yet.</p>
               ) : (
                 <div className="space-y-3">
                   {data.byCriteria.map(c => (
@@ -301,7 +301,7 @@ export default function AnalyticsPage() {
             {/* ── By job title ─────────────────────────────────────────────── */}
             <Section title="Performance by Job Title">
               {data.byJobTitle.length === 0 ? (
-                <p className="text-slate-500 text-sm">No data yet.</p>
+                <p className="text-slate-400 text-sm">No data yet.</p>
               ) : (
                 <div className="space-y-3">
                   {data.byJobTitle.map(j => (
@@ -389,7 +389,7 @@ function ScoringHealthSection({ health }: { health: ScoringHealth }) {
       </div>
       {failed > 0 && (
         <p className="text-red-400 text-xs mt-4">
-          ⚠️ {failed} session{failed !== 1 ? 's' : ''} could not be scored —
+          <span aria-hidden="true">⚠️</span> {failed} session{failed !== 1 ? 's' : ''} could not be scored —
           check the scoring engine before trusting the averages above.
         </p>
       )}

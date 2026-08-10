@@ -405,7 +405,7 @@ export default function VoiceChatInterface({
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="max-w-3xl mx-auto space-y-4">
           {messages.length === 0 && !streamingText && (
-            <div className="text-center text-slate-500 py-12">
+            <div className="text-center text-slate-400 py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto mb-4" />
               <p className="text-sm">Starting voice simulation…</p>
             </div>
@@ -588,7 +588,7 @@ export default function VoiceChatInterface({
             </div>
           )}
 
-          <p className="text-xs text-slate-600 text-center mt-6">
+          <p className="text-xs text-slate-400 text-center mt-6">
             {phase === 'unsupported'
               ? 'Speech recognition is unavailable in this browser. You can still practice using text input above.'
               : 'Hold the mic, speak your response, then release. The virtual customer will reply aloud.'}

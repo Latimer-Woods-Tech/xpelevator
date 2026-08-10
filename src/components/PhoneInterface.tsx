@@ -199,7 +199,7 @@ export default function PhoneInterface({
               >
                 Start Call
               </button>
-              <p className="text-xs text-slate-500 mt-3">
+              <p className="text-xs text-slate-400 mt-3">
                 Standard carrier rates may apply to the call.
               </p>
             </div>
@@ -216,7 +216,7 @@ export default function PhoneInterface({
                 </span>
               </div>
               <p className="text-slate-300 text-lg font-medium">Dialing {phoneNumber}…</p>
-              <p className="text-slate-500 text-sm mt-2">Waiting for answer</p>
+              <p className="text-slate-400 text-sm mt-2">Waiting for answer</p>
             </div>
           )}
 
@@ -227,13 +227,13 @@ export default function PhoneInterface({
                 <p className="text-green-400 font-semibold text-sm uppercase tracking-widest">
                   ● Live Call
                 </p>
-                <p className="text-slate-500 text-xs mt-1">Transcript updates as you speak</p>
+                <p className="text-slate-400 text-xs mt-1">Transcript updates as you speak</p>
               </div>
 
               {/* Messages */}
               <div className="space-y-4 mb-4">
                 {messages.length === 0 && (
-                  <p className="text-center text-slate-500 py-8 animate-pulse">
+                  <p className="text-center text-slate-400 py-8 animate-pulse">
                     Connecting to virtual customer…
                   </p>
                 )}
@@ -268,13 +268,14 @@ export default function PhoneInterface({
         <div className="sticky bottom-0 border-t border-slate-800 bg-slate-900/90 backdrop-blur-sm px-6 py-4 flex-shrink-0">
           <div className="max-w-3xl mx-auto flex items-center justify-between">
             <p className="text-slate-400 text-sm">
-              {customerIsThinking ? '🟡 Customer responding…' : '🟢 Your turn to speak'}
+              <span aria-hidden="true">{customerIsThinking ? '🟡' : '🟢'}</span>{' '}
+              {customerIsThinking ? 'Customer responding…' : 'Your turn to speak'}
             </p>
             <button
               onClick={hangUp}
               className="flex items-center gap-2 px-6 py-2.5 bg-red-600 hover:bg-red-500 rounded-full font-semibold transition-colors text-sm"
             >
-              🔴 Hang Up
+              <span aria-hidden="true">🔴</span> Hang Up
             </button>
           </div>
         </div>

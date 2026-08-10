@@ -17,7 +17,7 @@ export default function Error({
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-center">
       <div className="text-center max-w-md px-6">
-        <div className="text-5xl mb-6">⚠️</div>
+        <div className="text-5xl mb-6" aria-hidden="true">⚠️</div>
         <h1 className="text-2xl font-bold mb-3">Something went wrong</h1>
         <p className="text-slate-400 mb-6 text-sm">
           {error.message || 'An unexpected error occurred. Please try again.'}

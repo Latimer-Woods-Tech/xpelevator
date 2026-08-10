@@ -70,7 +70,7 @@ export default function SimulationPage() {
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white">
         <div className="max-w-3xl mx-auto px-6 py-12">
           <div className="text-center mb-10">
-            <div className="text-5xl mb-4">✅</div>
+            <div className="text-5xl mb-4" aria-hidden="true">✅</div>
             <h1 className="text-3xl font-bold mb-2">Simulation Complete</h1>
             <p className="text-slate-400">{session.scenario.name}</p>
             <span className="inline-block mt-2 text-xs px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-400 uppercase tracking-wide">
