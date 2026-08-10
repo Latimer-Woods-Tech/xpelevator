@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import MessageBubble from './MessageBubble';
 import { ChatIcon, UserIcon } from './ui/icons';
 import type { ChatSessionState } from '@/hooks/useChatSession';
@@ -39,6 +39,35 @@ export default function ChatInterface({
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // A single dedicated polite region is the ONLY thing announced to assistive
+  // tech. The visual scrollback below is a role="log" (not a live region), so
+  // streamed tokens no longer re-announce the growing reply on every chunk and
+  // the trainee's own messages aren't read back to them.
+  const [announcement, setAnnouncement] = useState('');
+  const lastAnnouncedIdRef = useRef<string | null>(null);
+
+  // Announce the simulated customer's completed replies (role === 'CUSTOMER'),
+  // once each, when they land in the transcript.
+  useEffect(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'CUSTOMER') {
+        if (messages[i].id !== lastAnnouncedIdRef.current) {
+          lastAnnouncedIdRef.current = messages[i].id;
+          setAnnouncement(`Simulated customer said: ${messages[i].content}`);
+        }
+        break;
+      }
+    }
+  }, [messages]);
+
+  // Before the first token streams, announce the pending state so a
+  // screen-reader user knows the customer is composing a reply.
+  useEffect(() => {
+    if (sending && !streamingText) {
+      setAnnouncement('Simulated customer is replying…');
+    }
+  }, [sending, streamingText]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,7 +112,7 @@ export default function ChatInterface({
                 </span>
               );
             })()}
-            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" aria-hidden="true" />
             <span className="text-sm text-green-400">Live</span>
             <button
               onClick={endConversation}
@@ -96,14 +125,21 @@ export default function ChatInterface({
         </div>
       </div>
 
-      {/* Messages — announce new customer replies to assistive tech. */}
-      <div className="flex-1 overflow-y-auto px-6 py-6" aria-live="polite" aria-atomic="false">
+      {/* Visually-hidden announcer — the single source of assistive-tech speech
+          for this surface (customer replies + the "replying" state). */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+
+      {/* Messages — a plain transcript log, NOT a live region (see the
+          announcer above): a live region here re-read every streamed token. */}
+      <div className="flex-1 overflow-y-auto px-6 py-6" role="log" aria-label="Conversation transcript">
         <div className="max-w-3xl mx-auto space-y-4">
           {messages.length === 0 && !streamingText && !sending && (
-            <div className="text-center text-slate-500 py-8">
+            <div className="text-center text-slate-400 py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4" />
               <p>Starting conversation…</p>
-              <p className="text-xs text-slate-600 mt-1">
+              <p className="text-xs text-slate-400 mt-1">
                 If this takes too long, check the browser console for errors.
               </p>
             </div>
@@ -119,7 +155,7 @@ export default function ChatInterface({
               <UserIcon className="h-6 w-6 shrink-0 text-slate-400" />
               <div className="bg-slate-700/60 border border-slate-600 rounded-2xl rounded-tl-none px-4 py-3 max-w-[80%]">
                 <p className="text-white text-sm whitespace-pre-wrap">{streamingText}</p>
-                <span className="inline-block w-1 h-4 bg-blue-400 animate-pulse ml-0.5" />
+                <span className="inline-block w-1 h-4 bg-blue-400 animate-pulse ml-0.5" aria-hidden="true" />
               </div>
             </div>
           )}
@@ -129,7 +165,7 @@ export default function ChatInterface({
             <div className="flex items-start gap-3">
               <UserIcon className="h-6 w-6 shrink-0 text-slate-400" />
               <div className="bg-slate-700/60 border border-slate-600 rounded-2xl rounded-tl-none px-4 py-3">
-                <div className="flex gap-1">
+                <div className="flex gap-1" aria-hidden="true">
                   <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
                   <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
                   <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" />
@@ -168,7 +204,7 @@ export default function ChatInterface({
               Send
             </button>
           </form>
-          <p className="text-xs text-slate-600 mt-2 text-center">
+          <p className="text-xs text-slate-400 mt-2 text-center">
             You are the employee. Respond to the virtual customer above.
           </p>
         </div>

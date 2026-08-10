@@ -19,7 +19,7 @@ export default function MessageBubble({ message }: Props) {
         }`}
       >
         <p className="text-white text-sm whitespace-pre-wrap">{message.content}</p>
-        <p className="text-xs text-slate-500 mt-1">{isCustomer ? 'Customer' : 'You'}</p>
+        <p className="text-xs text-slate-400 mt-1">{isCustomer ? 'Customer' : 'You'}</p>
       </div>
     </div>
   );

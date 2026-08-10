@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     // Authenticated read, scoped to the caller's org.
     const { session } = await requireAuth();
@@ -117,7 +118,8 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Failed to fetch job titles:', message);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'jobs.list_failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       { error: 'Failed to fetch job titles', detail: message },
       { status: 500 }
@@ -148,7 +150,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Failed to create job title:', message);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'jobs.create_failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       {
         error: 'Failed to create job title',

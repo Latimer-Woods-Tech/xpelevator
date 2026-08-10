@@ -38,7 +38,7 @@ const SCENARIO_TYPE_BADGE: Record<SimulationType, string> = {
 function Tooltip({ text }: { text: string }) {
   return (
     <span className="relative inline-block ml-1 group cursor-help align-middle">
-      <span className="text-slate-500 hover:text-blue-400 text-xs transition-colors">ⓘ</span>
+      <span className="text-slate-400 hover:text-blue-400 text-xs transition-colors">ⓘ</span>
       <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 bg-slate-700 text-white text-xs rounded-lg px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 border border-slate-600 shadow-xl leading-relaxed whitespace-normal">
         {text}
         <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-700" />
@@ -52,7 +52,7 @@ function Tooltip({ text }: { text: string }) {
 function TabIntro({ icon, title, description }: { icon: string; title: string; description: string }) {
   return (
     <div className="flex items-start gap-3 bg-blue-950/40 border border-blue-800/30 rounded-xl px-5 py-4 mb-6">
-      <span className="text-2xl">{icon}</span>
+      <span className="text-2xl" aria-hidden="true">{icon}</span>
       <div>
         <div className="font-semibold text-blue-200 text-sm">{title}</div>
         <div className="text-slate-400 text-xs mt-0.5 leading-relaxed">{description}</div>
@@ -175,7 +175,7 @@ function CriteriaTab() {
       {loading ? (
         <p className="text-slate-400">Loading...</p>
       ) : items.length === 0 ? (
-        <p className="text-slate-500 text-center py-12">No criteria yet.</p>
+        <p className="text-slate-400 text-center py-12">No criteria yet.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -193,7 +193,7 @@ function CriteriaTab() {
                 <tr key={c.id} className="border-b border-slate-800 hover:bg-slate-800/30">
                   <td className="py-3 px-4">
                     <div className="font-medium">{c.name}</div>
-                    {c.description && <div className="text-xs text-slate-500">{c.description}</div>}
+                    {c.description && <div className="text-xs text-slate-400">{c.description}</div>}
                   </td>
                   <td className="py-3 px-4 text-slate-400">{c.category || '—'}</td>
                   <td className="py-3 px-4">
@@ -318,7 +318,7 @@ function JobTitlesTab() {
       {loading ? (
         <p className="text-slate-400">Loading...</p>
       ) : items.length === 0 ? (
-        <p className="text-slate-500 text-center py-12">No job titles yet.</p>
+        <p className="text-slate-400 text-center py-12">No job titles yet.</p>
       ) : (
         <div className="space-y-3">
           {items.map(j => (
@@ -388,6 +388,16 @@ function ScenariosTab() {
     if (!res.ok) { const body2 = await res.json().catch(() => ({})); toast.error(`Delete failed: ${(body2 as any).error || res.statusText}`); return; }
     refresh();
     toast.success('Scenario deleted');
+  };
+
+  // Clone a scenario into a fresh, editable copy in the operator's own org —
+  // the day-one inventory lever (an operator tailors a starter/global scenario
+  // per client instead of re-authoring persona/objective/hints by hand).
+  const duplicate = async (id: string) => {
+    const res = await fetch(`/api/scenarios/${id}/duplicate`, { method: 'POST' });
+    if (!res.ok) { const body2 = await res.json().catch(() => ({})); toast.error(`Duplicate failed: ${(body2 as any).error || res.statusText}`); return; }
+    refresh();
+    toast.success('Scenario duplicated');
   };
 
   const startEdit = (s: Scenario) => {
@@ -539,7 +549,7 @@ function ScenariosTab() {
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-slate-400 mt-1">
                   {form.difficulty === 'easy' && 'Easy: Cooperative customer, accepts first reasonable solution.'}
                   {form.difficulty === 'medium' && 'Medium: Mildly frustrated, needs reassurance before agreeing.'}
                   {form.difficulty === 'hard' && 'Hard: Very upset, challenges solutions, only de-escalates if handled well.'}
@@ -586,7 +596,7 @@ function ScenariosTab() {
       {loading ? (
         <p className="text-slate-400">Loading...</p>
       ) : scenarios.length === 0 ? (
-        <p className="text-slate-500 text-center py-12">No scenarios found.</p>
+        <p className="text-slate-400 text-center py-12">No scenarios found.</p>
       ) : (
         <div className="space-y-3">
           {scenarios.map(s => (
@@ -599,10 +609,11 @@ function ScenariosTab() {
                   </span>
                 </div>
                 <div className="text-sm text-slate-400">{jobName(s.jobTitleId ?? '')}</div>
-                {s.description && <div className="text-xs text-slate-500 mt-0.5 truncate">{s.description}</div>}
+                {s.description && <div className="text-xs text-slate-400 mt-0.5 truncate">{s.description}</div>}
               </div>
               <div className="flex gap-3 shrink-0">
                 <button onClick={() => startEdit(s)} className="text-blue-400 hover:text-blue-300 text-sm">Edit</button>
+                <button onClick={() => duplicate(s.id)} className="text-emerald-400 hover:text-emerald-300 text-sm">Duplicate</button>
                 <button onClick={() => remove(s.id)} className="text-red-400 hover:text-red-300 text-sm">Delete</button>
               </div>
             </div>
@@ -688,7 +699,7 @@ function JobCriteriaTab() {
       </div>
 
       {!selectedJobId ? (
-        <p className="text-slate-500 text-center py-12">👆 Select a job title above to choose which criteria are scored for that role.</p>
+        <p className="text-slate-400 text-center py-12">👆 Select a job title above to choose which criteria are scored for that role.</p>
       ) : loading ? (
         <p className="text-slate-400">Loading criteria links...</p>
       ) : (
@@ -699,7 +710,7 @@ function JobCriteriaTab() {
           </p>
           {Object.entries(grouped).map(([category, criteriaList]) => (
             <div key={category}>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">{category}</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">{category}</h3>
               <div className="space-y-2">
                 {criteriaList.map(c => {
                   const linked = linkedIds.has(c.id);
@@ -716,14 +727,14 @@ function JobCriteriaTab() {
                     >
                       <div>
                         <div className="font-medium text-sm">{c.name}</div>
-                        {c.description && <div className="text-xs text-slate-500">{c.description}</div>}
+                        {c.description && <div className="text-xs text-slate-400">{c.description}</div>}
                       </div>
                       <div className="flex items-center gap-3 shrink-0 ml-4">
                         <div className="flex items-center gap-1">
                           <div className="w-12 h-1.5 bg-slate-700 rounded-full overflow-hidden">
                             <div className="h-full bg-blue-500 rounded-full" style={{ width: `${c.weight * 10}%` }} />
                           </div>
-                          <span className="text-xs text-slate-500">{c.weight}</span>
+                          <span className="text-xs text-slate-400">{c.weight}</span>
                         </div>
                         <span className={`text-xs font-medium px-2 py-1 rounded ${linked ? 'bg-green-700 text-white' : 'bg-slate-700 text-slate-400'}`}>
                           {isSaving ? '...' : linked ? 'Linked' : 'Add'}
@@ -912,7 +923,7 @@ function OrgsTab() {
       {loading ? (
         <p className="text-slate-400">Loading...</p>
       ) : orgs.length === 0 ? (
-        <p className="text-slate-500 text-center py-12">No organizations yet.</p>
+        <p className="text-slate-400 text-center py-12">No organizations yet.</p>
       ) : (
         <div className="space-y-3">
           {orgs.map(org => (
@@ -930,7 +941,7 @@ function OrgsTab() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold">{org.name}</span>
-                      <span className="text-xs text-slate-500 font-mono">{org.slug}</span>
+                      <span className="text-xs text-slate-400 font-mono">{org.slug}</span>
                     </div>
                     <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
                       <span>{org._count.users} members</span>
@@ -991,16 +1002,16 @@ function OrgsTab() {
 
                   {/* Members list */}
                   {!members[org.id] ? (
-                    <p className="text-slate-500 text-sm">Loading...</p>
+                    <p className="text-slate-400 text-sm">Loading...</p>
                   ) : members[org.id].length === 0 ? (
-                    <p className="text-slate-500 text-sm">No members yet.</p>
+                    <p className="text-slate-400 text-sm">No members yet.</p>
                   ) : (
                     <div className="space-y-2">
                       {members[org.id].map(m => (
                         <div key={m.id} className="flex items-center justify-between bg-slate-900/50 rounded-lg px-4 py-2.5">
                           <div>
                             <span className="text-sm font-medium">{m.name || m.email}</span>
-                            {m.name && <span className="text-xs text-slate-500 ml-2">{m.email}</span>}
+                            {m.name && <span className="text-xs text-slate-400 ml-2">{m.email}</span>}
                           </div>
                           <div className="flex items-center gap-3">
                             <span className={`text-xs px-2 py-0.5 rounded font-medium ${m.role === 'ADMIN' ? 'bg-amber-900/50 text-amber-400' : 'bg-slate-700 text-slate-400'}`}>
@@ -1237,7 +1248,7 @@ function ScenarioPacksTab() {
                             <span className={`px-2 py-0.5 rounded-full border shrink-0 ${a.cls}`}>{a.label}</span>
                             <span className="text-slate-300 truncate">{it.name}</span>
                             {it.action === 'update' && (
-                              <span className="text-slate-500 shrink-0">v{it.fromVersion ?? '—'} → v{it.toVersion ?? '—'}</span>
+                              <span className="text-slate-400 shrink-0">v{it.fromVersion ?? '—'} → v{it.toVersion ?? '—'}</span>
                             )}
                           </li>
                         );

@@ -421,7 +421,7 @@ jobs:
           fail=0
           for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
             echo "== $BASE =="
-            for path in /api/scenarios /api/jobs /api/criteria /api/audit; do
+            for path in /api/scenarios /api/jobs /api/criteria /api/audit /api/me/export; do
               code=000
               for i in 1 2 3 4 5; do
                 code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$path" || echo 000)
@@ -624,6 +624,36 @@ jobs:
             exit 1
           fi
           echo "✅ POST /api/scenario-packs/import rejects anonymous callers (401) on both hosts"
+
+      - name: Verify scenario duplicate is admin-gated (Phase 4)
+        # The admin "Duplicate scenario" action (POST /api/scenarios/[id]/duplicate)
+        # WRITES a new org-scoped scenario row carrying the source scenario's
+        # hidden script (persona / objective / hints). It is ADMIN-only + strictly
+        # tenant-scoped (you may only clone a scenario you can SEE). Auth is checked
+        # BEFORE the id is used, so an anonymous POST to any id must get 401 on both
+        # hosts (a 200/500 here would mean the clone write path is exposed).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                "$BASE/api/scenarios/__deploy_gate_nonexistent__/duplicate" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "POST $BASE/api/scenarios/[id]/duplicate (anon) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/scenarios/[id]/duplicate must require auth (got $code) — scenario-clone write path exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Scenario-duplicate admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ POST /api/scenarios/[id]/duplicate rejects anonymous callers (401) on both hosts"
 
       - name: Verify simulation-start is auth-gated (Phase 4 modality gating)
         # POST /api/simulations creates a session and drives billable LLM traffic.
@@ -1043,6 +1073,37 @@ jobs:
             exit 1
           fi
           echo "✅ /api/reports/spend rejects anonymous callers (401) on both hosts"
+
+      - name: Verify budget report is auth-gated (#155)
+        # The monthly LLM budget report (GET /api/reports/budget) shows a
+        # tenant's month-to-date Groq spend against its seat-tier ceiling —
+        # ADMIN-only and org-scoped, and must NEVER be readable anonymously
+        # (a 200 here would leak per-tenant cost/margin data). The /api/*
+        # middleware matcher gates it and the handler additionally requires
+        # role=ADMIN. Permanent regression gate: an anonymous caller must get
+        # 401 on both hosts. Checked on the pages.dev alias (authoritative for
+        # this deploy) and the branded domain.
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/reports/budget" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "GET $BASE/api/reports/budget -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/reports/budget must require auth (got $code) — budget report would leak tenant cost data"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Budget report auth-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /api/reports/budget rejects anonymous callers (401) on both hosts"
 
       - name: Verify home page is copy-clean (org copy rule, Phase 4)
         # The public home page (`/`) previously described "AI-generated

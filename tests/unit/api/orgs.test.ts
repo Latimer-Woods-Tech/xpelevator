@@ -147,7 +147,7 @@ beforeEach(() => {
 describe('GET /api/orgs — admin-only, scoped org list', () => {
   it('401s an unauthenticated caller (requireAuth throws)', async () => {
     authRejects(401);
-    const res = await LIST();
+    const res = await LIST(new Request('http://localhost/api/orgs'));
     expect(res.status).toBe(401);
     expect(sqlMock).not.toHaveBeenCalled();
   });
@@ -157,7 +157,7 @@ describe('GET /api/orgs — admin-only, scoped org list', () => {
     sqlMock.mockResolvedValue([
       { id: 'o1', name: 'Acme', slug: 'acme', plan: 'FREE', createdAt: 't', '_count.users': 3, '_count.sessions': 9 },
     ]);
-    const res = await LIST();
+    const res = await LIST(new Request('http://localhost/api/orgs'));
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual([
       { id: 'o1', name: 'Acme', slug: 'acme', plan: 'FREE', createdAt: 't', _count: { users: 3, sessions: 9 } },
@@ -172,7 +172,7 @@ describe('GET /api/orgs — admin-only, scoped org list', () => {
     sqlMock.mockResolvedValue([
       { id: 'orgA', name: 'Op', slug: 'op', plan: 'ENTERPRISE', createdAt: 't', '_count.users': 1, '_count.sessions': 0 },
     ]);
-    const res = await LIST();
+    const res = await LIST(new Request('http://localhost/api/orgs'));
     expect(res.status).toBe(200);
     // The scoped branch binds own-org + client (parent_org_id) — never all orgs.
     expect(ran('o.parent_org_id =')).toBe(true);
@@ -182,7 +182,7 @@ describe('GET /api/orgs — admin-only, scoped org list', () => {
   it('maps an unexpected DB error to 500', async () => {
     authAs('ADMIN', null);
     sqlMock.mockRejectedValue(new Error('db down'));
-    const res = await LIST();
+    const res = await LIST(new Request('http://localhost/api/orgs'));
     expect(res.status).toBe(500);
   });
 });

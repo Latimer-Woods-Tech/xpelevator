@@ -32,6 +32,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { canAccessOrgReport } from '@/lib/org-hierarchy';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -145,7 +146,8 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('Failed to read audit trail:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'audit.read_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to read audit trail' }, { status: 500 });
   }
 }

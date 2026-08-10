@@ -544,3 +544,105 @@ describe('background dispatch', () => {
     expect(callHangupMock).toHaveBeenCalledWith('cc-1');
   });
 });
+
+// ── structured request-correlated logging (#154) ────────────────────────────────
+// The phone webhook replaced its 17 ad-hoc `console.*` calls with the structured
+// `log()` primitive + the middleware-propagated `x-request-id`, so a phone-path
+// request can be traced across the background handler by one id. These are the
+// Standing-Law-1 proof-of-rejection tests: each asserts the emitted line is ONE
+// parseable JSON object carrying `{ level, msg, requestId }` — which the previous
+// free-text `console.log('[telnyx] incoming webhook: ...')` (not JSON, no id)
+// would fail. The noise-branch test additionally proves the caller transcript
+// (PII) is never written to the drain.
+describe('structured request-correlated logging (#154)', () => {
+  /** Parse the single-arg JSON lines the `log()` primitive writes to a console spy. */
+  function loggedLines(spy: ReturnType<typeof vi.spyOn>): Array<Record<string, unknown>> {
+    return spy.mock.calls
+      .map((c) => c[0])
+      .filter((a): a is string => typeof a === 'string')
+      .map((s) => {
+        try {
+          return JSON.parse(s) as Record<string, unknown>;
+        } catch {
+          return { __unparseable__: s };
+        }
+      });
+  }
+
+  it('emits ONE structured JSON info line for the received webhook, with a requestId', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await post(event('call.answered'));
+      const line = loggedLines(logSpy).find((l) => l.msg === 'telnyx.webhook_received');
+      expect(line).toBeDefined();
+      expect(line).toMatchObject({
+        level: 'info',
+        msg: 'telnyx.webhook_received',
+        path: '/api/telnyx/webhook',
+        method: 'POST',
+        eventType: 'call.answered',
+      });
+      expect(typeof line!.requestId).toBe('string');
+      expect((line!.requestId as string).length).toBeGreaterThan(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('honours a caller-supplied x-request-id so the log line correlates to the request', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await post(event('call.answered'), { 'x-request-id': 'trace-phone-999' });
+      const line = loggedLines(logSpy).find((l) => l.msg === 'telnyx.webhook_received');
+      expect(line?.requestId).toBe('trace-phone-999');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('logs an invalid signature as a structured warn line (fail closed) with a requestId', async () => {
+    verifyMock.mockResolvedValueOnce(false);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const res = await post(event('call.answered'), { 'x-request-id': 'trace-sig-1' });
+      expect(res.status).toBe(401);
+      const line = loggedLines(warnSpy).find((l) => l.msg === 'telnyx.signature_invalid');
+      expect(line).toMatchObject({
+        level: 'warn',
+        msg: 'telnyx.signature_invalid',
+        eventType: 'call.answered',
+        requestId: 'trace-sig-1',
+      });
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('never writes the caller transcript (PII) to the drain on the noise branch', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // Single-word transcript → wordCount 1 (< 2) → noise/silence re-listen.
+      await post(
+        event('call.transcription', {
+          transcription_data: { transcript: 'zqxsecret', is_final: true, language: 'en' },
+        }),
+      );
+      const line = loggedLines(warnSpy).find((l) => l.msg === 'telnyx.transcription_noise');
+      expect(line).toMatchObject({ level: 'warn', msg: 'telnyx.transcription_noise', wordCount: 1 });
+      expect(typeof line!.requestId).toBe('string');
+      // The transcript text must not appear in ANY structured line on any channel.
+      const all = [
+        ...loggedLines(warnSpy),
+        ...loggedLines(logSpy),
+        ...loggedLines(errSpy),
+      ];
+      expect(all.some((l) => JSON.stringify(l).includes('zqxsecret'))).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  });
+});

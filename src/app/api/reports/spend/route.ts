@@ -36,6 +36,7 @@ import { requireAuth, AuthError } from '@/lib/auth-api';
 import { buildSpendLedger, type SpendTurnGroup } from '@/lib/spend';
 import { canAccessOrgReport } from '@/lib/org-hierarchy';
 import { parseReportWindow } from '@/lib/report-window';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 export async function GET(request: Request) {
   try {
@@ -130,8 +131,8 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('Failed to build spend ledger:', msg);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'reports.spend_failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       { error: 'Failed to build spend ledger' },
       { status: 500 },

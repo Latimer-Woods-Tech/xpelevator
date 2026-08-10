@@ -109,8 +109,8 @@ jobs:
   # src/app/api/analytics/route.ts; routes join the include allowlist as they
   # gain a tests/unit/api/** test). Enforces the PLATFORM_STANDARDS §3-4 floor
   # (line & function already met; branches ratchet toward 85). Config:
-  # vitest.ci.config.ts. Kept separate from the integration/smoke tiers, which
-  # hit live Neon+Groq and can't be gated.
+  # vitest.ci.config.ts. Kept separate from the credential-bound `test:e2e`
+  # script, which hits live Neon+Groq and can't be a required gate.
   coverage:
     name: Coverage gate (src/lib)
     runs-on: ubuntu-latest
@@ -308,11 +308,13 @@ jobs:
   # (tests/ui, 21 tests, React render in happy-dom) — are wired as required
   # gates above. All deps are mocked (auth/next-auth/next-navigation/fetch), so
   # neither needs DB/LLM/Telnyx creds and neither can flake on credentials.
-  # The integration/smoke tiers still hit live Neon + Groq (tests/setup.ts loads
-  # real .env) and carry residual drift, so they are NOT gated yet — wiring a
-  # credential-dependent or red suite as a required check would flake/block every
-  # PR. Making the integration/smoke tiers deterministic + adding the §3-4
-  # coverage floors is the next Phase 3 sub-slice tracked in issue #16.
+  # The deterministic §3-4 stack is now complete: the coverage gate + the
+  # Playwright `smoke` tier (both required above). The credential-bound live
+  # suites have been pared down to the one out-of-band `test:e2e` script
+  # (tests/e2e/full-simulation.ts, hits live Neon + Groq via tests/setup.ts's
+  # real .env) — deliberately NOT a required gate, since a credential-dependent
+  # suite would flake/block every PR. Live smoke against prod is covered by the
+  # `uptime-monitor` health + scoring canary. (issue #156.)
 
   # ---------------------------------------------------------------------------
   # Required-status aggregator. The main-protection ruleset requires a single

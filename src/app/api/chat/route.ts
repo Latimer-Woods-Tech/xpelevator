@@ -21,6 +21,7 @@ import {
   windowConversation,
 } from '@/lib/limits';
 import { finalizeAndScoreSession } from '@/lib/session-scoring';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 
 // POST /api/chat
@@ -29,6 +30,10 @@ import { finalizeAndScoreSession } from '@/lib/session-scoring';
 // If the agent's message contains "[END]" or turn limit is reached, ends the session and scores it.
 
 export async function POST(request: Request) {
+  // Resolve the per-request correlation id once (honours the middleware-forwarded
+  // `x-request-id`, else mints) so every log line on this turn — including the
+  // outer catch — shares one traceable id.
+  const requestId = requestIdFrom(request.headers);
   try {
     // Require authentication for chat interactions
     const { session: authSession } = await requireAuth();
@@ -86,7 +91,7 @@ export async function POST(request: Request) {
     // hot path (this query runs before every streamed reply).
 
     if (sessionResult.length === 0) {
-      console.error('[Chat API] Session not found:', sessionId);
+      log('error', 'chat.session_not_found', { requestId, path: '/api/chat', method: 'POST', sessionId });
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
     
@@ -179,7 +184,7 @@ export async function POST(request: Request) {
           (m: { role: string }) => m.role === 'AGENT'
         ).length;
         if (priorAgentTurns + 1 >= maxTurns) {
-          console.log(`[Chat API] maxTurns (${maxTurns}) reached — auto-ending session`);
+          log('info', 'chat.max_turns_reached', { requestId, sessionId, maxTurns });
           if (agentInsertPromise) await agentInsertPromise;
           // session.messages was loaded BEFORE this final trainee turn was saved,
           // so include it in the transcript scored here. Without this, a session
@@ -258,7 +263,8 @@ export async function POST(request: Request) {
           // whole elapsed time to TTFT so the tier reflects the perceived wait.
           const timing = classifyTurnLatency(firstChunkSeen ? ttftMs : totalMs, totalMs);
           // Structured latency line — surfaced in logs so speed is tracked, not a vibe.
-          console.log('[chat] latency', {
+          log('info', 'chat.turn_latency', {
+            requestId,
             sessionId: sessionId.substring(0, 8),
             model: customerModel,
             ttftMs: timing.ttftMs,
@@ -337,7 +343,7 @@ export async function POST(request: Request) {
           const errEvent = `data: ${JSON.stringify({ type: 'error', message: 'Simulation error' })}\n\n`;
           controller.enqueue(encoder.encode(errEvent));
           controller.close();
-          console.error('[chat] Stream error:', err);
+          log('error', 'chat.stream_error', { requestId, sessionId, ...errorFields(err) });
         }
       },
     });
@@ -356,7 +362,7 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[chat] POST failed:', error);
+    log('error', 'chat.post_failed', { requestId, path: '/api/chat', method: 'POST', ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to process message' }, { status: 500 });
   }
 }
@@ -365,6 +371,7 @@ export async function POST(request: Request) {
 // Returns all messages in a session (for initial load / resume).
 // Add ?stream=true to receive a live SSE stream of transcript updates (used by phone mode).
 export async function GET(request: Request) {
+  const requestId = requestIdFrom(request.headers);
   try {
     // Require authentication for reading session data
     const { session: viewer } = await requireAuth();
@@ -400,7 +407,7 @@ export async function GET(request: Request) {
 
     // ── BL-054: SSE transcript stream for phone simulation ──────────────────────
     if (searchParams.get('stream') === 'true') {
-      return phoneTranscriptStream(sessionId);
+      return phoneTranscriptStream(sessionId, requestId);
     }
 
     // Fetch session with all relations using raw SQL
@@ -485,7 +492,7 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[chat] GET failed:', error);
+    log('error', 'chat.get_failed', { requestId, path: '/api/chat', method: 'GET', ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to fetch session' }, { status: 500 });
   }
 }
@@ -494,7 +501,7 @@ export async function GET(request: Request) {
 // Polls DB every 1 second and pushes events to the client as messages arrive.
 // Replaces the 3-second setInterval poll in PhoneInterface.
 
-async function phoneTranscriptStream(sessionId: string): Promise<Response> {
+async function phoneTranscriptStream(sessionId: string, requestId: string): Promise<Response> {
   const encoder = new TextEncoder();
   const MAX_ITERATIONS = 300; // 5-minute cap (300 × 1 s)
   let lastMessageCount = -1;
@@ -589,7 +596,7 @@ async function phoneTranscriptStream(sessionId: string): Promise<Response> {
           await new Promise<void>(r => setTimeout(r, 1_000));
         }
       } catch (err) {
-        console.error('[chat] phoneTranscriptStream error:', err);
+        log('error', 'chat.phone_stream_error', { requestId, sessionId, ...errorFields(err) });
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: 'Stream error' })}\n\n`));
         } catch { /* already closed */ }

@@ -7,6 +7,7 @@ import {
   computePackStatus,
   type StoredPackScenario,
 } from '@/lib/scenario-packs';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 // GET /api/scenario-packs/status
 //
@@ -74,7 +75,8 @@ export async function GET(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[scenario-packs/status] GET failed:', error);
+    const requestId = requestIdFrom(request.headers);
+    log('error', 'scenario_packs.status_failed', { requestId, ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to load pack status' }, { status: 500 });
   }
 }

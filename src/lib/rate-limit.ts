@@ -28,6 +28,7 @@
  * the caller is under budget).
  */
 import { sql as defaultSql } from '@/lib/db';
+import { log, errorFields } from '@/lib/log';
 
 /** A neon-style tagged-template query function. */
 export type SqlClient = (
@@ -169,7 +170,7 @@ export async function enforceRateLimit(
     return null;
   } catch (err) {
     // Fail open — abuse control must not take a public page down.
-    console.error(`[rate-limit] counter failed for "${routeKey}", allowing:`, err);
+    log('error', 'rate_limit.counter_failed', { routeKey, note: 'allowing', ...errorFields(err) });
     return null;
   }
 }

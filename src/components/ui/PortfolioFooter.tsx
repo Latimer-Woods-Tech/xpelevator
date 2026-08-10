@@ -21,7 +21,7 @@ export function PortfolioFooter({ currentId = 'xpelevator' }: { currentId?: stri
     <footer className="mt-24 border-t border-surface-border py-10">
       <Container>
         <nav aria-label="Other Latimer Woods properties">
-          <p className="mb-4 text-xs uppercase tracking-widest text-slate-500">
+          <p className="mb-4 text-xs uppercase tracking-widest text-slate-400">
             More from Latimer Woods
           </p>
           <ul className="flex flex-wrap gap-x-6 gap-y-3">

@@ -35,6 +35,7 @@
  * behaviour the route already had.
  */
 import { sql as defaultSql } from '@/lib/db';
+import { log, errorFields } from '@/lib/log';
 
 /** A neon-style tagged-template query function. */
 export type SqlClient = (
@@ -94,12 +95,12 @@ export async function withIdempotency(
     firstSeen = await claimEvent(eventId, sql);
   } catch (err) {
     // Fail OPEN — a DB blip must never drop a live call event.
-    console.error(`[idempotency] claim failed for "${eventId}", processing anyway:`, err);
+    log('error', 'idempotency.claim_failed', { eventId, note: 'processing anyway', ...errorFields(err) });
     firstSeen = true;
   }
 
   if (!firstSeen) {
-    console.log(`[idempotency] duplicate event skipped: ${eventId}`);
+    log('info', 'idempotency.duplicate_skipped', { eventId });
     return;
   }
 

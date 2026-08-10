@@ -7,13 +7,21 @@ import { MAX_SESSIONS_PER_DAY, parsePagination } from '@/lib/limits';
 import {
   planUnlocksModality,
   minimumTierForModality,
+  tierForPlan,
   type SimulationType,
 } from '@/lib/plans';
+import {
+  summarizeSpend,
+  evaluateBudget,
+  type MonthlySpendGroup,
+} from '@/lib/budget';
+import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 const SIMULATION_TYPES = ['CHAT', 'VOICE', 'PHONE'] as const;
 
 // Start a new simulation session
 export async function POST(request: Request) {
+  const requestId = requestIdFrom(request.headers);
   try {
     // Require authentication to create sessions
     const authResult = await requireAuth();
@@ -97,6 +105,59 @@ export async function POST(request: Request) {
       );
     }
 
+    // Org-level monthly Groq-spend ceiling (#155 — "LLM cost is unbounded").
+    // `MAX_SESSIONS_PER_DAY` above caps one user; this caps the whole tenant's
+    // aggregate LLM cost this calendar month, the missing org-level bound. This
+    // is a per-SESSION check (session start, not per turn), so it adds no cost
+    // to the per-turn hot path Run 100 optimized. Runs only when an `orgId` is
+    // present — platform staff / test mode (null org) are ungated, exactly like
+    // the modality gate — and FAILS OPEN: any error reading the spend ledger
+    // logs and allows the session, so a query hiccup never blocks a real
+    // trainee. The ceiling is a generous runaway guard (`@/lib/budget`), far
+    // above any real training workload; the block body carries no cost figures
+    // (those live behind the ADMIN-only /api/reports/budget).
+    if (orgId) {
+      try {
+        const spendRows = await sql`
+          SELECT
+            cm.model                                     as "model",
+            COALESCE(SUM(cm.prompt_tokens), 0)::int      as "promptTokens",
+            COALESCE(SUM(cm.completion_tokens), 0)::int  as "completionTokens",
+            COALESCE(SUM(cm.total_tokens), 0)::int       as "totalTokens"
+          FROM simulation_sessions ss
+          JOIN chat_messages cm ON cm.session_id = ss.id
+          WHERE ss.org_id = ${orgId}
+            AND cm.total_tokens IS NOT NULL
+            AND ss.created_at >= date_trunc('month', now())
+          GROUP BY cm.model
+        `;
+        const summary = summarizeSpend(
+          spendRows as unknown as MonthlySpendGroup[],
+        );
+        const budget = evaluateBudget(
+          summary.costMicroUsd,
+          tierForPlan(refs.orgPlan),
+        );
+        if (budget.status === 'over') {
+          return NextResponse.json(
+            {
+              error:
+                'Monthly usage ceiling reached for this workspace — it resets at the start of next month',
+              code: 'BUDGET_EXCEEDED',
+            },
+            { status: 429 }
+          );
+        }
+      } catch (budgetError) {
+        // Fail OPEN: a spend-ledger read failure must never block a legitimate
+        // session. Log and continue to session creation.
+        log('error', 'simulations.budget_check_failed_open', {
+          requestId,
+          ...errorFields(budgetError),
+        });
+      }
+    }
+
     // Create session using raw SQL (compatible with Cloudflare Workers)
     const created = await sql`
       INSERT INTO simulation_sessions (
@@ -162,7 +223,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     const msg = error instanceof Error ? error.message : String(error);
-    console.error('Failed to create simulation:', msg);
+    log('error', 'simulations.create_failed', { requestId, ...errorFields(error) });
     return NextResponse.json(
       { error: 'Failed to create simulation', detail: process.env.NODE_ENV !== 'production' ? msg : undefined },
       { status: 500 }
@@ -172,6 +233,7 @@ export async function POST(request: Request) {
 
 // List simulation sessions
 export async function GET(request: Request) {
+  const requestId = requestIdFrom(request.headers);
   try {
     // Require authentication to list sessions
     const authResult = await requireAuth();
@@ -298,8 +360,7 @@ export async function GET(request: Request) {
     );
     return NextResponse.json(safe);
   } catch (error) {
-    console.error('[simulations/GET] ERROR:', error);
-    console.error('[simulations/GET] ERROR Stack:', error instanceof Error ? error.stack : 'No stack trace');
+    log('error', 'simulations.get_failed', { requestId, ...errorFields(error) });
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

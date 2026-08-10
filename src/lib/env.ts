@@ -5,6 +5,8 @@
  * Warns in development; throws in production for hard-required vars.
  */
 
+import { log } from '@/lib/log';
+
 const isDev = process.env.NODE_ENV !== 'production';
 
 type EnvVarSpec = {
@@ -43,15 +45,11 @@ function validateEnv(): void {
 
   if (missing.length === 0) return;
 
-  const lines = missing.map(
-    s => `  • ${s.key} — ${s.description}`
-  );
-
   if (isDev) {
-    console.warn(
-      `\n⚠️  XPElevator: Missing environment variables:\n${lines.join('\n')}\n` +
-        `  Check your .env file and add the missing values.\n`
-    );
+    log('warn', 'env.missing_variables', {
+      missing: missing.map(s => ({ key: s.key, description: s.description })),
+      hint: 'Check your .env file and add the missing values.',
+    });
   } else {
     // In production, hard-required vars must be present
     const hardMissing = missing.filter(s => s.required);
