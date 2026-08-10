@@ -106,7 +106,7 @@ function SignInForm() {
 
         <div className="flex items-center gap-4 mb-6">
           <div className="flex-1 h-px bg-slate-700" />
-          <span className="text-slate-500 text-xs">or use a username</span>
+          <span className="text-slate-400 text-xs">or use a username</span>
           <div className="flex-1 h-px bg-slate-700" />
         </div>
 

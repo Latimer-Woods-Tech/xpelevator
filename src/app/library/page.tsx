@@ -158,7 +158,7 @@ export default function LibraryPage() {
         </div>
 
         {/* Footer note — operator framing, no hard-coded money */}
-        <p className="text-center text-xs text-slate-500 mt-12 max-w-2xl mx-auto">
+        <p className="text-center text-xs text-slate-400 mt-12 max-w-2xl mx-auto">
           Packs are a starting point — you can edit every scenario, add your own,
           and set your own retail. Want a vertical that is not here?{' '}
           <Link href="/auth/signin" className="text-blue-400 hover:underline">

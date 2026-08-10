@@ -136,7 +136,7 @@ export default async function SessionDetailPage({ params }: Props) {
           <div className="lg:col-span-2">
             <h2 className="text-lg font-semibold mb-4">Transcript</h2>
             {session.messages.length === 0 ? (
-              <p className="text-slate-500 text-sm">No messages recorded.</p>
+              <p className="text-slate-400 text-sm">No messages recorded.</p>
             ) : (
               <div className="space-y-3">
                 {session.messages.map((msg: { id: string; role: string; content: string; timestamp: Date }) => (
@@ -170,7 +170,7 @@ export default async function SessionDetailPage({ params }: Props) {
             <h2 className="text-lg font-semibold mb-4">Score</h2>
             {totalScore === null ? (
               <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 text-center">
-                <p className="text-slate-500 text-sm">
+                <p className="text-slate-400 text-sm">
                   {session.status === 'IN_PROGRESS'
                     ? 'Complete the session to see scores.'
                     : 'No scores available.'}

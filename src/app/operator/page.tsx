@@ -256,7 +256,7 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
               grand total). */}
           {!isNew && clients !== null && clients.length > 0 ? (
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-slate-500 text-xs mr-1">All clients</span>
+              <span className="text-slate-400 text-xs mr-1">All clients</span>
               <a
                 href={withWindow('/api/reports/sessions?scope=clients')}
                 className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
@@ -271,7 +271,7 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
               >
                 PDF
               </a>
-              <span className="text-slate-500 text-xs mx-1">Summary</span>
+              <span className="text-slate-400 text-xs mx-1">Summary</span>
               <a
                 href={withWindow('/api/reports/sessions?scope=clients&view=summary')}
                 className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
@@ -316,7 +316,7 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
           link (portfolio + per-client) via `withWindow`. Empty = all-time. */}
       {!isNew && clients !== null && clients.length > 0 ? (
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-          <span className="text-slate-500">Report window</span>
+          <span className="text-slate-400">Report window</span>
           <label className="flex items-center gap-1.5">
             <span className="sr-only">From date</span>
             <input
@@ -328,7 +328,7 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
               className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200 transition-colors"
             />
           </label>
-          <span className="text-slate-500">to</span>
+          <span className="text-slate-400">to</span>
           <label className="flex items-center gap-1.5">
             <span className="sr-only">To date</span>
             <input
@@ -352,7 +352,7 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
               Clear
             </button>
           ) : (
-            <span className="text-slate-600">all-time</span>
+            <span className="text-slate-400">all-time</span>
           )}
         </div>
       ) : null}
@@ -363,14 +363,14 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
       ) : clients === null ? (
         <p className="text-slate-400 text-sm">Loading clients…</p>
       ) : clients.length === 0 ? (
-        <p className="text-slate-500 text-sm">No client workspaces yet. Create one above to get started.</p>
+        <p className="text-slate-400 text-sm">No client workspaces yet. Create one above to get started.</p>
       ) : (
         <ul className="divide-y divide-slate-800 rounded-2xl bg-slate-800/40 border border-slate-700 overflow-hidden">
           {clients.map(c => (
             <li key={c.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
               <div>
                 <div className="font-medium text-sm">{c.name}</div>
-                <div className="text-slate-500 text-xs mt-0.5">
+                <div className="text-slate-400 text-xs mt-0.5">
                   {c.slug} · {c.plan} plan
                 </div>
               </div>
