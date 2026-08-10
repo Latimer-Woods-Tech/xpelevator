@@ -625,6 +625,36 @@ jobs:
           fi
           echo "✅ POST /api/scenario-packs/import rejects anonymous callers (401) on both hosts"
 
+      - name: Verify scenario duplicate is admin-gated (Phase 4)
+        # The admin "Duplicate scenario" action (POST /api/scenarios/[id]/duplicate)
+        # WRITES a new org-scoped scenario row carrying the source scenario's
+        # hidden script (persona / objective / hints). It is ADMIN-only + strictly
+        # tenant-scoped (you may only clone a scenario you can SEE). Auth is checked
+        # BEFORE the id is used, so an anonymous POST to any id must get 401 on both
+        # hosts (a 200/500 here would mean the clone write path is exposed).
+        run: |
+          set -e
+          fail=0
+          for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+            code=000
+            for i in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                "$BASE/api/scenarios/__deploy_gate_nonexistent__/duplicate" || echo 000)
+              if [ "$code" = "401" ]; then break; fi
+              sleep 6
+            done
+            echo "POST $BASE/api/scenarios/[id]/duplicate (anon) -> HTTP $code"
+            if [ "$code" != "401" ]; then
+              echo "::error::$BASE/api/scenarios/[id]/duplicate must require auth (got $code) — scenario-clone write path exposed"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Scenario-duplicate admin-gate verification failed"
+            exit 1
+          fi
+          echo "✅ POST /api/scenarios/[id]/duplicate rejects anonymous callers (401) on both hosts"
+
       - name: Verify simulation-start is auth-gated (Phase 4 modality gating)
         # POST /api/simulations creates a session and drives billable LLM traffic.
         # It now also enforces per-seat modality gating (issue #16 Phase 4): a

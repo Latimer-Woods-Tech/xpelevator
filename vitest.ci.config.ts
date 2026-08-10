@@ -134,6 +134,12 @@ export default defineConfig({
         // PUT/DELETE global-catalog protection + all auth/500 boundaries covered.
         'src/app/api/scenarios/route.ts',
         'src/app/api/scenarios/[id]/route.ts',
+        // Duplicate action — clone a visible scenario into a fresh, hand-authored
+        // copy in the caller's own org (operator inventory lever). Auth (anon 401 /
+        // non-admin 403), source visibility guard (404 not-found / 403 cross-tenant
+        // via canReadResource), the 201 global+own-org clone, and the copy
+        // invariants (no pack provenance, "(copy)" suffix, caller-org scope) covered.
+        'src/app/api/scenarios/[id]/duplicate/route.ts',
         // Job↔criteria link CRUD. GET/POST cross-tenant read/link IDOR guards +
         // the DELETE unlink guards (own-org admin only; global catalog protected)
         // all covered.
