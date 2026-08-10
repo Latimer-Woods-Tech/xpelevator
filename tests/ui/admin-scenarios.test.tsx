@@ -101,3 +101,25 @@ describe('Admin Scenarios — modality badge colour', () => {
     expect(new Set(colours).size).toBe(3);
   });
 });
+
+describe('Admin Scenarios — Duplicate action', () => {
+  it('POSTs to the per-scenario duplicate endpoint and refreshes the list', async () => {
+    const fetchSpy = stubFetch();
+    await openScenariosTab();
+
+    await waitFor(() => expect(screen.getByText('Chat scenario')).toBeInTheDocument());
+
+    // One Duplicate button per scenario row; the first row is the CHAT scenario.
+    const dupButtons = screen.getAllByRole('button', { name: 'Duplicate' });
+    expect(dupButtons.length).toBe(SCENARIOS.length);
+
+    fetchSpy.mockClear();
+    fireEvent.click(dupButtons[0]);
+
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith('/api/scenarios/s-chat/duplicate', { method: 'POST' })
+    );
+    // The list is re-fetched after a successful duplicate.
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('/api/scenarios'));
+  });
+});

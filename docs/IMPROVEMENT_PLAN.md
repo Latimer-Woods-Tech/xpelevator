@@ -227,8 +227,13 @@ white-label-able."
   never renders. Establish a type scale.
 - [ ] **P3a-8 Admin at scale.** Search + pagination for Criteria/Scenarios;
   bulk save for Job↔Criteria (currently one network call per toggle,
-  `admin/page.tsx:621-639`); duplicate-scenario action; loading skeletons for
-  admin/analytics/session-detail.
+  `admin/page.tsx:621-639`); ~~duplicate-scenario action~~ **DONE** (R-083,
+  `POST /api/scenarios/[id]/duplicate` + Duplicate button — clones a visible
+  scenario into a private, hand-authored copy in the caller's org, provenance
+  reset); loading skeletons for admin/analytics/session-detail. _Remaining:
+  search+pagination (deliberately deferred — the config lists render in full;
+  needs UI paging, not a silent server cap), bulk save (a UX tradeoff — the
+  current per-toggle save is already atomic), skeletons._
 - [ ] **P3a-9 Accessibility pass.** `aria-live` on streaming chat, keyboard
   path for push-to-talk (`VoiceChatInterface.tsx:518` is mouse/touch only),
   focus management on opened forms, `aria-hidden` on decorative emoji, raise
@@ -253,11 +258,15 @@ first hard failure as data grows (full-history aggregation in JS per request).
 - [ ] **P3b-2 Paginate all list/report endpoints.** Zero LIMIT/OFFSET anywhere;
   `simulations/route.ts:112-214` returns all sessions; reports build a
   PDF/CSV of the entire history in-Worker (`reports/sessions/route.ts:34-63`).
-- [ ] **P3b-3 Add query-shape indexes.** Composite `(org_id, status,
-  ended_at)` for analytics/reports; `db_user_id` (used in the reports join,
-  unindexed); `created_at` for list ordering.
-- [ ] **P3b-4 Batch score inserts** (also P2-3) — one multi-row INSERT instead
-  of 5–10 serialized Neon HTTP round trips per session end.
+- [x] **P3b-3 Add query-shape indexes.** DONE — migration
+  `20260717000000_add_query_shape_indexes` ships all three: `@@index([orgId,
+  status, endedAt])` for analytics/reports, `@@index([dbUserId])` for the
+  reports join, and `@@index([createdAt])` for list ordering (see
+  `prisma/schema.prisma`).
+- [x] **P3b-4 Batch score inserts** (also P2-3) — DONE. `insertScoresBatch`
+  (`src/lib/session-scoring.ts`) writes one multi-row INSERT via
+  `json_to_recordset` (exactly one bound parameter), not 5–10 serialized Neon
+  HTTP round trips.
 - [ ] **P3b-5 Cache the auth lookup.** `requireAuth` does a `SELECT FROM
   users` on every authenticated request (`auth-api.ts:81-96`); embed
   role/orgId in the JWT to cut ~1 DB round trip from every call.
@@ -266,10 +275,13 @@ first hard failure as data grows (full-history aggregation in JS per request).
   up to 5 minutes. Stopgap: widen interval, slim the query. Real fix: a
   per-session **Durable Object** that holds call state and pushes SSE — also
   fixes Telnyx webhook event-ordering races.
-- [ ] **P3b-7 Cap Groq token growth.** Full transcript is resent every turn —
-  O(turns²) token cost (`ai.ts:246-259`); use a sliding window. Phone always
-  uses the 70B model — apply the difficulty tiering there too
-  (`telnyx/webhook/route.ts:167,300`).
+- [x] **P3b-7 Cap Groq token growth.** DONE. Both reply paths window the
+  transcript before the Groq call via `windowConversation` (`src/lib/limits.ts`)
+  — the chat SSE path (`chat/route.ts`) and the phone opening + gather legs
+  (`telnyx/webhook/route.ts`) — so a long call no longer resends the full
+  history every turn. Scoring is unaffected (it reloads the full DB transcript).
+  Both phone legs also route by `customerModelForDifficulty` (R-059), so the 70B
+  model is no longer hard-coded on every phone turn.
 - [ ] **P3b-8 Queue end-of-session scoring.** Move scoring off the
   request/webhook path onto a Cloudflare Queue with retries (pairs with the
   existing `scoring_status` tracking).

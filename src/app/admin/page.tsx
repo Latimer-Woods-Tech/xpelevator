@@ -390,6 +390,16 @@ function ScenariosTab() {
     toast.success('Scenario deleted');
   };
 
+  // Clone a scenario into a fresh, editable copy in the operator's own org —
+  // the day-one inventory lever (an operator tailors a starter/global scenario
+  // per client instead of re-authoring persona/objective/hints by hand).
+  const duplicate = async (id: string) => {
+    const res = await fetch(`/api/scenarios/${id}/duplicate`, { method: 'POST' });
+    if (!res.ok) { const body2 = await res.json().catch(() => ({})); toast.error(`Duplicate failed: ${(body2 as any).error || res.statusText}`); return; }
+    refresh();
+    toast.success('Scenario duplicated');
+  };
+
   const startEdit = (s: Scenario) => {
     const script = ((s.script || {}) as { customerPersona?: string; customerObjective?: string; difficulty?: string; hints?: string[] });
     setEditingId(s.id);
@@ -603,6 +613,7 @@ function ScenariosTab() {
               </div>
               <div className="flex gap-3 shrink-0">
                 <button onClick={() => startEdit(s)} className="text-blue-400 hover:text-blue-300 text-sm">Edit</button>
+                <button onClick={() => duplicate(s.id)} className="text-emerald-400 hover:text-emerald-300 text-sm">Duplicate</button>
                 <button onClick={() => remove(s.id)} className="text-red-400 hover:text-red-300 text-sm">Delete</button>
               </div>
             </div>
