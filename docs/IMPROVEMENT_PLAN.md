@@ -153,8 +153,16 @@ score and tenant boundaries defensible.
   inbound Call Control control loop — 27 cases: signature 401 / malformed 400,
   the answered-opening + idempotency skip + speak-failure fallback,
   speak.ended listen-or-hangup, the transcription turn incl. noise re-listen and
-  the `[RESOLVED]` finalize+score, and hangup→ABANDONED; 88.5% branch). Remaining:
-  `useChatSession` and the interface components — still untested.
+  the `[RESOLVED]` finalize+score, and hangup→ABANDONED; 88.5% branch). The
+  client half is now covered too: `useChatSession` (the shared chat/voice state
+  machine + SSE loop) under the deterministic gate since #170/#172/#173, and
+  **`PhoneInterface` — the phone modality UI (top paid tier) — behaviorally
+  tested as of #240** (`tests/ui/phone-interface.test.tsx`, 8 happy-dom cases:
+  idle setup, dial POST `{sessionId,to}` → live-call view, dial-failure → idle,
+  SSE `transcript` render, the "Customer responding…" indicator, the SSE
+  `ended` finalize, and hang-up `[END]` + re-fetch — each proof-of-rejection).
+  Remaining: `VoiceChatInterface` + `ChatInterface` behavioral coverage (only
+  `ChatInterface`'s a11y contract is tested today).
 - [x] **P2-9 Repo cleanup.** Delete ~23 committed build logs
   (`*.log`, `*.exit`, `build-output*.txt`, `hi.*`, `which.log`), the `.bak`
   test, `fix-data.sql`, `install.bat`, `wait-and-test.py`, `validate.mjs`
