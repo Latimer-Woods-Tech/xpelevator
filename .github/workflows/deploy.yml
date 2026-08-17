@@ -3,8 +3,9 @@ name: Deploy to Cloudflare Pages (LWT)
 # Phase 1(b): build via OpenNext and deploy a NEW Cloudflare Pages project in the
 # LWT account, then verify on the *.pages.dev preview URL BEFORE any DNS cutover.
 #
-# - Auth uses the repo-staged CF_API_TOKEN / CF_ACCOUNT_ID (mapped onto the
-#   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID env vars wrangler reads).
+# - Auth resolves CF_API_TOKEN / CF_ACCOUNT_ID from GCP Secret Manager via WIF
+#   (source of truth), falling back to the repo secrets, then maps them onto the
+#   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID env vars wrangler reads.
 # - Deploys to a fresh project name (xpelevator-sim) — the old xpelevator.pages.dev
 #   lives in a different CF account and its subdomain is globally reserved.
 # - The xpelevator.com CNAME flip is founder-gated and is NOT part of this workflow.
@@ -22,15 +23,22 @@ concurrency:
 
 env:
   CF_PROJECT: xpelevator-sim
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+  # NOTE: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are intentionally NOT set
+  # here. The deploy job resolves them at runtime — GCP Secret Manager via WIF
+  # (source of truth, Standing Law 3) with the GitHub repo secrets as the
+  # no-lockout fallback — and exports the winners to $GITHUB_ENV. Setting them at
+  # workflow level would collide with (and, depending on runner precedence, mask)
+  # the $GITHUB_ENV export, so the resolution is kept entirely inside the job.
 
 # checkout needs contents:read; the blocked-promotion alert step opens/comments a
-# GitHub issue, which needs issues:write. Declared explicitly (default token would
-# otherwise vary by repo setting). wrangler auth uses CF_API_TOKEN, not this token.
+# GitHub issue, which needs issues:write; id-token:write mints the GitHub OIDC
+# token for keyless GCP auth (WIF) so the deploy job can read the Cloudflare
+# credentials from GCP Secret Manager instead of GitHub repo secrets. Declared
+# explicitly (default token would otherwise vary by repo setting).
 permissions:
   contents: read
   issues: write
+  id-token: write
 
 jobs:
   # CI gate — the same fast static + deterministic checks as ci.yml, run here so
@@ -70,6 +78,12 @@ jobs:
     runs-on: ubuntu-latest
     name: Backup + migrate live Neon DB
     env:
+      # Sourced from the GitHub repo secret. DATABASE_URL is deliberately NOT
+      # cut over to GCP SM in this slice: the SM copy (XPELEVATOR_CONNECTION_STRING)
+      # is unverified and the org warns these connection-string copies are often
+      # stale — sourcing a stale value here would fail the live-DB migrate AND
+      # (in the deploy job) overwrite the production Pages secret. The DB cutover
+      # is a separate slice that must first prove a fresh SM value. See #16.
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - name: Checkout
@@ -146,8 +160,14 @@ jobs:
 
     env:
       # Injected at build time so src/lib/env.ts validation passes during the
-      # OpenNext build. At RUNTIME the Pages Worker reads these from the
-      # project secrets set below (surfaced into process.env by OpenNext).
+      # OpenNext build; at RUNTIME the Pages Worker reads the project secrets set
+      # below. These three are sourced from GitHub repo secrets (the known-good
+      # values that the live site already runs on) and are NOT moved to SM in this
+      # slice — the "Set Pages project secrets" step overwrites the PRODUCTION
+      # Pages secrets, so sourcing an unverified/stale SM value here would break
+      # the live site. AUTH_SECRET additionally is absent from SM by design (a
+      # fresh value invalidates every live NextAuth session). DB/GROQ/AUTH cutover
+      # to SM is a separate, verified slice. See #16 (2026-08-17 gate-stale note).
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
@@ -164,6 +184,74 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Detect OIDC availability
+        id: oidc
+        # ACTIONS_ID_TOKEN_REQUEST_URL is present only when id-token:write is
+        # granted. Gate the GCP auth path on it so the job falls back to the
+        # workflow-level CLOUDFLARE_* GitHub secrets when OIDC is unavailable
+        # (no-lockout).
+        run: |
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Authenticate to GCP (WIF)
+        if: steps.oidc.outputs.available == 'true'
+        # continue-on-error: this is a no-lockout secrets migration. A misconfigured
+        # WIF trust must never break the deploy — it falls back to the GitHub-secret
+        # CLOUDFLARE_* values. Confirm WIF actually engaged via the fetch step's
+        # "✅ CLOUDFLARE_… ← …" log line, not merely by the deploy going green.
+        continue-on-error: true
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          service_account: factory-sa@factory-495015.iam.gserviceaccount.com
+          workload_identity_provider: projects/891842778224/locations/global/workloadIdentityPools/github-factory/providers/github
+      - name: Set up gcloud
+        if: steps.oidc.outputs.available == 'true'
+        continue-on-error: true
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Fetch Cloudflare credentials from GCP Secret Manager
+        id: sm-fetch
+        if: steps.oidc.outputs.available == 'true'
+        continue-on-error: true
+        # Source of truth for the CF credentials is GCP SM (Standing Law 3). These
+        # only auth wrangler / the CF API — a stale value fails the deploy WITHOUT
+        # mutating any production state, which is why the CF creds are safe to cut
+        # over here while DB/GROQ are not. Fetches into the intermediate SM_CF_*
+        # env vars; the resolve step below picks SM-or-fallback with no name
+        # collision. CF_ACCOUNT_ID in SM is UTF-8 BOM-prefixed — fetch_gcp_secrets.sh
+        # strips the BOM (line 58). fetch_to_env is a no-op on a missing key.
+        run: |
+          set -euo pipefail
+          source "$GITHUB_WORKSPACE/scripts/fetch_gcp_secrets.sh"
+          fetch_to_env SM_CF_API_TOKEN CF_API_TOKEN cf-token-pages-deploy
+          fetch_to_env SM_CF_ACCOUNT_ID CF_ACCOUNT_ID CLOUDFLARE_ACCOUNT_ID
+
+      - name: Resolve Cloudflare credentials (SM first, GitHub-secret fallback)
+        env:
+          # No-lockout fallback: used when WIF/OIDC is unavailable or the SM key is
+          # absent. Kept in the job (not workflow env) so there is no name collision
+          # with the CLOUDFLARE_* values exported to $GITHUB_ENV below.
+          FALLBACK_CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          FALLBACK_CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          cf_api_token="${SM_CF_API_TOKEN:-$FALLBACK_CF_API_TOKEN}"
+          cf_account_id="${SM_CF_ACCOUNT_ID:-$FALLBACK_CF_ACCOUNT_ID}"
+          test -n "$cf_api_token"  || { echo "::error::Cloudflare API token missing in GCP SM and GitHub secrets"; exit 1; }
+          test -n "$cf_account_id" || { echo "::error::Cloudflare account ID missing in GCP SM and GitHub secrets"; exit 1; }
+          if [ -n "${SM_CF_API_TOKEN:-}" ]; then
+            echo "🔑 CF API token source: GCP Secret Manager (WIF)"
+          else
+            echo "🔑 CF API token source: GitHub repo secret (no-lockout fallback)"
+          fi
+          echo "::add-mask::$cf_api_token"
+          {
+            echo "CLOUDFLARE_API_TOKEN=$cf_api_token"
+            echo "CLOUDFLARE_ACCOUNT_ID=$cf_account_id"
+          } >> "$GITHUB_ENV"
 
       - name: Stamp build info (commit SHA + timestamp) into src/build-info.ts
         # G72: overwrite the committed "dev" default with this deploy's real
