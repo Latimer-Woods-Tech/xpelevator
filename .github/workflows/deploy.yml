@@ -253,6 +253,77 @@ jobs:
             echo "CLOUDFLARE_ACCOUNT_ID=$cf_account_id"
           } >> "$GITHUB_ENV"
 
+      - name: Probe SM DB/GROQ credentials (diagnostic only — NEVER writes Pages secrets)
+        id: sm-probe
+        if: steps.oidc.outputs.available == 'true'
+        # Phase-1 secrets cutover, next increment (#16, 2026-08-17): the CF creds
+        # already source from GCP SM (Standing Law 3). Before DATABASE_URL/GROQ can
+        # safely follow, we must PROVE the SM copies actually authenticate — the org
+        # warns these connection-string copies are frequently stale (wrong password),
+        # and a stale value written to the production Pages secret would break the
+        # live site. This step reads them via the already-established WIF session and
+        # probes them READ-ONLY:
+        #   XPELEVATOR_CONNECTION_STRING → Neon `SELECT 1`
+        #   GROQ_API_KEY                 → Groq `GET /v1/models` (expect 200)
+        # It fetches into LOCAL shell vars ONLY (never $GITHUB_ENV), so it can NOT
+        # override the known-good GitHub-secret DATABASE_URL/GROQ_API_KEY that the
+        # "Set Pages project secrets" step writes to production. continue-on-error
+        # keeps a stale SM copy from ever breaking the working CF-cred deploy; the
+        # PROBE RESULT line + job summary are the evidence the cutover slice needs.
+        # Fail-capable by design (absent/stale secret → non-zero → red step),
+        # satisfying proof-of-rejection while staying non-blocking.
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          proj="factory-495015"
+          db_pass=FAIL; groq_pass=FAIL
+          command -v psql >/dev/null 2>&1 || sudo apt-get install -y -qq postgresql-client >/dev/null 2>&1 || true
+          # --- fetch into LOCAL vars only; strip UTF-8 BOM + trailing WS; mask ---
+          db="$(gcloud secrets versions access latest --secret=XPELEVATOR_CONNECTION_STRING --project="$proj" --quiet 2>/dev/null \
+                | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r' | sed -E 's/[[:space:]]+$//')" || db=""
+          groq="$(gcloud secrets versions access latest --secret=GROQ_API_KEY --project="$proj" --quiet 2>/dev/null \
+                | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || groq=""
+          [ -n "$db" ]   && echo "::add-mask::$db"
+          [ -n "$groq" ] && echo "::add-mask::$groq"
+          # --- Neon SELECT 1 (read-only) ---
+          if [ -z "$db" ]; then
+            echo "⚠️  XPELEVATOR_CONNECTION_STRING absent in SM"
+          elif ! command -v psql >/dev/null 2>&1; then
+            echo "⚠️  psql unavailable on runner — DB probe skipped"; db_pass=SKIP
+          else
+            out="$(PGCONNECT_TIMEOUT=15 psql "$db" -tAc 'select 1' 2>/tmp/db_err || true)"
+            if [ "$(printf '%s' "$out" | tr -d '[:space:]')" = "1" ]; then
+              db_pass=PASS; echo "✅ Neon SELECT 1 via SM XPELEVATOR_CONNECTION_STRING → 1"
+            else
+              echo "❌ Neon probe FAILED: $(head -c 300 /tmp/db_err | tr '\n' ' ')"
+            fi
+          fi
+          # --- Groq GET /v1/models (read-only, expect 200) ---
+          if [ -z "$groq" ]; then
+            echo "⚠️  GROQ_API_KEY absent in SM"
+          else
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+                     -H "Authorization: Bearer $groq" https://api.groq.com/openai/v1/models || echo 000)"
+            if [ "$code" = "200" ]; then
+              groq_pass=PASS; echo "✅ Groq GET /v1/models via SM GROQ_API_KEY → 200"
+            else
+              echo "❌ Groq probe returned HTTP $code (expected 200)"
+            fi
+          fi
+          # --- job-summary evidence table ---
+          {
+            echo "### SM credential probe — Phase-1 cutover readiness"
+            echo ""
+            echo "| secret (GCP SM) | read-only probe | result |"
+            echo "|---|---|---|"
+            echo "| XPELEVATOR_CONNECTION_STRING | Neon \`SELECT 1\` | $db_pass |"
+            echo "| GROQ_API_KEY | Groq \`GET /v1/models\` | $groq_pass |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "PROBE RESULT: DATABASE_URL=$db_pass GROQ=$groq_pass"
+          # Red (non-blocking) unless BOTH SM copies are usable, so the cutover slice
+          # only proceeds on green evidence.
+          [ "$db_pass" = "PASS" ] && [ "$groq_pass" = "PASS" ]
+
       - name: Stamp build info (commit SHA + timestamp) into src/build-info.ts
         # G72: overwrite the committed "dev" default with this deploy's real
         # commit + UTC build time BEFORE the OpenNext build, so /api/health on
