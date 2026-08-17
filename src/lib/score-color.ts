@@ -20,6 +20,21 @@ export function scoreBand(score: number): ScoreBand {
   return 'weak';
 }
 
+/**
+ * Human-facing text label for a score's band (out of 10). Lets a surface convey
+ * the band as words, so status is never carried by colour alone — the text
+ * alternative an assistive-tech user needs for the score-trend chart, and the
+ * "don't rely on colour" fallback anywhere a band is shown (WCAG 1.4.1).
+ */
+export function scoreBandLabel(score: number): string {
+  return {
+    strong: 'Strong',
+    good: 'Good',
+    fair: 'Fair',
+    weak: 'Weak',
+  }[scoreBand(score)];
+}
+
 /** Tailwind text color class for a score. */
 export function scoreTextClass(score: number): string {
   return {

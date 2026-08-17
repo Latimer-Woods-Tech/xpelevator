@@ -5,7 +5,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { scoreBand, scoreTextClass, scoreBarClass, scoreBarHex } from '@/lib/score-color';
+import {
+  scoreBand,
+  scoreTextClass,
+  scoreBarClass,
+  scoreBarHex,
+  scoreBandLabel,
+} from '@/lib/score-color';
 
 describe('scoreBand', () => {
   it('maps the four bands at their boundaries', () => {
@@ -67,5 +73,22 @@ describe('scoreBarHex', () => {
     // divergent scale can never come back.
     expect(scoreBarHex(6.5)).toBe(SKY); // was yellow (#facc15) under the 3-tier scale
     expect(scoreBarHex(4.5)).toBe(AMBER); // was red (#ef4444) under the 3-tier scale
+  });
+});
+
+describe('scoreBandLabel', () => {
+  it('names each of the four bands, tracking scoreBand exactly', () => {
+    expect(scoreBandLabel(9)).toBe('Strong');
+    expect(scoreBandLabel(8)).toBe('Strong');
+    expect(scoreBandLabel(7)).toBe('Good');
+    expect(scoreBandLabel(6)).toBe('Good');
+    expect(scoreBandLabel(5)).toBe('Fair');
+    expect(scoreBandLabel(4)).toBe('Fair');
+    expect(scoreBandLabel(3.9)).toBe('Weak');
+    expect(scoreBandLabel(0)).toBe('Weak');
+  });
+
+  it('provides four distinct labels — a colour-free way to read the band', () => {
+    expect(new Set([9, 7, 5, 2].map(scoreBandLabel)).size).toBe(4);
   });
 });
