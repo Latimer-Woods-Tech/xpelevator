@@ -130,6 +130,66 @@ describe('AnalyticsPage — scoring health surface', () => {
   });
 });
 
+describe('AnalyticsPage — score-trend chart has a text alternative (P3a-9, WCAG 1.1.1 / 1.4.1)', () => {
+  const withTrend = (scoreTrend: { date: string; avg: number; count: number }[]) => {
+    const data = {
+      totalSessions: 3,
+      overallAvg: 6.5,
+      scoringHealth: { scored: 3, failed: 0, notScorable: 0, unknown: 0 },
+      scoreTrend,
+      byJobTitle: [],
+      byCriteria: [],
+      byType: [{ type: 'CHAT', sessions: 3, avg: 6.5 }],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(data) })
+      )
+    );
+  };
+
+  it('exposes the daily series as an accessible data table (not just coloured bars)', async () => {
+    withTrend([
+      { date: '2026-08-15', avg: 8.4, count: 2 },
+      { date: '2026-08-16', avg: 5.0, count: 1 },
+    ]);
+    render(<AnalyticsPage />);
+    await screen.findByText('Score Trend (last 60 days)');
+    // Proof-of-rejection: the bars are `aria-hidden`, so the ONLY thing a
+    // screen reader can read is this table. Remove it (revert to bars-only) and
+    // this query finds nothing — the chart becomes silent to assistive tech.
+    const table = screen.getByRole('table', { name: /daily average score/i });
+    expect(table).toBeInTheDocument();
+    // The real numbers are present as text, per row.
+    expect(within(table).getByRole('row', { name: /2026-08-15/ })).toBeInTheDocument();
+    expect(within(table).getByText('8.4')).toBeInTheDocument();
+    expect(within(table).getByText('5.0')).toBeInTheDocument();
+  });
+
+  it('names the band as words so status is not conveyed by colour alone', async () => {
+    withTrend([
+      { date: '2026-08-15', avg: 8.4, count: 2 }, // Strong
+      { date: '2026-08-16', avg: 5.0, count: 1 }, // Fair
+    ]);
+    render(<AnalyticsPage />);
+    const table = await screen.findByRole('table', { name: /daily average score/i });
+    expect(within(table).getByText('Strong')).toBeInTheDocument();
+    expect(within(table).getByText('Fair')).toBeInTheDocument();
+  });
+
+  it('renders no trend table when there is no trend data', async () => {
+    withTrend([]);
+    render(<AnalyticsPage />);
+    // Scope to the Score Trend section — "No data yet." is also the empty state
+    // of other breakdown panels, so assert the empty state within this section.
+    const heading = await screen.findByRole('heading', { name: /score trend/i });
+    const section = heading.parentElement as HTMLElement;
+    expect(screen.queryByRole('table', { name: /daily average score/i })).not.toBeInTheDocument();
+    expect(within(section).getByText('No data yet.')).toBeInTheDocument();
+  });
+});
+
 describe('AnalyticsPage — per-modality highlight tiles reconcile with total', () => {
   /**
    * Mounts the page with a full three-modality breakdown. The top-of-page

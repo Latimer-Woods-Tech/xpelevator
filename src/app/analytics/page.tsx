@@ -5,7 +5,7 @@ import { useSession, signOut } from 'next-auth/react';
 import { PageShell, Container, Button, ButtonLink, Skeleton, SkeletonScreen } from '@/components/ui';
 import { TopNav } from '@/components/ui/TopNav';
 import { PhoneIcon, ChatIcon, HeadsetIcon, AlertTriangleIcon } from '@/components/ui/icons';
-import { scoreBarClass, scoreTextClass, scoreBarHex } from '@/lib/score-color';
+import { scoreBarClass, scoreTextClass, scoreBarHex, scoreBandLabel } from '@/lib/score-color';
 
 interface TrendPoint {
   date: string;
@@ -99,7 +99,19 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
 
   return (
     <div className="overflow-x-auto">
-      <div className="flex items-end gap-1 min-w-max px-1" style={{ height: chartH + 28 }}>
+      {/*
+        The visual bars convey each day's score by height + colour alone, which
+        an assistive-tech user can't perceive — and the hover `title` isn't
+        exposed to a screen reader. So the bar row is hidden from the a11y tree
+        (`aria-hidden`) and the equivalent data table below carries the series as
+        text (WCAG 1.1.1 non-text content). Sighted users see the chart; AT users
+        read the actual scores + band.
+      */}
+      <div
+        className="flex items-end gap-1 min-w-max px-1"
+        style={{ height: chartH + 28 }}
+        aria-hidden="true"
+      >
         {points.map(pt => {
           const barH = Math.max(2, (pt.avg / maxVal) * chartH);
           // Canonical 4-tier band (score-color.ts) — the trend chart previously
@@ -130,6 +142,37 @@ function TrendChart({ points }: { points: TrendPoint[] }) {
           );
         })}
       </div>
+
+      {/*
+        Text alternative for the chart above. `sr-only` keeps it out of the
+        sighted layout while a screen reader reads the real numbers. The Band
+        column names the colour band as words, so the status a bar shows by
+        colour is also available without colour (WCAG 1.4.1).
+      */}
+      <table className="sr-only">
+        <caption>
+          Daily average score over the last 60 days, out of 10, with the number
+          of sessions each day.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Date</th>
+            <th scope="col">Average score out of 10</th>
+            <th scope="col">Band</th>
+            <th scope="col">Sessions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {points.map(pt => (
+            <tr key={pt.date}>
+              <th scope="row">{pt.date}</th>
+              <td>{pt.avg.toFixed(1)}</td>
+              <td>{scoreBandLabel(pt.avg)}</td>
+              <td>{pt.count}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -273,7 +316,8 @@ export default function AnalyticsPage() {
             {/* ── Score trend ─────────────────────────────────────────────── */}
             <Section title="Score Trend (last 60 days)">
               <p className="text-slate-400 text-xs mb-4">
-                Daily average score across completed sessions. Color: green ≥ 8, yellow ≥ 5, red &lt; 5.
+                Daily average score across completed sessions. Band by score:
+                strong ≥ 8, good ≥ 6, fair ≥ 4, weak &lt; 4.
               </p>
               <TrendChart points={data.scoreTrend} />
             </Section>

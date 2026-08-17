@@ -253,11 +253,16 @@ white-label-able."
   `aria-hidden` sweep across the crash screen, PhoneInterface, ChatInterface and
   now VoiceChatInterface (header/mic glyphs) + the admin remove-hint control,
   which was an icon-only ✕ with no accessible name (now `aria-label`-named,
-  `type=button`). Remaining: focus management on opened forms, raise
-  `slate-500/600` text to AA contrast, finish the "don't convey status by
-  colour alone" audit (session/modality badges already carry text labels; the
-  analytics trend chart still encodes score band by bar height + colour with no
-  text alternative for AT).
+  `type=button`); the analytics **score-trend chart now carries a text
+  alternative** — the coloured bars are `aria-hidden` and an equivalent
+  `sr-only` data table (date · avg /10 · **band as words** · sessions) exposes
+  the series to AT, so a day's score is no longer conveyed by bar-height +
+  colour alone (`scoreBandLabel`, WCAG 1.1.1 / 1.4.1); the on-chart legend was
+  also corrected from the stale 3-tier "green/yellow/red" to the canonical
+  4-tier band. Remaining: focus management on opened forms, raise
+  `slate-500/600` text to AA contrast (the "don't convey status by colour alone"
+  audit is now closed — session/modality badges carry text labels and the trend
+  chart has its data table).
 - [x] **P3a-10 Mobile hardening.** Chat/voice shells use `min-h-screen` with a
   non-sticky composer — the mobile keyboard covers the input. Switch to
   `h-dvh` + `sticky bottom-0`; make the analytics trend chart responsive
