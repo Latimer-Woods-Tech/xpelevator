@@ -78,12 +78,14 @@ jobs:
     runs-on: ubuntu-latest
     name: Backup + migrate live Neon DB
     env:
-      # Sourced from the GitHub repo secret. DATABASE_URL is deliberately NOT
-      # cut over to GCP SM in this slice: the SM copy (XPELEVATOR_CONNECTION_STRING)
-      # is unverified and the org warns these connection-string copies are often
-      # stale — sourcing a stale value here would fail the live-DB migrate AND
-      # (in the deploy job) overwrite the production Pages secret. The DB cutover
-      # is a separate slice that must first prove a fresh SM value. See #16.
+      # No-lockout fallback. DATABASE_URL is now cut over to GCP SM (Standing Law 3 —
+      # one source of truth for secrets): the "Resolve SM DB credential" step below
+      # validates the SM copy (XPELEVATOR_CONNECTION_STRING) READ-ONLY and, ONLY on a
+      # PASS, exports it to $GITHUB_ENV so it overrides this value for every migrate
+      # step. A stale / absent / failing SM copy leaves this GitHub-secret value in
+      # place (no-lockout) — so a stale SM value can never reach the live-DB migrate
+      # and fail it. This mirrors the deploy job's already-shipped DB cutover (#250 /
+      # run 32057219065, PROBE RESULT DATABASE_URL=PASS). See #16.
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - name: Checkout
@@ -95,6 +97,85 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
+
+      - name: Detect OIDC availability
+        id: oidc
+        # ACTIONS_ID_TOKEN_REQUEST_URL is present only when id-token:write is
+        # granted. Gate the GCP auth path on it so the job falls back to the
+        # GitHub-secret DATABASE_URL when OIDC is unavailable (no-lockout).
+        run: |
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Authenticate to GCP (WIF)
+        if: steps.oidc.outputs.available == 'true'
+        # continue-on-error: no-lockout. A misconfigured WIF trust must never break
+        # the live-DB migrate — it falls back to the GitHub-secret DATABASE_URL.
+        continue-on-error: true
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          service_account: factory-sa@factory-495015.iam.gserviceaccount.com
+          workload_identity_provider: projects/891842778224/locations/global/workloadIdentityPools/github-factory/providers/github
+      - name: Set up gcloud
+        if: steps.oidc.outputs.available == 'true'
+        continue-on-error: true
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Resolve SM DB credential (validated SM-first, GitHub-secret fallback)
+        id: sm-resolve-db
+        if: steps.oidc.outputs.available == 'true'
+        # Phase-1 secrets cutover (#16): the migrate job's DATABASE_URL sources from
+        # GCP SM (Standing Law 3), mirroring the deploy job's shipped cutover (#250)
+        # with the same safety — the SM copy is PROVED to authenticate READ-ONLY
+        # (Neon `SELECT 1`) *before* it is allowed to win, so a stale SM copy can
+        # NEVER reach the live-DB migrate (the org warns these connection-string
+        # copies are frequently stale). ONLY a PASSing probe writes the SM value to
+        # $GITHUB_ENV (SM wins, overriding the job-level GitHub-secret default for
+        # every subsequent migrate step). An absent / stale / failing SM copy writes
+        # nothing, leaving the GitHub-secret value in place (no-lockout).
+        # continue-on-error so a fallback path never blocks the migrate; the final
+        # assertion stays fail-capable (red step on any non-PASS) so proof-of-
+        # rejection is a real failing probe, not a rubber stamp.
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          proj="factory-495015"
+          db_pass=FAIL
+          command -v psql >/dev/null 2>&1 || sudo apt-get install -y -qq postgresql-client >/dev/null 2>&1 || true
+          # --- fetch into a LOCAL var only; strip UTF-8 BOM + trailing WS; mask ---
+          db="$(gcloud secrets versions access latest --secret=XPELEVATOR_CONNECTION_STRING --project="$proj" --quiet 2>/dev/null \
+                | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r' | sed -E 's/[[:space:]]+$//')" || db=""
+          [ -n "$db" ] && echo "::add-mask::$db"
+          # --- Neon SELECT 1 (read-only) — export DATABASE_URL ONLY on PASS ---
+          if [ -z "$db" ]; then
+            echo "⚠️  XPELEVATOR_CONNECTION_STRING absent in SM — keeping GitHub-secret DATABASE_URL"
+          elif ! command -v psql >/dev/null 2>&1; then
+            echo "⚠️  psql unavailable on runner — DB probe skipped, keeping GitHub-secret DATABASE_URL"; db_pass=SKIP
+          else
+            out="$(PGCONNECT_TIMEOUT=15 psql "$db" -tAc 'select 1' 2>/tmp/db_err || true)"
+            if [ "$(printf '%s' "$out" | tr -d '[:space:]')" = "1" ]; then
+              db_pass=PASS
+              echo "DATABASE_URL=$db" >> "$GITHUB_ENV"
+              echo "✅ Neon SELECT 1 via SM XPELEVATOR_CONNECTION_STRING → 1 (DATABASE_URL ← GCP SM)"
+            else
+              echo "❌ Neon probe FAILED — keeping GitHub-secret DATABASE_URL: $(head -c 300 /tmp/db_err | tr '\n' ' ')"
+            fi
+          fi
+          # --- job-summary evidence (source actually used) ---
+          src_db="GitHub secret (fallback)"; [ "$db_pass" = "PASS" ] && src_db="GCP SM"
+          {
+            echo "### migrate-job DB credential cutover — Phase-1 (validated SM-first, GitHub-secret fallback)"
+            echo ""
+            echo "| secret (GCP SM) | read-only probe | result | source used |"
+            echo "|---|---|---|---|"
+            echo "| XPELEVATOR_CONNECTION_STRING | Neon \`SELECT 1\` | $db_pass | $src_db |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "MIGRATE-DB CUTOVER RESULT: DATABASE_URL=$db_pass ($src_db)"
+          # Fail-capable (non-blocking) unless the SM copy validated: keeps proof-of-
+          # rejection honest — a stale SM value yields a red step AND falls back.
+          [ "$db_pass" = "PASS" ]
 
       - name: Recover a previously-failed migration (idempotent)
         # A migration that failed mid-apply leaves a "failed" row (finished=false,
