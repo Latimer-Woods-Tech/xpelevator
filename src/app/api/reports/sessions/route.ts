@@ -60,6 +60,7 @@ import {
 } from '@/lib/report';
 import { canAccessOrgReport, resolveOperatorRollup } from '@/lib/org-hierarchy';
 import { parseReportWindow } from '@/lib/report-window';
+import { boundScan, MAX_REPORT_SESSIONS } from '@/lib/limits';
 import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 export async function GET(request: Request) {
@@ -187,11 +188,22 @@ export async function GET(request: Request) {
         AND (${where})
       GROUP BY ss.id, u.email, jt.name, s.name, o.name
       ORDER BY ss.ended_at DESC NULLS LAST
+      LIMIT ${MAX_REPORT_SESSIONS + 1}
     `;
+
+    // Bound the rows marshaled into this isolate (P3b-2). The query pulls
+    // `LIMIT max + 1`, so a full book (<= max) is returned unchanged and the
+    // export is byte-identical to an unbounded scan; only a book larger than
+    // the cap is trimmed — to its most-recent `max` completed sessions (the
+    // query orders `ended_at DESC`) — rather than OOM-ing the render.
+    const { rows: bounded, truncated } = boundScan(
+      rows as unknown as ReportSession[],
+      MAX_REPORT_SESSIONS
+    );
 
     const day = new Date().toISOString().slice(0, 10);
     const slug = summary ? 'portfolio-summary' : rollup ? 'portfolio' : 'sessions';
-    const sessions = rows as unknown as ReportSession[];
+    const sessions = bounded;
 
     if (wantsPdf) {
       const pdf = summary
@@ -213,6 +225,10 @@ export async function GET(request: Request) {
           'Content-Disposition': `attachment; filename="xpelevator-${slug}-${day}.pdf"`,
           // Reporting data is per-request and tenant-specific — never cache it.
           'Cache-Control': 'no-store',
+          // Surface the P3b-2 export cap so it is never silent: `true` means the
+          // book exceeded MAX_REPORT_SESSIONS and this file carries the most
+          // recent cap-worth — window older cuts with ?since/?until.
+          'X-Report-Truncated': String(truncated),
         },
       });
     }
@@ -230,6 +246,10 @@ export async function GET(request: Request) {
         'Content-Disposition': `attachment; filename="xpelevator-${slug}-${day}.csv"`,
         // Reporting data is per-request and tenant-specific — never cache it.
         'Cache-Control': 'no-store',
+        // Surface the P3b-2 export cap so it is never silent: `true` means the
+        // book exceeded MAX_REPORT_SESSIONS and this file carries the most
+        // recent cap-worth — window older cuts with ?since/?until.
+        'X-Report-Truncated': String(truncated),
       },
     });
   } catch (error) {

@@ -263,9 +263,17 @@ first hard failure as data grows (full-history aggregation in JS per request).
   `AVG/GROUP BY/date_trunc` aggregates with a 60-day window; add
   `Cache-Control: private, max-age=60`. Longer term: incremental rollup table
   updated at end-of-session.
-- [ ] **P3b-2 Paginate all list/report endpoints.** Zero LIMIT/OFFSET anywhere;
-  `simulations/route.ts:112-214` returns all sessions; reports build a
-  PDF/CSV of the entire history in-Worker (`reports/sessions/route.ts:34-63`).
+- [x] **P3b-2 Paginate/bound all list/report endpoints.** DONE. The two
+  unbounded big-data reads are now capped: `GET /api/simulations` takes
+  `?limit` (≤100)/`?offset` via `parsePagination` (`src/lib/limits.ts`); the
+  manager export `GET /api/reports/sessions` (CSV **and** PDF, incl. the
+  operator portfolio roll-up) now pulls `LIMIT MAX_REPORT_SESSIONS + 1` and
+  `boundScan`-trims to the most-recent cap-worth of completed sessions,
+  flagging `X-Report-Truncated: true` so the cap is never silent (operators
+  window older cuts with `?since`/`?until`). The admin config lists
+  (scenarios/criteria/jobs) render in full **by design** (P3a-8) — a small,
+  bounded set the UI needs whole. Covered by `reports-sessions.test.ts`
+  (cap + truncation, proof-of-rejection by mutation) + `limits.test.ts`.
 - [x] **P3b-3 Add query-shape indexes.** DONE — migration
   `20260717000000_add_query_shape_indexes` ships all three: `@@index([orgId,
   status, endedAt])` for analytics/reports, `@@index([dbUserId])` for the

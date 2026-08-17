@@ -67,6 +67,31 @@ export function parsePagination(params: URLSearchParams): { limit: number; offse
 export const MAX_ANALYTICS_SCAN_ROWS = 20_000;
 
 /**
+ * Hard cap on the number of completed sessions a single report export
+ * (`GET /api/reports/sessions`, CSV or PDF) may pull into the Worker (P3b-2 —
+ * "reports build a PDF/CSV of the entire history in-Worker").
+ *
+ * The report query GROUP-BYs to one row per completed session, then a pure
+ * builder marshals every row into a single in-memory CSV/PDF string. With no
+ * bound, a large book (or a portfolio roll-up spanning every client org)
+ * materialises the whole history into one isolate — memory + serialisation +
+ * the full string build — which can OOM or time out the render. This bounds the
+ * rows *processed in-Worker*; the DB-side scan is a separate concern (query-shape
+ * indexes, P3b-3).
+ *
+ * When it bites, the export carries the most-recent `MAX_REPORT_SESSIONS`
+ * completed sessions (the query is `ORDER BY ended_at DESC`) and the response
+ * sets `X-Report-Truncated: true` so the cap is never silent (Standing Law:
+ * no silent caps). Operators past the cap window the export with `?since`/
+ * `?until` to pull older cuts.
+ *
+ * Deliberately generous — far above any realistic near-term book (a heavy org
+ * runs low thousands of completed sessions) — so it never bites real usage and
+ * normal exports are byte-identical. It is a runaway guard, not a page size.
+ */
+export const MAX_REPORT_SESSIONS = 25_000;
+
+/**
  * Bound an in-memory scan to at most `max` rows, reporting whether the source was
  * larger. Callers SELECT `LIMIT max + 1` so a full result set unambiguously
  * signals there was more than `max`; this trims back to `max` and flags it. Pure
