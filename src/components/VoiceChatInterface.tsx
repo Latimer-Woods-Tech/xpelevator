@@ -372,7 +372,7 @@ export default function VoiceChatInterface({
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xl">🎙️</span>
+              <span className="text-xl" aria-hidden="true">🎙️</span>
               <h1 className="font-semibold">{session?.scenario.name}</h1>
               <span className="text-xs px-2 py-0.5 rounded-full bg-purple-900/60 border border-purple-700/60 text-purple-300 font-medium tracking-wide uppercase">
                 Voice
@@ -451,11 +451,11 @@ export default function VoiceChatInterface({
                 onClick={() => setShowVoicePicker(p => !p)}
                 className="flex items-center gap-1.5 px-3 py-1 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/50 border border-slate-700/50 rounded-full transition-colors"
               >
-                <span>🔊</span>
+                <span aria-hidden="true">🔊</span>
                 <span className="max-w-[160px] truncate">
                   {selectedVoiceName ?? 'Default voice'}
                 </span>
-                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-3 h-3 flex-shrink-0" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
@@ -551,7 +551,7 @@ export default function VoiceChatInterface({
                   }
                 `}
               >
-                {isMicActive ? '⏺' : '🎙️'}
+                <span aria-hidden="true">{isMicActive ? '⏺' : '🎙️'}</span>
                 {/* Ripple ring when recording */}
                 {isMicActive && (
                   <span className="absolute inset-0 rounded-full border-2 border-red-400 animate-ping opacity-50" />

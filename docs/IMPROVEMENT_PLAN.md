@@ -247,10 +247,17 @@ white-label-able."
   search+pagination (deliberately deferred — the config lists render in full;
   needs UI paging, not a silent server cap), bulk save (a UX tradeoff — the
   current per-toggle save is already atomic)._
-- [ ] **P3a-9 Accessibility pass.** `aria-live` on streaming chat, keyboard
-  path for push-to-talk (`VoiceChatInterface.tsx:518` is mouse/touch only),
-  focus management on opened forms, `aria-hidden` on decorative emoji, raise
-  `slate-500/600` text to AA contrast, don't convey status by color alone.
+- [ ] **P3a-9 Accessibility pass.** Done: `aria-live` on streaming chat;
+  keyboard hold-to-talk on the mic control (`VoiceChatInterface.tsx` mic button
+  — Space/Enter hold, no longer mouse/touch only); decorative-emoji
+  `aria-hidden` sweep across the crash screen, PhoneInterface, ChatInterface and
+  now VoiceChatInterface (header/mic glyphs) + the admin remove-hint control,
+  which was an icon-only ✕ with no accessible name (now `aria-label`-named,
+  `type=button`). Remaining: focus management on opened forms, raise
+  `slate-500/600` text to AA contrast, finish the "don't convey status by
+  colour alone" audit (session/modality badges already carry text labels; the
+  analytics trend chart still encodes score band by bar height + colour with no
+  text alternative for AT).
 - [x] **P3a-10 Mobile hardening.** Chat/voice shells use `min-h-screen` with a
   non-sticky composer — the mobile keyboard covers the input. Switch to
   `h-dvh` + `sticky bottom-0`; make the analytics trend chart responsive
