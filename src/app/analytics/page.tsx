@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSession, signOut } from 'next-auth/react';
-import { PageShell, Container, Button, ButtonLink } from '@/components/ui';
+import { PageShell, Container, Button, ButtonLink, Skeleton, SkeletonScreen } from '@/components/ui';
 import { TopNav } from '@/components/ui/TopNav';
 import { PhoneIcon, ChatIcon, HeadsetIcon, AlertTriangleIcon } from '@/components/ui/icons';
 import { scoreBarClass, scoreTextClass, scoreBarHex } from '@/lib/score-color';
@@ -210,7 +210,7 @@ export default function AnalyticsPage() {
         </div>
 
         {loading ? (
-          <p className="text-slate-400">Loading analytics…</p>
+          <AnalyticsSkeleton />
         ) : error ? (
           <div className="text-center py-12">
             <AlertTriangleIcon className="mx-auto mb-3 h-8 w-8 text-rose-400" />
@@ -602,5 +602,44 @@ function Section({
       <h2 className="text-lg font-semibold mb-4">{title}</h2>
       {children}
     </div>
+  );
+}
+
+/**
+ * Content-shaped placeholder for the dashboard body while `GET /api/analytics`
+ * is in flight — mirrors the real layout (five summary tiles, the trend chart,
+ * two breakdown panels) so the page doesn't reflow when data lands, and reads
+ * as faster than the old bare "Loading analytics…" line. `SkeletonScreen`
+ * carries the single "Loading analytics" announcement for assistive tech.
+ */
+function AnalyticsSkeleton() {
+  return (
+    <SkeletonScreen label="Loading analytics" className="space-y-8">
+      {/* Summary tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
+            <Skeleton className="h-3 w-20 mb-3" />
+            <Skeleton className="h-7 w-16" />
+          </div>
+        ))}
+      </div>
+      {/* Trend chart */}
+      <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+        <Skeleton className="h-4 w-40 mb-4" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+      {/* Two breakdown panels */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, panel) => (
+          <div key={panel} className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 space-y-3">
+            <Skeleton className="h-4 w-36 mb-2" />
+            {Array.from({ length: 4 }).map((_, row) => (
+              <Skeleton key={row} className="h-4 w-full" />
+            ))}
+          </div>
+        ))}
+      </div>
+    </SkeletonScreen>
   );
 }

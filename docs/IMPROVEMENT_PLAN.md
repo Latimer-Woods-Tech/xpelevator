@@ -238,10 +238,15 @@ white-label-able."
   `admin/page.tsx:621-639`); ~~duplicate-scenario action~~ **DONE** (R-083,
   `POST /api/scenarios/[id]/duplicate` + Duplicate button — clones a visible
   scenario into a private, hand-authored copy in the caller's org, provenance
-  reset); loading skeletons for admin/analytics/session-detail. _Remaining:
+  reset); ~~loading skeletons for admin/analytics/session-detail~~ **DONE**
+  (shared `Skeleton`/`SkeletonScreen`/`SkeletonList` primitives in the ui kit;
+  content-shaped skeletons replace the bare "Loading…" text on the analytics
+  dashboard, the four admin config lists, and a new `sessions/[id]/loading.tsx`
+  Suspense fallback — each announced once via a polite `role=status` region so
+  the loading state isn't silent to assistive tech). _Remaining:
   search+pagination (deliberately deferred — the config lists render in full;
   needs UI paging, not a silent server cap), bulk save (a UX tradeoff — the
-  current per-toggle save is already atomic), skeletons._
+  current per-toggle save is already atomic)._
 - [ ] **P3a-9 Accessibility pass.** `aria-live` on streaming chat, keyboard
   path for push-to-talk (`VoiceChatInterface.tsx:518` is mouse/touch only),
   focus management on opened forms, `aria-hidden` on decorative emoji, raise

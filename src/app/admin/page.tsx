@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { Criteria, JobTitle, Scenario, SimulationType } from '@/types';
 import { useToast, useConfirm } from '@/components/ui/feedback';
+import { SkeletonList } from '@/components/ui';
 import type { PackStatus, ScenarioUpgradeItem, UpgradePreviewCounts } from '@/lib/scenario-packs';
 import { upgradeActionLabel, summarizeUpgradeCounts } from '@/lib/scenario-packs';
 
@@ -173,7 +174,7 @@ function CriteriaTab() {
       )}
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <SkeletonList rows={4} />
       ) : items.length === 0 ? (
         <p className="text-slate-400 text-center py-12">No criteria yet.</p>
       ) : (
@@ -316,7 +317,7 @@ function JobTitlesTab() {
       )}
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <SkeletonList rows={4} />
       ) : items.length === 0 ? (
         <p className="text-slate-400 text-center py-12">No job titles yet.</p>
       ) : (
@@ -594,7 +595,7 @@ function ScenariosTab() {
       )}
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <SkeletonList rows={4} />
       ) : scenarios.length === 0 ? (
         <p className="text-slate-400 text-center py-12">No scenarios found.</p>
       ) : (
@@ -921,7 +922,7 @@ function OrgsTab() {
       )}
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <SkeletonList rows={4} />
       ) : orgs.length === 0 ? (
         <p className="text-slate-400 text-center py-12">No organizations yet.</p>
       ) : (
