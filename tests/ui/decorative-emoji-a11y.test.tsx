@@ -51,6 +51,9 @@ import ErrorBoundary from '@/app/error';
 import PhoneInterface, {
   type PhoneInterfaceProps,
 } from '@/components/PhoneInterface';
+import VoiceChatInterface, {
+  type VoiceChatInterfaceProps,
+} from '@/components/VoiceChatInterface';
 
 describe('crash screen (error.tsx) — decorative warning glyph', () => {
   it('hides the ⚠️ glyph from assistive tech', () => {
@@ -119,5 +122,99 @@ describe('PhoneInterface — decorative call-control glyphs', () => {
     expect(screen.getByText('Your turn to speak')).toBeInTheDocument();
     const glyph = screen.getByText('🟢');
     expect(glyph).toHaveAttribute('aria-hidden', 'true');
+  });
+});
+
+describe('VoiceChatInterface — decorative voice glyphs', () => {
+  const W = () => window as unknown as Record<string, unknown>;
+
+  // The mic control renders only when the Web Speech API is present. Install the
+  // smallest fakes the component feature-detects (SpeechRecognition + a
+  // speechSynthesis stub); getVoices() → [] so the voice-picker stays hidden and
+  // only the always-present glyphs are asserted here.
+  function installVoiceSupport() {
+    class FakeRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = '';
+      maxAlternatives = 1;
+      onresult: ((e: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      start = vi.fn();
+      stop = vi.fn();
+      abort = vi.fn();
+    }
+    W().SpeechRecognition = FakeRecognition;
+    W().webkitSpeechRecognition = FakeRecognition;
+    W().speechSynthesis = {
+      speaking: false,
+      pending: false,
+      onvoiceschanged: null,
+      getVoices: () => [],
+      speak: vi.fn(),
+      cancel: vi.fn(),
+    };
+    W().SpeechSynthesisUtterance = class {
+      text: string;
+      constructor(text: string) {
+        this.text = text;
+      }
+    };
+  }
+
+  function removeVoiceSupport() {
+    delete W().SpeechRecognition;
+    delete W().webkitSpeechRecognition;
+    delete W().speechSynthesis;
+    delete W().SpeechSynthesisUtterance;
+  }
+
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+  afterEach(() => {
+    removeVoiceSupport();
+    vi.restoreAllMocks();
+  });
+
+  function baseProps(): VoiceChatInterfaceProps {
+    return {
+      session: {
+        scenario: { name: 'Angry caller', script: {} },
+        jobTitle: { name: 'Phone Agent' },
+      } as unknown as VoiceChatInterfaceProps['session'],
+      messages: [],
+      streamingText: '',
+      sending: false,
+      error: null,
+      speechChunks: [],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      endConversation: vi.fn(),
+    };
+  }
+
+  it('hides the header microphone glyph while keeping the scenario name reachable', async () => {
+    // Unsupported mode needs no Web Speech fakes; the header renders regardless.
+    render(<VoiceChatInterface {...baseProps()} />);
+    // Proof-of-rejection: pre-slice this glyph had no aria-hidden, so a screen
+    // reader read "microphone Angry caller".
+    const glyph = screen.getByText('🎙️');
+    expect(glyph).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByRole('heading', { name: 'Angry caller' })).toBeInTheDocument();
+  });
+
+  it('names the push-to-talk control from its aria-label, not its glyph', async () => {
+    installVoiceSupport();
+    render(<VoiceChatInterface {...baseProps()} />);
+    // The mic button's accessible name comes from aria-label; the idle glyph is
+    // hidden so it is never doubled into the name. There are two 🎙️ on screen
+    // (header + mic) — both must be hidden from AT.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Hold to speak/i })).toBeInTheDocument()
+    );
+    for (const glyph of screen.getAllByText('🎙️')) {
+      expect(glyph).toHaveAttribute('aria-hidden', 'true');
+    }
   });
 });

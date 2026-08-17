@@ -574,7 +574,7 @@ function ScenariosTab() {
                     placeholder={`Hint ${i + 1} — e.g. Order #12345 placed 3 weeks ago`}
                     className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white placeholder-slate-500 text-sm"
                   />
-                  <button onClick={() => removeHint(i)} className="text-red-400 hover:text-red-300 px-2 text-sm">✕</button>
+                  <button type="button" onClick={() => removeHint(i)} aria-label={`Remove hint ${i + 1}`} className="text-red-400 hover:text-red-300 px-2 text-sm"><span aria-hidden="true">✕</span></button>
                 </div>
               ))}
             </div>

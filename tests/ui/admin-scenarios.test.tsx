@@ -102,6 +102,28 @@ describe('Admin Scenarios — modality badge colour', () => {
   });
 });
 
+describe('Admin Scenarios — remove-hint control accessibility (P3a-9)', () => {
+  it('gives the icon-only remove-hint button a glyph-free accessible name', async () => {
+    stubFetch();
+    await openScenariosTab();
+
+    // Open the create form, then add one background hint to reveal its remove
+    // control (an icon-only ✕ button).
+    fireEvent.click(screen.getByRole('button', { name: '+ Add Scenario' }));
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add Hint' }));
+
+    // Proof-of-rejection: pre-slice the button had no aria-label, so its only
+    // accessible name was the bare "✕" glyph (announced "multiplication x").
+    const remove = screen.getByRole('button', { name: 'Remove hint 1' });
+    expect(remove).toBeInTheDocument();
+    // The glyph itself is hidden from assistive tech; the name comes from the label.
+    const glyph = screen.getByText('✕');
+    expect(glyph).toHaveAttribute('aria-hidden', 'true');
+    // An explicit type=button so the control never accidentally submits the form.
+    expect(remove).toHaveAttribute('type', 'button');
+  });
+});
+
 describe('Admin Scenarios — Duplicate action', () => {
   it('POSTs to the per-scenario duplicate endpoint and refreshes the list', async () => {
     const fetchSpy = stubFetch();
