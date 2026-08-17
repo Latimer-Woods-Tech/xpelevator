@@ -62,6 +62,17 @@ describe('AnalyticsPage — manager reporting export', () => {
     const { container } = render(<AnalyticsPage />);
     expect(container.textContent ?? '').not.toMatch(/\bAI\b/);
   });
+
+  it('shows a content skeleton (not bare text) while analytics loads (P3a-8)', () => {
+    render(<AnalyticsPage />);
+    // Proof-of-rejection: revert to the old `<p>Loading analytics…</p>` and
+    // this fails — a bare paragraph is not an announced status region.
+    expect(
+      screen.getByRole('status', { name: /loading analytics/i })
+    ).toBeInTheDocument();
+    // Real dashboard data has not rendered yet.
+    expect(screen.queryByText('Total Sessions')).not.toBeInTheDocument();
+  });
 });
 
 describe('AnalyticsPage — scoring health surface', () => {

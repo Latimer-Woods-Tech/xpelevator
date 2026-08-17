@@ -142,6 +142,60 @@ export function ButtonLink({
   );
 }
 
+/**
+ * A single presentational loading placeholder — a pulsing block shaped like the
+ * content it stands in for. Decorative by design (`aria-hidden`): a screen
+ * reader gets the one "Loading" announcement from the enclosing
+ * {@link SkeletonScreen} status region, not a stutter of empty bars. A
+ * content-shaped skeleton reads as faster than a bare "Loading…" line or a
+ * centered spinner and avoids the layout shift when real data lands.
+ */
+export function Skeleton({ className }: { className?: string }) {
+  return <div aria-hidden="true" className={cx('animate-pulse rounded bg-slate-800', className)} />;
+}
+
+/**
+ * Wraps a skeleton layout in a polite status region so assistive tech announces
+ * the loading state exactly once (the pulsing bars inside are `aria-hidden` and
+ * silent). Pair every skeleton screen with this — a screen-reader user should
+ * hear "Loading…", not silence, while a surface fills in.
+ */
+export function SkeletonScreen({
+  label = 'Loading',
+  className,
+  children,
+}: {
+  label?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div role="status" aria-busy="true" aria-label={`${label}…`} className={className}>
+      {/* Redundant visible-to-AT text for readers that announce live-region
+          content on insertion rather than the label. */}
+      <span className="sr-only">{label}…</span>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A skeleton stand-in for a vertical list of rows (admin config lists, etc.).
+ * Rendered inside a {@link SkeletonScreen} so the loading state is announced.
+ */
+export function SkeletonList({ rows = 5, className }: { rows?: number; className?: string }) {
+  return (
+    <SkeletonScreen label="Loading" className={cx('space-y-3', className)}>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="rounded-xl border border-surface-border bg-surface p-4">
+          <Skeleton className="mb-2 h-4 w-1/3" />
+          <Skeleton className="h-3 w-2/3" />
+        </div>
+      ))}
+    </SkeletonScreen>
+  );
+}
+
 type BadgeTone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger';
 
 const BADGE_TONES: Record<BadgeTone, string> = {
