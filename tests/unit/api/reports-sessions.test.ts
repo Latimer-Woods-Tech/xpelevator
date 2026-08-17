@@ -32,6 +32,7 @@ vi.mock('@/lib/db', () => ({
 
 import { GET } from '@/app/api/reports/sessions/route';
 import { AuthError } from '@/lib/auth-api';
+import { MAX_REPORT_SESSIONS } from '@/lib/limits';
 
 const OPERATOR = 'operator-1';
 const CLIENT = 'client-1';
@@ -426,5 +427,91 @@ describe('GET /api/reports/sessions — ?since/?until date window (R-065)', () =
     expect(scopedTo).toBe(OPERATOR);
     expect(sinceBound).toBe(null);
     expect(untilBound).toBe(null);
+  });
+});
+
+describe('GET /api/reports/sessions — export cap (P3b-2)', () => {
+  /** The last bound value of the main session query (the `LIMIT` param). */
+  let limitParam: unknown;
+
+  /** One minimal completed session in the report query's row shape. */
+  function fixtureRow(i: number) {
+    return {
+      id: `s${i}`,
+      type: 'CHAT',
+      scoringStatus: 'SCORED',
+      endedAt: '2026-07-10T00:00:00.000Z',
+      createdAt: '2026-07-10T00:00:00.000Z',
+      traineeEmail: `t${i}@acme.test`,
+      jobTitle: 'Rep',
+      scenario: 'Angry customer',
+      organization: 'Acme Retail',
+      scores: [{ score: 8, criteria: { name: 'Empathy', weight: 1 } }],
+    };
+  }
+
+  /**
+   * Route sql for the own-org export, returning `sessionRows` from the main
+   * query and capturing the trailing bound value (the LIMIT param) so the test
+   * can prove the query pulls `LIMIT max + 1`.
+   */
+  function routeCapSql(sessionRows: unknown[]) {
+    limitParam = null;
+    sqlMock.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
+      const text = Array.isArray(strings) ? strings.join(' ') : String(strings);
+      // The own-org scope fragment (`ss.org_id = ${orgId}`) is a nested sql``
+      // call interpolated into the main query — pass it through.
+      if (/ss\.org_id =/.test(text)) {
+        return Promise.resolve([]);
+      }
+      if (/FROM simulation_sessions/.test(text)) {
+        limitParam = values[values.length - 1];
+        return Promise.resolve(sessionRows);
+      }
+      throw new Error(`unmatched sql in test: ${text}`);
+    });
+  }
+
+  it('pulls LIMIT max + 1 and, under the cap, exports every row untruncated', async () => {
+    asAdmin(OPERATOR);
+    routeCapSql([fixtureRow(1), fixtureRow(2)]);
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    // The query is bounded — the defensive cap is +1 so a full book is detectable.
+    expect(limitParam).toBe(MAX_REPORT_SESSIONS + 1);
+    // A normal (under-cap) export is byte-for-byte an unbounded scan.
+    expect(res.headers.get('X-Report-Truncated')).toBe('false');
+    const body = await res.text();
+    // header + 2 data rows.
+    expect(body.split('\r\n').filter(Boolean).length).toBe(3);
+  });
+
+  it('over the cap: trims to the most-recent MAX_REPORT_SESSIONS and flags truncated', async () => {
+    asAdmin(OPERATOR);
+    // Simulate a book larger than the cap: the query returns max + 1 rows.
+    const overCap = Array.from({ length: MAX_REPORT_SESSIONS + 1 }, (_v, i) =>
+      fixtureRow(i)
+    );
+    routeCapSql(overCap);
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    // Dropping the boundScan wiring fails both assertions (Standing Law 1):
+    // the header would be 'false' and the CSV would carry all max + 1 rows.
+    expect(res.headers.get('X-Report-Truncated')).toBe('true');
+    const body = await res.text();
+    // header + exactly MAX_REPORT_SESSIONS data rows (the extra row is trimmed).
+    expect(body.split('\r\n').filter(Boolean).length).toBe(MAX_REPORT_SESSIONS + 1);
+  });
+
+  it('the truncation flag rides the PDF export path too (false under the cap)', async () => {
+    // The header is wired on the PDF branch as well. Proven under the cap so the
+    // test stays fast — an over-cap PDF renders a full cap-worth of rows, which
+    // the CSV over-cap case above already covers for the truncation value.
+    asAdmin(OPERATOR);
+    routeCapSql([fixtureRow(1)]);
+    const res = await GET(req('?format=pdf'));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('application/pdf');
+    expect(res.headers.get('X-Report-Truncated')).toBe('false');
   });
 });
