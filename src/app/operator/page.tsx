@@ -412,6 +412,17 @@ function ClientRow({
 }) {
   const [saving, setSaving] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
+  // Rename: an inline editor toggled open from the row. `draftName` seeds from
+  // the persisted name; a failed PUT leaves the editor open with the reason.
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState(client.name);
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  // Delete: a two-step confirm (the action is irreversible and the server
+  // refuses it with 409 once the client has recorded sessions).
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const tierName = getSeatTier(tierForPlan(client.plan))?.name ?? 'Chat';
 
@@ -438,14 +449,131 @@ function ClientRow({
     }
   };
 
+  // Rename the client via `PUT /api/orgs/[id] { name }` — authorised server-side
+  // by `canAccessOrg` (an operator admin may rename a CLIENT they own). A no-op
+  // (blank or unchanged) just closes the editor; on success the parent reloads.
+  const saveName = async () => {
+    const trimmed = draftName.trim();
+    if (renameSaving) return;
+    if (!trimmed || trimmed === client.name) {
+      setRenaming(false);
+      setRenameError(null);
+      setDraftName(client.name);
+      return;
+    }
+    setRenameSaving(true);
+    setRenameError(null);
+    try {
+      const res = await fetch(`/api/orgs/${encodeURIComponent(client.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setRenameError(data?.error ?? `Could not rename the client (HTTP ${res.status}).`);
+        return;
+      }
+      setRenaming(false);
+      onChanged();
+    } catch {
+      setRenameError('Network error — the client was not renamed.');
+    } finally {
+      setRenameSaving(false);
+    }
+  };
+
+  // Delete the client via `DELETE /api/orgs/[id]` — authorised server-side by
+  // `canDeleteOrg` (only the parent operator or a platform admin). The route
+  // refuses with 409 while the client still has recorded sessions, so the
+  // returned error is surfaced verbatim and the row stays. 204 → the row is
+  // gone on the parent's reload.
+  const deleteClient = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/orgs/${encodeURIComponent(client.id)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setDeleteError(data?.error ?? `Could not delete the client (HTTP ${res.status}).`);
+        setConfirmingDelete(false);
+        return;
+      }
+      onChanged();
+    } catch {
+      setDeleteError('Network error — the client was not deleted.');
+      setConfirmingDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
       <div>
-        <div className="font-medium text-sm">{client.name}</div>
+        {renaming ? (
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              void saveName();
+            }}
+            className="flex items-center gap-2"
+          >
+            <input
+              type="text"
+              value={draftName}
+              autoFocus
+              disabled={renameSaving}
+              onChange={e => setDraftName(e.target.value)}
+              aria-label={`New name for ${client.name}`}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm text-slate-200 disabled:opacity-60 transition-colors"
+            />
+            <button
+              type="submit"
+              disabled={renameSaving}
+              className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-xs font-medium transition-colors"
+            >
+              {renameSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              disabled={renameSaving}
+              onClick={() => {
+                setRenaming(false);
+                setRenameError(null);
+                setDraftName(client.name);
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 text-xs transition-colors"
+            >
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-sm">{client.name}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setDraftName(client.name);
+                setRenameError(null);
+                setRenaming(true);
+              }}
+              aria-label={`Rename ${client.name}`}
+              className="text-xs text-slate-400 hover:text-blue-300 transition-colors"
+            >
+              Rename
+            </button>
+          </div>
+        )}
         <div className="text-slate-400 text-xs mt-0.5">
           {client.slug} · {tierName} seat
         </div>
         {planError ? <p className="text-red-400 text-xs mt-1">{planError}</p> : null}
+        {renameError ? <p className="text-red-400 text-xs mt-1">{renameError}</p> : null}
+        {deleteError ? <p className="text-red-400 text-xs mt-1">{deleteError}</p> : null}
       </div>
       <div className="flex items-center gap-4">
         <label className="flex items-center gap-2">
@@ -488,6 +616,41 @@ function ClientRow({
             PDF
           </a>
         </div>
+        {/* Delete — the destructive half of the "manage" verb. Two-step confirm;
+            the server refuses (409) while the client still has sessions. */}
+        {confirmingDelete ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => void deleteClient()}
+              aria-label={`Confirm delete ${client.name}`}
+              className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-60 rounded-lg text-xs font-medium transition-colors"
+            >
+              {deleting ? 'Deleting…' : 'Confirm'}
+            </button>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => setConfirmingDelete(false)}
+              className="px-3 py-1.5 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 rounded-lg text-xs transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteError(null);
+              setConfirmingDelete(true);
+            }}
+            aria-label={`Delete ${client.name}`}
+            className="px-3 py-1.5 border border-red-900/60 text-red-300 hover:bg-red-950/40 rounded-lg text-xs font-medium transition-colors"
+          >
+            Delete
+          </button>
+        )}
       </div>
     </li>
   );
