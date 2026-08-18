@@ -37,6 +37,12 @@ const ENV_VARS: EnvVarSpec[] = [
     description:
       'Sentry ingest DSN (#154 observability) — server error sink. Optional: absent → the sink no-ops, requests are unaffected.',
   },
+  {
+    key: 'POSTHOG_KEY',
+    required: false,
+    description:
+      'PostHog project ingest key (#154 observability) — product-event sink. Optional: absent → the sink no-ops, requests are unaffected.',
+  },
 ];
 
 function validateEnv(): void {
@@ -90,6 +96,14 @@ export const AUTH_SECRET = process.env.AUTH_SECRET ?? '';
  * exported here only so the var is documented in one canonical registry.
  */
 export const SENTRY_DSN = process.env.SENTRY_DSN ?? '';
+
+/**
+ * PostHog project ingest key for the product-event sink (#154). Optional — an
+ * empty value makes `@/lib/posthog` no-op, so a key-less deploy runs unaffected.
+ * Read directly from `process.env` by the sink itself; exported here only so the
+ * var is documented in one canonical registry (mirrors `SENTRY_DSN`).
+ */
+export const POSTHOG_KEY = process.env.POSTHOG_KEY ?? '';
 
 /**
  * Whether GitHub OAuth is configured.
