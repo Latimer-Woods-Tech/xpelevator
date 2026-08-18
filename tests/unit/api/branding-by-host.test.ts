@@ -31,10 +31,17 @@ function req(host: string | null): Request {
 function brandingRow(over: Record<string, unknown> = {}) {
   return {
     slug: 'acme',
+    parentOrgId: null,
     brandDisplayName: 'Acme Training',
     brandLogoUrl: 'https://cdn.acme.example/logo.svg',
     brandPrimaryColor: '#112233',
     brandAccentColor: '#445566',
+    // Parent OPERATOR brand columns from the self-join (all null when top-level —
+    // a host-resolved slug is always an operator subdomain, so no parent).
+    parentBrandDisplayName: null,
+    parentBrandLogoUrl: null,
+    parentBrandPrimaryColor: null,
+    parentBrandAccentColor: null,
     ...over,
   };
 }

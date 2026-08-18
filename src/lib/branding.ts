@@ -60,6 +60,44 @@ export function toPublicBranding(
 }
 
 /**
+ * Resolve the branding a trainee should SEE for an org, applying operator→client
+ * inheritance (issue #16, Phase 4, R-050 — the white-label channel model).
+ *
+ * The whole point of white-label is that an OPERATOR sets its brand ONCE and
+ * every CLIENT workspace beneath it wears that brand — otherwise a client org
+ * that never set its own colours shows the bare platform default and the
+ * operator's brand never reaches its trainees. So, per field:
+ *   - the CLIENT's OWN value wins when set (a client may override just its logo);
+ *   - where the client left a field `null`, it inherits the parent OPERATOR's
+ *     value for that field;
+ *   - where neither is set, it stays `null` (fall back to the platform default).
+ *
+ * `parent` is the parent operator's branding, or `null` for an org with no
+ * parent (STANDALONE / OPERATOR) — in which case the org's own branding is
+ * returned unchanged. Inheritance is per-field, never all-or-nothing, and one
+ * level deep only (the hierarchy is deliberately operator → client).
+ */
+export function resolveInheritedBranding(
+  own: Branding,
+  parent: Branding | null
+): Branding {
+  if (parent === null) {
+    return {
+      displayName: own.displayName,
+      logoUrl: own.logoUrl,
+      primaryColor: own.primaryColor,
+      accentColor: own.accentColor,
+    };
+  }
+  return {
+    displayName: own.displayName ?? parent.displayName,
+    logoUrl: own.logoUrl ?? parent.logoUrl,
+    primaryColor: own.primaryColor ?? parent.primaryColor,
+    accentColor: own.accentColor ?? parent.accentColor,
+  };
+}
+
+/**
  * Whether any white-label field is set. `false` means the org has no custom
  * brand and the render surface should fall back to the platform default. Used
  * by the client shell to decide between the branded and default presentation.

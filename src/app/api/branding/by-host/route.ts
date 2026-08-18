@@ -30,17 +30,24 @@
  */
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { toPublicBranding } from '@/lib/branding';
+import { resolveInheritedBranding, toPublicBranding, type Branding } from '@/lib/branding';
 import { resolveOperatorSlugFromHost } from '@/lib/host';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import { errorFields, log, requestIdFrom } from '@/lib/log';
 
 interface PublicBrandingRow {
   slug: string;
+  /** Set when this org is a CLIENT owned by an OPERATOR — drives inheritance. */
+  parentOrgId: string | null;
   brandDisplayName: string | null;
   brandLogoUrl: string | null;
   brandPrimaryColor: string | null;
   brandAccentColor: string | null;
+  // The parent OPERATOR's brand columns (all null when there is no parent).
+  parentBrandDisplayName: string | null;
+  parentBrandLogoUrl: string | null;
+  parentBrandPrimaryColor: string | null;
+  parentBrandAccentColor: string | null;
 }
 
 export async function GET(request: Request) {
@@ -59,15 +66,25 @@ export async function GET(request: Request) {
       );
     }
 
+    // Self-join to the parent operator for the same inheritance the slug read
+    // does. A host-resolved slug is an operator subdomain (top-level, no parent)
+    // so the LEFT JOIN is a no-op here today; kept symmetric with the slug read
+    // so "the public resolver inherits" is one invariant, not two.
     const rows = await sql`
       SELECT
-        slug,
-        brand_display_name  as "brandDisplayName",
-        brand_logo_url      as "brandLogoUrl",
-        brand_primary_color as "brandPrimaryColor",
-        brand_accent_color  as "brandAccentColor"
-      FROM organizations
-      WHERE slug = ${slug}
+        o.slug,
+        o.parent_org_id       as "parentOrgId",
+        o.brand_display_name  as "brandDisplayName",
+        o.brand_logo_url      as "brandLogoUrl",
+        o.brand_primary_color as "brandPrimaryColor",
+        o.brand_accent_color  as "brandAccentColor",
+        p.brand_display_name  as "parentBrandDisplayName",
+        p.brand_logo_url      as "parentBrandLogoUrl",
+        p.brand_primary_color as "parentBrandPrimaryColor",
+        p.brand_accent_color  as "parentBrandAccentColor"
+      FROM organizations o
+      LEFT JOIN organizations p ON p.id = o.parent_org_id
+      WHERE o.slug = ${slug}
       LIMIT 1
     `;
 
@@ -76,12 +93,23 @@ export async function GET(request: Request) {
     }
 
     const row = rows[0] as PublicBrandingRow;
-    const branding = toPublicBranding({
-      slug: row.slug,
+    const own: Branding = {
       displayName: row.brandDisplayName,
       logoUrl: row.brandLogoUrl,
       primaryColor: row.brandPrimaryColor,
       accentColor: row.brandAccentColor,
+    };
+    const parent: Branding | null = row.parentOrgId
+      ? {
+          displayName: row.parentBrandDisplayName ?? null,
+          logoUrl: row.parentBrandLogoUrl ?? null,
+          primaryColor: row.parentBrandPrimaryColor ?? null,
+          accentColor: row.parentBrandAccentColor ?? null,
+        }
+      : null;
+    const branding = toPublicBranding({
+      slug: row.slug,
+      ...resolveInheritedBranding(own, parent),
     });
 
     return NextResponse.json(branding, {
