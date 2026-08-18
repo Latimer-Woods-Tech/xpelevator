@@ -171,6 +171,13 @@ jobs:
   smoke:
     name: Playwright smoke (public surface)
     runs-on: ubuntu-latest
+    # The `playwright install --with-deps chromium` step can hang on a slow/
+    # stalled browser-CDN or apt fetch; with no explicit bound it inherits the
+    # 6-hour job default and blocks auto-merge indefinitely (observed on #257,
+    # run 32173764009). Cap it so a stuck install fails fast and surfaces as an
+    # actionable red instead of a silent multi-hour hang. Normal end-to-end
+    # (install + build + smoke) is ~3-4 min, so 15 is generous headroom.
+    timeout-minutes: 15
 
     env:
       # Dummy, non-secret values — the smoke surface never touches DB/LLM.

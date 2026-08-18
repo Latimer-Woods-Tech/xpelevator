@@ -23,6 +23,7 @@ import type { SelfContext } from '@/lib/self-context';
 import { operatorWorkspaceView, type WorkspaceState } from '@/lib/operator-workspace';
 import type { Branding } from '@/lib/branding';
 import { brandingToForm, validateBrandingForm, type BrandingForm } from '@/lib/branding-form';
+import { ORG_PLANS, tierForPlan, getSeatTier, type OrgPlan } from '@/lib/plans';
 
 interface ClientOrg {
   id: string;
@@ -367,42 +368,128 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
       ) : (
         <ul className="divide-y divide-slate-800 rounded-2xl bg-slate-800/40 border border-slate-700 overflow-hidden">
           {clients.map(c => (
-            <li key={c.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-              <div>
-                <div className="font-medium text-sm">{c.name}</div>
-                <div className="text-slate-400 text-xs mt-0.5">
-                  {c.slug} · {c.plan} plan
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="text-right text-xs text-slate-400">
-                  <div>{c._count?.users ?? 0} trainees</div>
-                  <div>{c._count?.sessions ?? 0} sessions</div>
-                </div>
-                {/* The per-client report — the artifact the operator shows this
-                    client. Scoped server-side by `canAccessOrgReport`. */}
-                <div className="flex items-center gap-2">
-                  <a
-                    href={withWindow(`/api/reports/sessions?clientOrgId=${encodeURIComponent(c.id)}`)}
-                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
-                    title={`Download ${c.name} sessions as CSV`}
-                  >
-                    CSV
-                  </a>
-                  <a
-                    href={withWindow(`/api/reports/sessions?clientOrgId=${encodeURIComponent(c.id)}&format=pdf`)}
-                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
-                    title={`Download ${c.name} sessions as PDF`}
-                  >
-                    PDF
-                  </a>
-                </div>
-              </div>
-            </li>
+            <ClientRow key={c.id} client={c} withWindow={withWindow} onChanged={loadClients} />
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+// ─── One client row ──────────────────────────────────────────────────────────
+
+/** A plan option in the seat-tier selector: the persisted `OrgPlan` value and
+ * the human seat-tier name it entitles trainees to (FREE → Chat, PRO → Voice,
+ * ENTERPRISE → Phone). Derived from `plans.ts` so the label never re-encodes the
+ * plan→tier mapping the server gate reads. */
+function seatOptionLabel(plan: OrgPlan): string {
+  return `${plan} · ${getSeatTier(tierForPlan(plan))?.name ?? plan} seat`;
+}
+
+/**
+ * A single client workspace: identity, its allocated seat tier, usage counts,
+ * a seat-tier allocation control, and the per-client report links.
+ *
+ * The seat-tier selector is the operator's allocation control — the "manage"
+ * verb the channel model needs on top of create/list. It PUTs the client's
+ * `plan` to `PUT /api/orgs/[id]`, authorised server-side by `canSetOrgPlan`: an
+ * operator admin may set the plan of a CLIENT they own, never their own org and
+ * never another operator's client. Re-tiering re-scopes every entitlement gate
+ * the client's trainees hit (chat → +voice → +phone). On success the parent
+ * reloads the list; a failed PUT leaves the (controlled) select on the persisted
+ * value and shows why. Wholesale metering/invoicing stays a later, founder-gated
+ * slice (Phase 4 item 2) — this only surfaces the allocation the API already
+ * permits.
+ */
+function ClientRow({
+  client,
+  withWindow,
+  onChanged,
+}: {
+  client: ClientOrg;
+  withWindow: (url: string) => string;
+  onChanged: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+
+  const tierName = getSeatTier(tierForPlan(client.plan))?.name ?? 'Chat';
+
+  const changePlan = async (plan: OrgPlan) => {
+    if (plan === client.plan || saving) return;
+    setSaving(true);
+    setPlanError(null);
+    try {
+      const res = await fetch(`/api/orgs/${encodeURIComponent(client.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setPlanError(data?.error ?? `Could not change the seat tier (HTTP ${res.status}).`);
+        return;
+      }
+      onChanged();
+    } catch {
+      setPlanError('Network error — the seat tier was not changed.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+      <div>
+        <div className="font-medium text-sm">{client.name}</div>
+        <div className="text-slate-400 text-xs mt-0.5">
+          {client.slug} · {tierName} seat
+        </div>
+        {planError ? <p className="text-red-400 text-xs mt-1">{planError}</p> : null}
+      </div>
+      <div className="flex items-center gap-4">
+        <label className="flex items-center gap-2">
+          <span className="sr-only">{`Seat tier for ${client.name}`}</span>
+          <select
+            value={client.plan}
+            disabled={saving}
+            onChange={e => {
+              void changePlan(e.target.value as OrgPlan);
+            }}
+            aria-label={`Seat tier for ${client.name}`}
+            className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200 text-xs disabled:opacity-60 transition-colors"
+          >
+            {ORG_PLANS.map(p => (
+              <option key={p} value={p}>
+                {seatOptionLabel(p)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="text-right text-xs text-slate-400">
+          <div>{client._count?.users ?? 0} trainees</div>
+          <div>{client._count?.sessions ?? 0} sessions</div>
+        </div>
+        {/* The per-client report — the artifact the operator shows this
+            client. Scoped server-side by `canAccessOrgReport`. */}
+        <div className="flex items-center gap-2">
+          <a
+            href={withWindow(`/api/reports/sessions?clientOrgId=${encodeURIComponent(client.id)}`)}
+            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+            title={`Download ${client.name} sessions as CSV`}
+          >
+            CSV
+          </a>
+          <a
+            href={withWindow(`/api/reports/sessions?clientOrgId=${encodeURIComponent(client.id)}&format=pdf`)}
+            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+            title={`Download ${client.name} sessions as PDF`}
+          >
+            PDF
+          </a>
+        </div>
+      </div>
+    </li>
   );
 }
 
