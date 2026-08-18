@@ -381,10 +381,18 @@ jobs:
           # is safe-to-embed by design, but it is still masked + kept off logs.
           sentry="$(gcloud secrets versions access latest --secret=XPELEVATOR_SENTRY_DSN --project="$proj" --quiet 2>/dev/null \
                 | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || sentry=""
+          # PostHog project key (#154 observability): sibling of the Sentry DSN —
+          # NOT a lockout-critical credential (absent/blank → the product-event
+          # sink no-ops), so it too is fetched-and-exported (no probe gate) and
+          # stays OUT of the fail-capable assertion below. A project ingest key is
+          # write-only + safe-to-embed, but is still masked + kept off logs.
+          posthog="$(gcloud secrets versions access latest --secret=XPELEVATOR_POSTHOG_KEY --project="$proj" --quiet 2>/dev/null \
+                | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || posthog=""
           [ -n "$db" ]   && echo "::add-mask::$db"
           [ -n "$groq" ] && echo "::add-mask::$groq"
           [ -n "$auth" ] && echo "::add-mask::$auth"
           [ -n "$sentry" ] && echo "::add-mask::$sentry"
+          [ -n "$posthog" ] && echo "::add-mask::$posthog"
           # --- Neon SELECT 1 (read-only) — export DATABASE_URL ONLY on PASS ---
           if [ -z "$db" ]; then
             echo "⚠️  XPELEVATOR_CONNECTION_STRING absent in SM — keeping GitHub-secret DATABASE_URL"
@@ -441,6 +449,17 @@ jobs:
           else
             echo "ℹ️  XPELEVATOR_SENTRY_DSN absent in SM — Sentry sink will no-op (non-fatal)"
           fi
+          # --- PostHog project key (#154): non-empty check only, export POSTHOG_KEY
+          #     so the build + Pages-secret step pick it up. No gate: absent/blank →
+          #     product-event sink no-ops, deploy unaffected. ---
+          posthog_pass=ABSENT
+          if [ -n "$posthog" ]; then
+            posthog_pass=PASS
+            echo "POSTHOG_KEY=$posthog" >> "$GITHUB_ENV"
+            echo "✅ SM XPELEVATOR_POSTHOG_KEY present (${#posthog} chars) → (POSTHOG_KEY ← GCP SM)"
+          else
+            echo "ℹ️  XPELEVATOR_POSTHOG_KEY absent in SM — PostHog sink will no-op (non-fatal)"
+          fi
           # --- job-summary evidence table (source actually used) ---
           src_db="GitHub secret (fallback)";   [ "$db_pass" = "PASS" ]   && src_db="GCP SM"
           src_groq="GitHub secret (fallback)"; [ "$groq_pass" = "PASS" ] && src_groq="GCP SM"
@@ -454,8 +473,9 @@ jobs:
             echo "| GROQ_API_KEY | Groq \`GET /v1/models\` | $groq_pass | $src_groq |"
             echo "| XPELEVATOR_AUTH_SECRET | structural (>=32 chars) | $auth_pass | $src_auth |"
             echo "| XPELEVATOR_SENTRY_DSN | structural (scheme+@), non-gating | $sentry_pass | $([ "$sentry_pass" = "PASS" ] && echo 'GCP SM' || echo '— (sink no-ops)') |"
+            echo "| XPELEVATOR_POSTHOG_KEY | non-empty, non-gating | $posthog_pass | $([ "$posthog_pass" = "PASS" ] && echo 'GCP SM' || echo '— (sink no-ops)') |"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "CUTOVER RESULT: DATABASE_URL=$db_pass ($src_db) GROQ=$groq_pass ($src_groq) AUTH_SECRET=$auth_pass ($src_auth) SENTRY_DSN=$sentry_pass"
+          echo "CUTOVER RESULT: DATABASE_URL=$db_pass ($src_db) GROQ=$groq_pass ($src_groq) AUTH_SECRET=$auth_pass ($src_auth) SENTRY_DSN=$sentry_pass POSTHOG_KEY=$posthog_pass"
           # Fail-capable (non-blocking) unless ALL THREE SM copies validated: keeps
           # proof-of-rejection honest — a stale/absent SM value yields a red step AND falls back.
           [ "$db_pass" = "PASS" ] && [ "$groq_pass" = "PASS" ] && [ "$auth_pass" = "PASS" ]
@@ -505,6 +525,14 @@ jobs:
             echo "✅ SENTRY_DSN set on Pages production (Sentry error sink live)"
           else
             echo "ℹ️  SENTRY_DSN unset — skipping (Sentry sink no-ops)"
+          fi
+          # POSTHOG_KEY (#154): set ONLY when resolved from SM (guarded) — an unset
+          # key leaves the product-event sink no-op'ing rather than writing an empty secret.
+          if [ -n "${POSTHOG_KEY:-}" ]; then
+            printf '%s' "$POSTHOG_KEY" | npx wrangler pages secret put POSTHOG_KEY --project-name="$CF_PROJECT"
+            echo "✅ POSTHOG_KEY set on Pages production (PostHog product-event sink live)"
+          else
+            echo "ℹ️  POSTHOG_KEY unset — skipping (PostHog sink no-ops)"
           fi
 
       - name: Set Pages PREVIEW-environment secrets (Pages REST API)

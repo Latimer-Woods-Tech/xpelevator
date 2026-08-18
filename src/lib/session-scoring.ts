@@ -12,6 +12,7 @@
 import { sql } from '@/lib/db';
 import { scoreSession, type ScoringCriterion } from '@/lib/ai';
 import { log, errorFields } from '@/lib/log';
+import { dispatchEvent } from '@/lib/posthog';
 import type { ScoreResult } from '@/types';
 
 /** A session needs at least this many messages to be worth scoring. */
@@ -135,11 +136,34 @@ export async function finalizeAndScoreSession(
   await insertScoresBatch(sessionId, scores);
 
   const scoringStatus = resolveScoringStatus(scorable, scores.length);
-  await sql`
+  const finalized = await sql`
     UPDATE simulation_sessions
     SET scoring_status = ${scoringStatus}
     WHERE id = ${sessionId}
+    RETURNING user_id as "userId", org_id as "orgId", type
   `;
+
+  // Best-effort PostHog product-event sink (#154, the sibling half of the Sentry
+  // error sink). Fired ONCE per finalized session from this single shared path so
+  // the chat + phone modalities can never diverge on which sessions emit the core
+  // "session_scored" signal — the same reason this module exists. No-ops without
+  // POSTHOG_KEY and never throws, so it cannot affect the scoring result. Keyed by
+  // the session's user when known (a real person timeline) and otherwise by the
+  // session id (org-less canary / self-registered run) so the event is never
+  // dropped for a missing distinct id. `scoring_status`, `modality`, and
+  // `scoringFailed` are the properties the manager-trust / kill-signal metrics
+  // read (scored vs engine-failed vs not-scorable, per modality).
+  const row = (finalized[0] ?? {}) as { userId?: string | null; orgId?: string | null; type?: string | null };
+  const distinctId = typeof row.userId === 'string' && row.userId ? row.userId : `session:${sessionId}`;
+  dispatchEvent('session_scored', distinctId, {
+    sessionId,
+    scoringStatus,
+    scoreCount: scores.length,
+    scorable,
+    scoringFailed: scorable && scores.length === 0,
+    modality: row.type ?? null,
+    orgId: row.orgId ?? null,
+  });
 
   return { scores, scoringStatus, scoringFailed: scorable && scores.length === 0 };
 }
