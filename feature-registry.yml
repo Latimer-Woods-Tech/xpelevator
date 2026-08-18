@@ -1,0 +1,153 @@
+# Feature Registry — XPElevator
+#
+# Platform Standards Dimension 11 (docs/standards/feature-registry.schema.yml in
+# the Factory repo). Read by the Factory build-entity-graph.mjs /
+# generate-platform-data.mjs pipeline (this repo is in its standaloneRepos fetch
+# list) to build platform.json, which powers the /platform/ live dashboard on
+# latwoodtech.com. `app` is the canonical alias from docs/registry/app-aliases.yml
+# (canonical: xpelevator), matching the schema's own selfprime example (canonical,
+# not the -sim service id). Control plane: xpelevator#16.
+#
+# Copy rule (org standard): never the word "AI" in any surface that can render to
+# users — this file's description/labels feed dashboard tooltips, so they use the
+# craft vocabulary (simulated customers, scoring engine, the simulator).
+
+app: xpelevator
+name: XPElevator
+domain: xpelevator.com
+stage: production
+cohesion: 51
+description: Virtual-customer training simulator — trainees run simulated customer conversations (chat, browser voice, phone) scored against weighted per-role criteria.
+
+roadmap:
+  - id: xp-scoring-restore
+    label: Restore the scoring engine (valid credential)
+    status: done
+    quarter: Q3-2026
+    description: Expired Groq key was nulling every score; fixed + verified end-to-end (non-null score on the live deploy).
+  - id: xp-lwt-migration
+    label: Redeploy into the LWT Cloudflare account + DNS cutover
+    status: done
+    quarter: Q3-2026
+    description: New Pages project xpelevator-sim; xpelevator.com CNAME flipped to the LWT build; live Neon DB migrated to head.
+  - id: xp-security-hardening
+    label: Close the security holes (auth, tenant isolation, headers)
+    status: done
+    quarter: Q3-2026
+    description: Authenticated /api/* reads, hidden-hint sanitization, orgId tenant isolation (cross-tenant IDOR closed), CSP/HSTS/nosniff/X-Frame on every response.
+  - id: xp-spine-rewrite
+    label: Design-spine rewrite around the simulator
+    status: done
+    quarter: Q3-2026
+    description: VISION/ARCHITECTURE/REQUIREMENTS rewritten off the dead journeys product to the PLATFORM_STANDARDS §16 shape.
+  - id: xp-observability
+    label: Observability — error + product-event sinks
+    status: done
+    quarter: Q3-2026
+    description: Worker-safe Sentry error sink and PostHog session_scored product-event sink, both fail-safe (no-op without their key).
+  - id: xp-conformance
+    label: Conformance — CI quality gates + registry entries (Dimension 11)
+    status: active
+    quarter: Q3-2026
+    description: Deterministic §3-4 CI stack (typecheck/lint/audit/unit/ui/coverage/build/smoke/migrations) plus this feature-registry entry; service-registry & feature-registry entries land the last piece.
+  - id: xp-operator-billing
+    label: Wholesale seat billing (channel-first operator model)
+    status: active
+    quarter: Q4-2026
+    description: Operators buy seats at wholesale via the shared Stripe platform account and set their own retail; metering + rev-share via Stripe Connect. Test-mode first; live-mode is a founder gate.
+  - id: xp-llm-chain
+    label: Route model calls onto the shared @latimer-woods-tech/llm chain
+    status: queued
+    quarter: Q4-2026
+    description: Move the direct Groq path onto the portfolio LLM chain (per-app gateway routing) so credential rotation and budget caps are centralized.
+  - id: xp-voice-upgrade
+    label: Voice realism upgrade (Deepgram STT + ElevenLabs TTS)
+    status: queued
+    quarter: Q4-2026
+    description: Upgrade the voice path behind the existing provider abstraction; keep the swap cheap for a later Bandwidth account.
+  - id: xp-cohort-analytics
+    label: Team / cohort analytics + adaptive difficulty
+    status: design
+    quarter: Q1-2027
+    description: Manager-facing cohort reporting and adaptive scenario difficulty; parked until paying tenants exist.
+
+features:
+  - id: chat-sim
+    label: Chat simulated-customer conversations (SSE)
+    status: live
+    tier: core
+  - id: voice-sim
+    label: In-browser voice practice (push-to-talk + hands-free)
+    status: live
+    tier: core
+  - id: phone-sim
+    label: Real phone-call practice via Telnyx
+    status: live
+    tier: core
+  - id: scoring-engine
+    label: Weighted /10 performance scoring against per-role criteria
+    status: live
+    tier: core
+  - id: scenario-authoring
+    label: Admin scenario / persona / criteria authoring
+    status: live
+    tier: core
+  - id: multi-tenant-orgs
+    label: Multi-tenant orgs (FREE / ENTERPRISE plan tiers)
+    status: live
+    tier: core
+  - id: operator-workspace
+    label: Operator workspace — client-org hierarchy + white-label branding
+    status: live
+    tier: growth
+  - id: scenario-packs
+    label: Starter scenario-library packs (import / upgrade)
+    status: live
+    tier: growth
+  - id: seat-plans
+    label: Seat-plan catalog + public /api/plans + channel-first /pricing
+    status: live
+    tier: growth
+  - id: manager-reporting
+    label: Org-scoped CSV session reporting + spend / budget reports
+    status: live
+    tier: growth
+  - id: read-auth
+    label: Authenticated /api/* reads + hidden-hint sanitization
+    status: live
+    tier: compliance
+  - id: tenant-isolation
+    label: orgId tenant isolation (cross-tenant IDOR closed)
+    status: live
+    tier: compliance
+  - id: security-headers
+    label: CSP / HSTS / nosniff / X-Frame on every response
+    status: live
+    tier: compliance
+  - id: rate-limiting
+    label: Public-route rate limiting (429 + Retry-After)
+    status: live
+    tier: compliance
+  - id: dsr-export
+    label: Data-subject export (/me/export) + audit trail
+    status: live
+    tier: compliance
+  - id: sentry
+    label: Worker-safe Sentry error sink
+    status: live
+    tier: infra
+  - id: posthog
+    label: Worker-safe PostHog product-event sink (session_scored)
+    status: live
+    tier: infra
+  - id: uptime-monitor
+    label: Health + credential + scoring-canary uptime monitor
+    status: live
+    tier: infra
+  - id: pdf-export
+    label: PDF report export
+    status: in-progress
+    tier: growth
+
+packages:
+  - seo
