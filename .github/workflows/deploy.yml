@@ -247,9 +247,13 @@ jobs:
       # the OpenNext build + the "Set Pages project secrets" step. A stale / absent /
       # failing SM copy leaves these GitHub-secret values in place (no-lockout) — so a
       # stale SM value can never reach the production Pages secret and break the live
-      # site. AUTH_SECRET stays GitHub-only by design: its SM copy is a fresh value that
-      # would rotate every live NextAuth session — cut over in its own slice. See #16
-      # (2026-08-17 founder-cleared secrets note; probe green on PR #249 / run 32043864963).
+      # site. AUTH_SECRET is now ALSO cut over to GCP SM (XPELEVATOR_AUTH_SECRET, founder-
+      # staged 2026-08-17): unlike DB/GROQ it has no external service to authenticate
+      # against, so the resolve step validates it structurally (non-empty, >=32 chars) and,
+      # ONLY on PASS, exports it so SM wins. Its SM value is a fresh 64-hex — the first
+      # deploy after this cutover rotates every live NextAuth session ONCE (founder-
+      # accepted, near-zero active users); it is stable thereafter. See #16 (2026-08-17
+      # founder-cleared secrets note; DB/GROQ probe green on PR #249 / run 32043864963).
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
@@ -346,27 +350,34 @@ jobs:
         # site (the org warns these connection-string copies are frequently stale).
         #   XPELEVATOR_CONNECTION_STRING → Neon `SELECT 1`          → exports DATABASE_URL
         #   GROQ_API_KEY                 → Groq `GET /v1/models` 200 → exports GROQ_API_KEY
+        #   XPELEVATOR_AUTH_SECRET       → structural check (>=32)  → exports AUTH_SECRET
         # ONLY a PASSing probe writes the SM value to $GITHUB_ENV (SM wins, overriding the
         # job-level GitHub-secret default for the build + "Set Pages project secrets"
         # steps). An absent / stale / failing SM copy writes nothing, leaving the
         # GitHub-secret value in place (no-lockout fallback). continue-on-error so a
         # fallback path never blocks the deploy; the final assertion stays fail-capable
         # (red step on any non-PASS) so proof-of-rejection is a real failing probe, not a
-        # rubber stamp. AUTH_SECRET is deliberately NOT cut over here — its SM copy is a
-        # fresh value that rotates live NextAuth sessions (its own slice).
+        # rubber stamp. AUTH_SECRET is ALSO resolved here now (XPELEVATOR_AUTH_SECRET):
+        # it has no external service to authenticate against, so it is validated
+        # structurally (non-empty, >=32 chars) before it is allowed to win. Its SM value
+        # is a fresh 64-hex — the first deploy after this cutover rotates every live
+        # NextAuth session ONCE (founder-accepted, near-zero active users), stable after.
         continue-on-error: true
         run: |
           set -uo pipefail
           proj="factory-495015"
-          db_pass=FAIL; groq_pass=FAIL
+          db_pass=FAIL; groq_pass=FAIL; auth_pass=FAIL
           command -v psql >/dev/null 2>&1 || sudo apt-get install -y -qq postgresql-client >/dev/null 2>&1 || true
           # --- fetch into LOCAL vars only; strip UTF-8 BOM + trailing WS; mask ---
           db="$(gcloud secrets versions access latest --secret=XPELEVATOR_CONNECTION_STRING --project="$proj" --quiet 2>/dev/null \
                 | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r' | sed -E 's/[[:space:]]+$//')" || db=""
           groq="$(gcloud secrets versions access latest --secret=GROQ_API_KEY --project="$proj" --quiet 2>/dev/null \
                 | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || groq=""
+          auth="$(gcloud secrets versions access latest --secret=XPELEVATOR_AUTH_SECRET --project="$proj" --quiet 2>/dev/null \
+                | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || auth=""
           [ -n "$db" ]   && echo "::add-mask::$db"
           [ -n "$groq" ] && echo "::add-mask::$groq"
+          [ -n "$auth" ] && echo "::add-mask::$auth"
           # --- Neon SELECT 1 (read-only) — export DATABASE_URL ONLY on PASS ---
           if [ -z "$db" ]; then
             echo "⚠️  XPELEVATOR_CONNECTION_STRING absent in SM — keeping GitHub-secret DATABASE_URL"
@@ -396,21 +407,36 @@ jobs:
               echo "❌ Groq probe returned HTTP $code (expected 200) — keeping GitHub-secret GROQ_API_KEY"
             fi
           fi
+          # --- AUTH_SECRET structural check (non-empty, >=32 chars) — export ONLY on PASS ---
+          # No external service to authenticate against, so validate shape. The SM value is
+          # a fresh 64-hex; exporting it rotates every live NextAuth session ONCE on the
+          # first deploy after cutover (founder-accepted, near-zero active users).
+          if [ -z "$auth" ]; then
+            echo "⚠️  XPELEVATOR_AUTH_SECRET absent in SM — keeping GitHub-secret AUTH_SECRET"
+          elif [ "${#auth}" -lt 32 ]; then
+            echo "❌ SM XPELEVATOR_AUTH_SECRET too short (${#auth}<32) — keeping GitHub-secret AUTH_SECRET"
+          else
+            auth_pass=PASS
+            echo "AUTH_SECRET=$auth" >> "$GITHUB_ENV"
+            echo "✅ SM XPELEVATOR_AUTH_SECRET valid (${#auth} chars) → (AUTH_SECRET ← GCP SM); rotates live sessions once"
+          fi
           # --- job-summary evidence table (source actually used) ---
           src_db="GitHub secret (fallback)";   [ "$db_pass" = "PASS" ]   && src_db="GCP SM"
           src_groq="GitHub secret (fallback)"; [ "$groq_pass" = "PASS" ] && src_groq="GCP SM"
+          src_auth="GitHub secret (fallback)"; [ "$auth_pass" = "PASS" ] && src_auth="GCP SM"
           {
             echo "### SM credential cutover — Phase-1 (validated SM-first, GitHub-secret fallback)"
             echo ""
-            echo "| secret (GCP SM) | read-only probe | result | source used |"
+            echo "| secret (GCP SM) | validation | result | source used |"
             echo "|---|---|---|---|"
             echo "| XPELEVATOR_CONNECTION_STRING | Neon \`SELECT 1\` | $db_pass | $src_db |"
             echo "| GROQ_API_KEY | Groq \`GET /v1/models\` | $groq_pass | $src_groq |"
+            echo "| XPELEVATOR_AUTH_SECRET | structural (>=32 chars) | $auth_pass | $src_auth |"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "CUTOVER RESULT: DATABASE_URL=$db_pass ($src_db) GROQ=$groq_pass ($src_groq)"
-          # Fail-capable (non-blocking) unless BOTH SM copies validated: keeps
-          # proof-of-rejection honest — a stale SM value yields a red step AND falls back.
-          [ "$db_pass" = "PASS" ] && [ "$groq_pass" = "PASS" ]
+          echo "CUTOVER RESULT: DATABASE_URL=$db_pass ($src_db) GROQ=$groq_pass ($src_groq) AUTH_SECRET=$auth_pass ($src_auth)"
+          # Fail-capable (non-blocking) unless ALL THREE SM copies validated: keeps
+          # proof-of-rejection honest — a stale/absent SM value yields a red step AND falls back.
+          [ "$db_pass" = "PASS" ] && [ "$groq_pass" = "PASS" ] && [ "$auth_pass" = "PASS" ]
 
       - name: Stamp build info (commit SHA + timestamp) into src/build-info.ts
         # G72: overwrite the committed "dev" default with this deploy's real
