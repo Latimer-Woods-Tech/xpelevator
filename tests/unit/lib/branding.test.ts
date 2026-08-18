@@ -8,6 +8,7 @@ import {
   canManageOrgBranding,
   toPublicBranding,
   hasBranding,
+  resolveInheritedBranding,
   type Branding,
 } from '@/lib/branding';
 
@@ -250,5 +251,67 @@ describe('hasBranding', () => {
     expect(hasBranding({ ...none, logoUrl: 'https://x.example/l.png' })).toBe(true);
     expect(hasBranding({ ...none, primaryColor: '#000000' })).toBe(true);
     expect(hasBranding({ ...none, accentColor: '#ffffff' })).toBe(true);
+  });
+});
+
+describe('resolveInheritedBranding', () => {
+  const none: Branding = { displayName: null, logoUrl: null, primaryColor: null, accentColor: null };
+  const operator: Branding = {
+    displayName: 'Acme Training',
+    logoUrl: 'https://cdn.acme.example/logo.svg',
+    primaryColor: '#112233',
+    accentColor: '#445566',
+  };
+
+  it('returns own branding unchanged when there is no parent operator', () => {
+    const own: Branding = { ...none, displayName: 'Client Co' };
+    expect(resolveInheritedBranding(own, null)).toEqual({
+      displayName: 'Client Co',
+      logoUrl: null,
+      primaryColor: null,
+      accentColor: null,
+    });
+  });
+
+  it('inherits every parent field a CLIENT left unset (full white-label)', () => {
+    // The core channel-model case: a client that set NO brand of its own wears
+    // its operator's brand end-to-end.
+    expect(resolveInheritedBranding(none, operator)).toEqual(operator);
+  });
+
+  it('does NOT override a field the client set itself (own value wins)', () => {
+    // Proof-of-rejection: inheritance must never clobber an explicit client value.
+    const own: Branding = { ...none, displayName: 'Client Co', primaryColor: '#00ff00' };
+    expect(resolveInheritedBranding(own, operator)).toEqual({
+      displayName: 'Client Co', // own wins
+      logoUrl: 'https://cdn.acme.example/logo.svg', // inherited
+      primaryColor: '#00ff00', // own wins
+      accentColor: '#445566', // inherited
+    });
+  });
+
+  it('inheritance is per-field, not all-or-nothing', () => {
+    const own: Branding = { ...none, logoUrl: 'https://cdn.client.example/l.png' };
+    const out = resolveInheritedBranding(own, operator);
+    expect(out.logoUrl).toBe('https://cdn.client.example/l.png'); // own
+    expect(out.displayName).toBe('Acme Training'); // inherited
+  });
+
+  it('stays null where neither client nor operator set a field', () => {
+    const parentPartial: Branding = { ...none, displayName: 'Acme Training' };
+    expect(resolveInheritedBranding(none, parentPartial)).toEqual({
+      displayName: 'Acme Training',
+      logoUrl: null,
+      primaryColor: null,
+      accentColor: null,
+    });
+  });
+
+  it('does not mutate its inputs', () => {
+    const own: Branding = { ...none };
+    const parent: Branding = { ...operator };
+    resolveInheritedBranding(own, parent);
+    expect(own).toEqual(none);
+    expect(parent).toEqual(operator);
   });
 });

@@ -31,10 +31,16 @@ function req(slug = 'acme'): Request {
 function brandingRow(over: Record<string, unknown> = {}) {
   return {
     slug: 'acme',
+    parentOrgId: null,
     brandDisplayName: 'Acme Training',
     brandLogoUrl: 'https://cdn.acme.example/logo.svg',
     brandPrimaryColor: '#112233',
     brandAccentColor: '#445566',
+    // Parent OPERATOR brand columns from the self-join (all null when top-level).
+    parentBrandDisplayName: null,
+    parentBrandLogoUrl: null,
+    parentBrandPrimaryColor: null,
+    parentBrandAccentColor: null,
     ...over,
   };
 }
@@ -96,6 +102,58 @@ describe('GET /api/branding/[slug]', () => {
       primaryColor: null,
       accentColor: null,
     });
+  });
+
+  it('inherits the parent OPERATOR brand for a CLIENT that left fields unset (R-050 white-label)', async () => {
+    // A client org with NO brand of its own, owned by operator 'op-1' whose
+    // brand IS set: the trainee must see the operator's brand, not the platform
+    // default. The response slug stays the CLIENT's own slug.
+    sqlMock.mockResolvedValueOnce([
+      brandingRow({
+        slug: 'client-co',
+        parentOrgId: 'op-1',
+        brandDisplayName: null,
+        brandLogoUrl: null,
+        brandPrimaryColor: null,
+        brandAccentColor: null,
+        parentBrandDisplayName: 'Acme Training',
+        parentBrandLogoUrl: 'https://cdn.acme.example/logo.svg',
+        parentBrandPrimaryColor: '#112233',
+        parentBrandAccentColor: '#445566',
+      }),
+    ]);
+    const res = await GET(req('client-co'), params('client-co'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({
+      slug: 'client-co',
+      displayName: 'Acme Training',
+      logoUrl: 'https://cdn.acme.example/logo.svg',
+      primaryColor: '#112233',
+      accentColor: '#445566',
+    });
+  });
+
+  it('a CLIENT overriding one field keeps its own value and inherits the rest', async () => {
+    sqlMock.mockResolvedValueOnce([
+      brandingRow({
+        slug: 'client-co',
+        parentOrgId: 'op-1',
+        brandDisplayName: 'Client Co', // own override
+        brandLogoUrl: null,
+        brandPrimaryColor: null,
+        brandAccentColor: null,
+        parentBrandDisplayName: 'Acme Training',
+        parentBrandLogoUrl: 'https://cdn.acme.example/logo.svg',
+        parentBrandPrimaryColor: '#112233',
+        parentBrandAccentColor: '#445566',
+      }),
+    ]);
+    const res = await GET(req('client-co'), params('client-co'));
+    const body = await res.json();
+    expect(body.displayName).toBe('Client Co'); // own wins
+    expect(body.logoUrl).toBe('https://cdn.acme.example/logo.svg'); // inherited
+    expect(body.primaryColor).toBe('#112233'); // inherited
   });
 
   it('returns 404 for an unknown slug (no row)', async () => {
