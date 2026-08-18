@@ -23,6 +23,7 @@ import type { SelfContext } from '@/lib/self-context';
 import { operatorWorkspaceView, type WorkspaceState } from '@/lib/operator-workspace';
 import type { Branding } from '@/lib/branding';
 import { brandingToForm, validateBrandingForm, type BrandingForm } from '@/lib/branding-form';
+import { ORG_PLANS, tierForPlan, getSeatTier, type OrgPlan } from '@/lib/plans';
 
 interface ClientOrg {
   id: string;
@@ -367,42 +368,291 @@ function OperatorClients({ orgId, isNew }: { orgId: string; isNew: boolean }) {
       ) : (
         <ul className="divide-y divide-slate-800 rounded-2xl bg-slate-800/40 border border-slate-700 overflow-hidden">
           {clients.map(c => (
-            <li key={c.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-              <div>
-                <div className="font-medium text-sm">{c.name}</div>
-                <div className="text-slate-400 text-xs mt-0.5">
-                  {c.slug} · {c.plan} plan
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="text-right text-xs text-slate-400">
-                  <div>{c._count?.users ?? 0} trainees</div>
-                  <div>{c._count?.sessions ?? 0} sessions</div>
-                </div>
-                {/* The per-client report — the artifact the operator shows this
-                    client. Scoped server-side by `canAccessOrgReport`. */}
-                <div className="flex items-center gap-2">
-                  <a
-                    href={withWindow(`/api/reports/sessions?clientOrgId=${encodeURIComponent(c.id)}`)}
-                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
-                    title={`Download ${c.name} sessions as CSV`}
-                  >
-                    CSV
-                  </a>
-                  <a
-                    href={withWindow(`/api/reports/sessions?clientOrgId=${encodeURIComponent(c.id)}&format=pdf`)}
-                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
-                    title={`Download ${c.name} sessions as PDF`}
-                  >
-                    PDF
-                  </a>
-                </div>
-              </div>
-            </li>
+            <ClientRow key={c.id} client={c} withWindow={withWindow} onChanged={loadClients} />
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+// ─── One client row ──────────────────────────────────────────────────────────
+
+/** A plan option in the seat-tier selector: the persisted `OrgPlan` value and
+ * the human seat-tier name it entitles trainees to (FREE → Chat, PRO → Voice,
+ * ENTERPRISE → Phone). Derived from `plans.ts` so the label never re-encodes the
+ * plan→tier mapping the server gate reads. */
+function seatOptionLabel(plan: OrgPlan): string {
+  return `${plan} · ${getSeatTier(tierForPlan(plan))?.name ?? plan} seat`;
+}
+
+/**
+ * A single client workspace: identity, its allocated seat tier, usage counts,
+ * a seat-tier allocation control, and the per-client report links.
+ *
+ * The seat-tier selector is the operator's allocation control — the "manage"
+ * verb the channel model needs on top of create/list. It PUTs the client's
+ * `plan` to `PUT /api/orgs/[id]`, authorised server-side by `canSetOrgPlan`: an
+ * operator admin may set the plan of a CLIENT they own, never their own org and
+ * never another operator's client. Re-tiering re-scopes every entitlement gate
+ * the client's trainees hit (chat → +voice → +phone). On success the parent
+ * reloads the list; a failed PUT leaves the (controlled) select on the persisted
+ * value and shows why. Wholesale metering/invoicing stays a later, founder-gated
+ * slice (Phase 4 item 2) — this only surfaces the allocation the API already
+ * permits.
+ */
+function ClientRow({
+  client,
+  withWindow,
+  onChanged,
+}: {
+  client: ClientOrg;
+  withWindow: (url: string) => string;
+  onChanged: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  // Rename: an inline editor toggled open from the row. `draftName` seeds from
+  // the persisted name; a failed PUT leaves the editor open with the reason.
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState(client.name);
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  // Delete: a two-step confirm (the action is irreversible and the server
+  // refuses it with 409 once the client has recorded sessions).
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const tierName = getSeatTier(tierForPlan(client.plan))?.name ?? 'Chat';
+
+  const changePlan = async (plan: OrgPlan) => {
+    if (plan === client.plan || saving) return;
+    setSaving(true);
+    setPlanError(null);
+    try {
+      const res = await fetch(`/api/orgs/${encodeURIComponent(client.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setPlanError(data?.error ?? `Could not change the seat tier (HTTP ${res.status}).`);
+        return;
+      }
+      onChanged();
+    } catch {
+      setPlanError('Network error — the seat tier was not changed.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Rename the client via `PUT /api/orgs/[id] { name }` — authorised server-side
+  // by `canAccessOrg` (an operator admin may rename a CLIENT they own). A no-op
+  // (blank or unchanged) just closes the editor; on success the parent reloads.
+  const saveName = async () => {
+    const trimmed = draftName.trim();
+    if (renameSaving) return;
+    if (!trimmed || trimmed === client.name) {
+      setRenaming(false);
+      setRenameError(null);
+      setDraftName(client.name);
+      return;
+    }
+    setRenameSaving(true);
+    setRenameError(null);
+    try {
+      const res = await fetch(`/api/orgs/${encodeURIComponent(client.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setRenameError(data?.error ?? `Could not rename the client (HTTP ${res.status}).`);
+        return;
+      }
+      setRenaming(false);
+      onChanged();
+    } catch {
+      setRenameError('Network error — the client was not renamed.');
+    } finally {
+      setRenameSaving(false);
+    }
+  };
+
+  // Delete the client via `DELETE /api/orgs/[id]` — authorised server-side by
+  // `canDeleteOrg` (only the parent operator or a platform admin). The route
+  // refuses with 409 while the client still has recorded sessions, so the
+  // returned error is surfaced verbatim and the row stays. 204 → the row is
+  // gone on the parent's reload.
+  const deleteClient = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/orgs/${encodeURIComponent(client.id)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setDeleteError(data?.error ?? `Could not delete the client (HTTP ${res.status}).`);
+        setConfirmingDelete(false);
+        return;
+      }
+      onChanged();
+    } catch {
+      setDeleteError('Network error — the client was not deleted.');
+      setConfirmingDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+      <div>
+        {renaming ? (
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              void saveName();
+            }}
+            className="flex items-center gap-2"
+          >
+            <input
+              type="text"
+              value={draftName}
+              autoFocus
+              disabled={renameSaving}
+              onChange={e => setDraftName(e.target.value)}
+              aria-label={`New name for ${client.name}`}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm text-slate-200 disabled:opacity-60 transition-colors"
+            />
+            <button
+              type="submit"
+              disabled={renameSaving}
+              className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-xs font-medium transition-colors"
+            >
+              {renameSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              disabled={renameSaving}
+              onClick={() => {
+                setRenaming(false);
+                setRenameError(null);
+                setDraftName(client.name);
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 text-xs transition-colors"
+            >
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-sm">{client.name}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setDraftName(client.name);
+                setRenameError(null);
+                setRenaming(true);
+              }}
+              aria-label={`Rename ${client.name}`}
+              className="text-xs text-slate-400 hover:text-blue-300 transition-colors"
+            >
+              Rename
+            </button>
+          </div>
+        )}
+        <div className="text-slate-400 text-xs mt-0.5">
+          {client.slug} · {tierName} seat
+        </div>
+        {planError ? <p className="text-red-400 text-xs mt-1">{planError}</p> : null}
+        {renameError ? <p className="text-red-400 text-xs mt-1">{renameError}</p> : null}
+        {deleteError ? <p className="text-red-400 text-xs mt-1">{deleteError}</p> : null}
+      </div>
+      <div className="flex items-center gap-4">
+        <label className="flex items-center gap-2">
+          <span className="sr-only">{`Seat tier for ${client.name}`}</span>
+          <select
+            value={client.plan}
+            disabled={saving}
+            onChange={e => {
+              void changePlan(e.target.value as OrgPlan);
+            }}
+            aria-label={`Seat tier for ${client.name}`}
+            className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200 text-xs disabled:opacity-60 transition-colors"
+          >
+            {ORG_PLANS.map(p => (
+              <option key={p} value={p}>
+                {seatOptionLabel(p)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="text-right text-xs text-slate-400">
+          <div>{client._count?.users ?? 0} trainees</div>
+          <div>{client._count?.sessions ?? 0} sessions</div>
+        </div>
+        {/* The per-client report — the artifact the operator shows this
+            client. Scoped server-side by `canAccessOrgReport`. */}
+        <div className="flex items-center gap-2">
+          <a
+            href={withWindow(`/api/reports/sessions?clientOrgId=${encodeURIComponent(client.id)}`)}
+            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+            title={`Download ${client.name} sessions as CSV`}
+          >
+            CSV
+          </a>
+          <a
+            href={withWindow(`/api/reports/sessions?clientOrgId=${encodeURIComponent(client.id)}&format=pdf`)}
+            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition-colors"
+            title={`Download ${client.name} sessions as PDF`}
+          >
+            PDF
+          </a>
+        </div>
+        {/* Delete — the destructive half of the "manage" verb. Two-step confirm;
+            the server refuses (409) while the client still has sessions. */}
+        {confirmingDelete ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => void deleteClient()}
+              aria-label={`Confirm delete ${client.name}`}
+              className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-60 rounded-lg text-xs font-medium transition-colors"
+            >
+              {deleting ? 'Deleting…' : 'Confirm'}
+            </button>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => setConfirmingDelete(false)}
+              className="px-3 py-1.5 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 rounded-lg text-xs transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteError(null);
+              setConfirmingDelete(true);
+            }}
+            aria-label={`Delete ${client.name}`}
+            className="px-3 py-1.5 border border-red-900/60 text-red-300 hover:bg-red-950/40 rounded-lg text-xs font-medium transition-colors"
+          >
+            Delete
+          </button>
+        )}
+      </div>
+    </li>
   );
 }
 
