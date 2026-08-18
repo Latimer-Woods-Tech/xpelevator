@@ -180,6 +180,107 @@ describe('Operator workspace — operator view', () => {
     expect(screen.getByLabelText('Seat tier for Northwind')).toHaveValue('FREE');
   });
 
+  it('renames a client (PUT name) and reloads the list', async () => {
+    let name = 'Northwind';
+    const fetchSpy = vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/me') return Promise.resolve(jsonResponse(OPERATOR_ME));
+      if (url === '/api/orgs/c1' && init?.method === 'PUT') {
+        name = JSON.parse(String(init.body)).name;
+        return Promise.resolve(jsonResponse({ id: 'c1', name }));
+      }
+      if (url.startsWith('/api/orgs/op-1/clients'))
+        return Promise.resolve(
+          jsonResponse([
+            { id: 'c1', name, slug: 'northwind', plan: 'FREE', kind: 'CLIENT', parentOrgId: 'op-1', createdAt: '', _count: { users: 3, sessions: 7 } },
+          ])
+        );
+      return Promise.resolve(jsonResponse([]));
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    await renderPage();
+    await waitFor(() => expect(screen.getByText('Northwind')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename Northwind' }));
+    fireEvent.change(screen.getByLabelText('New name for Northwind'), {
+      target: { value: 'Northwind Retail' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const putCall = await waitFor(() => {
+      const call = fetchSpy.mock.calls.find(
+        ([u, init]) => u === '/api/orgs/c1' && (init as RequestInit)?.method === 'PUT'
+      );
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect(JSON.parse((putCall[1] as RequestInit).body as string)).toEqual({ name: 'Northwind Retail' });
+    await waitFor(() => expect(screen.getByText('Northwind Retail')).toBeInTheDocument());
+  });
+
+  it('deletes a client after confirm and the row disappears on reload', async () => {
+    let deleted = false;
+    const fetchSpy = vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/me') return Promise.resolve(jsonResponse(OPERATOR_ME));
+      if (url === '/api/orgs/c1' && init?.method === 'DELETE') {
+        deleted = true;
+        return Promise.resolve({ ok: true, status: 204, json: async () => null } as Response);
+      }
+      if (url.startsWith('/api/orgs/op-1/clients'))
+        return Promise.resolve(
+          jsonResponse(
+            deleted
+              ? []
+              : [{ id: 'c1', name: 'Northwind', slug: 'northwind', plan: 'FREE', kind: 'CLIENT', parentOrgId: 'op-1', createdAt: '', _count: { users: 0, sessions: 0 } }]
+          )
+        );
+      return Promise.resolve(jsonResponse([]));
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    await renderPage();
+    await waitFor(() => expect(screen.getByText('Northwind')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Northwind' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm delete Northwind' }));
+
+    await waitFor(() => {
+      const call = fetchSpy.mock.calls.find(
+        ([u, init]) => u === '/api/orgs/c1' && (init as RequestInit)?.method === 'DELETE'
+      );
+      expect(call).toBeTruthy();
+    });
+    await waitFor(() => expect(screen.getByText(/No client workspaces yet/)).toBeInTheDocument());
+  });
+
+  it('surfaces the 409 error when deleting a client that has sessions and keeps the row', async () => {
+    const fetchSpy = vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/me') return Promise.resolve(jsonResponse(OPERATOR_ME));
+      if (url === '/api/orgs/c1' && init?.method === 'DELETE')
+        return Promise.resolve(jsonResponse({ error: 'Cannot delete: org has 7 session(s)' }, 409));
+      if (url.startsWith('/api/orgs/op-1/clients'))
+        return Promise.resolve(
+          jsonResponse([
+            { id: 'c1', name: 'Northwind', slug: 'northwind', plan: 'FREE', kind: 'CLIENT', parentOrgId: 'op-1', createdAt: '', _count: { users: 3, sessions: 7 } },
+          ])
+        );
+      return Promise.resolve(jsonResponse([]));
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    await renderPage();
+    await waitFor(() => expect(screen.getByText('Northwind')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Northwind' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm delete Northwind' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('Cannot delete: org has 7 session(s)')).toBeInTheDocument()
+    );
+    // The row is still present after the refused delete.
+    expect(screen.getByText('Northwind')).toBeInTheDocument();
+  });
+
   it('surfaces the API error message on a failed create', async () => {
     const fetchSpy = vi.fn((url: string, init?: RequestInit) => {
       if (url === '/api/me') return Promise.resolve(jsonResponse(OPERATOR_ME));
