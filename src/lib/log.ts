@@ -8,10 +8,15 @@
  *
  * This is the observability foundation (#154, Phase 3): a request id is minted /
  * propagated at the middleware edge and threaded through structured logs so a
- * single request can be traced across handlers. The Sentry + PostHog sinks
- * (which need provisioned DSNs) layer on top of this later — they are the
- * secret-dependent half of #154 and are intentionally NOT in this slice.
+ * single request can be traced across handlers. The Sentry error sink now layers
+ * on top of this: every `log('error', …)` also fires a best-effort Sentry capture
+ * (`@/lib/sentry`) so a server error reaches Sentry with its request id + fields,
+ * while this structured console line stays the durable, drain-indexed record. The
+ * sink no-ops without `SENTRY_DSN`, so nothing changes in dev / tests / a DSN-less
+ * deploy. (The sibling PostHog product-event sink remains a separate slice.)
  */
+
+import { dispatchCapture } from '@/lib/sentry';
 
 /** Canonical per-request correlation header, propagated by the middleware. */
 export const REQUEST_ID_HEADER = 'x-request-id';
@@ -31,6 +36,16 @@ export function log(level: LogLevel, message: string, fields: LogFields = {}): v
   const line = JSON.stringify({ level, msg: message, ...fields });
   if (level === 'error') {
     console.error(line);
+    // Best-effort Sentry sink (#154). No-ops without SENTRY_DSN; never throws.
+    // We forward the correlation id + path as indexed tags and the full field
+    // bag as searchable `extra`; `errorName` (set by `errorFields()`) becomes
+    // the exception class.
+    const requestId =
+      typeof fields.requestId === 'string' ? fields.requestId : undefined;
+    const path = typeof fields.path === 'string' ? fields.path : undefined;
+    const errorName =
+      typeof fields.errorName === 'string' ? fields.errorName : undefined;
+    dispatchCapture(message, { requestId, path, extra: fields }, errorName);
   } else if (level === 'warn') {
     console.warn(line);
   } else {

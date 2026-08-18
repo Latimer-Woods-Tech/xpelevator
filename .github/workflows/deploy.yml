@@ -375,9 +375,16 @@ jobs:
                 | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || groq=""
           auth="$(gcloud secrets versions access latest --secret=XPELEVATOR_AUTH_SECRET --project="$proj" --quiet 2>/dev/null \
                 | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || auth=""
+          # Sentry DSN (#154 observability): NOT a lockout-critical credential — an
+          # absent/blank DSN makes the sink no-op, so this is fetched-and-exported
+          # (no probe gate) and stays OUT of the fail-capable assertion below. A DSN
+          # is safe-to-embed by design, but it is still masked + kept off logs.
+          sentry="$(gcloud secrets versions access latest --secret=XPELEVATOR_SENTRY_DSN --project="$proj" --quiet 2>/dev/null \
+                | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || sentry=""
           [ -n "$db" ]   && echo "::add-mask::$db"
           [ -n "$groq" ] && echo "::add-mask::$groq"
           [ -n "$auth" ] && echo "::add-mask::$auth"
+          [ -n "$sentry" ] && echo "::add-mask::$sentry"
           # --- Neon SELECT 1 (read-only) — export DATABASE_URL ONLY on PASS ---
           if [ -z "$db" ]; then
             echo "⚠️  XPELEVATOR_CONNECTION_STRING absent in SM — keeping GitHub-secret DATABASE_URL"
@@ -420,6 +427,20 @@ jobs:
             echo "AUTH_SECRET=$auth" >> "$GITHUB_ENV"
             echo "✅ SM XPELEVATOR_AUTH_SECRET valid (${#auth} chars) → (AUTH_SECRET ← GCP SM); rotates live sessions once"
           fi
+          # --- Sentry DSN (#154): structural sanity only (contains scheme + '@'),
+          #     export SENTRY_DSN so the build + Pages-secret step pick it up. No
+          #     gate: absent/blank → sink no-ops, deploy unaffected. ---
+          sentry_pass=ABSENT
+          if [ -n "$sentry" ] && printf '%s' "$sentry" | grep -qE '^https?://[^@]+@'; then
+            sentry_pass=PASS
+            echo "SENTRY_DSN=$sentry" >> "$GITHUB_ENV"
+            echo "✅ SM XPELEVATOR_SENTRY_DSN present (${#sentry} chars) → (SENTRY_DSN ← GCP SM)"
+          elif [ -n "$sentry" ]; then
+            sentry_pass=MALFORMED
+            echo "⚠️  SM XPELEVATOR_SENTRY_DSN present but not a DSN shape — sink will no-op"
+          else
+            echo "ℹ️  XPELEVATOR_SENTRY_DSN absent in SM — Sentry sink will no-op (non-fatal)"
+          fi
           # --- job-summary evidence table (source actually used) ---
           src_db="GitHub secret (fallback)";   [ "$db_pass" = "PASS" ]   && src_db="GCP SM"
           src_groq="GitHub secret (fallback)"; [ "$groq_pass" = "PASS" ] && src_groq="GCP SM"
@@ -432,8 +453,9 @@ jobs:
             echo "| XPELEVATOR_CONNECTION_STRING | Neon \`SELECT 1\` | $db_pass | $src_db |"
             echo "| GROQ_API_KEY | Groq \`GET /v1/models\` | $groq_pass | $src_groq |"
             echo "| XPELEVATOR_AUTH_SECRET | structural (>=32 chars) | $auth_pass | $src_auth |"
+            echo "| XPELEVATOR_SENTRY_DSN | structural (scheme+@), non-gating | $sentry_pass | $([ "$sentry_pass" = "PASS" ] && echo 'GCP SM' || echo '— (sink no-ops)') |"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "CUTOVER RESULT: DATABASE_URL=$db_pass ($src_db) GROQ=$groq_pass ($src_groq) AUTH_SECRET=$auth_pass ($src_auth)"
+          echo "CUTOVER RESULT: DATABASE_URL=$db_pass ($src_db) GROQ=$groq_pass ($src_groq) AUTH_SECRET=$auth_pass ($src_auth) SENTRY_DSN=$sentry_pass"
           # Fail-capable (non-blocking) unless ALL THREE SM copies validated: keeps
           # proof-of-rejection honest — a stale/absent SM value yields a red step AND falls back.
           [ "$db_pass" = "PASS" ] && [ "$groq_pass" = "PASS" ] && [ "$auth_pass" = "PASS" ]
@@ -476,6 +498,14 @@ jobs:
           printf '%s' "$GROQ_API_KEY"  | npx wrangler pages secret put GROQ_API_KEY  --project-name="$CF_PROJECT"
           printf '%s' "$DATABASE_URL"  | npx wrangler pages secret put DATABASE_URL  --project-name="$CF_PROJECT"
           printf '%s' "$AUTH_SECRET"   | npx wrangler pages secret put AUTH_SECRET   --project-name="$CF_PROJECT"
+          # SENTRY_DSN (#154): set ONLY when resolved from SM (guarded) — an unset
+          # DSN leaves the sink no-op'ing rather than writing an empty secret.
+          if [ -n "${SENTRY_DSN:-}" ]; then
+            printf '%s' "$SENTRY_DSN" | npx wrangler pages secret put SENTRY_DSN --project-name="$CF_PROJECT"
+            echo "✅ SENTRY_DSN set on Pages production (Sentry error sink live)"
+          else
+            echo "ℹ️  SENTRY_DSN unset — skipping (Sentry sink no-ops)"
+          fi
 
       - name: Set Pages PREVIEW-environment secrets (Pages REST API)
         # The pre-promotion smoke runs a `verify-preview` (preview-environment)
