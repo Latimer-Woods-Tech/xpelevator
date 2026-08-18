@@ -173,7 +173,7 @@ appears in the Gap table.
 | Gap (Current → Target) | Requirement | Closes in |
 |---|---|---|
 | Deploy secrets are repo/Pages secrets, not GCP SM/WIF | R-110 | Phase 1 — "Secrets into org GCP SM/WIF" (blocked on GCP-admin WIF binding) |
-| No Sentry / PostHog; no service/feature-registry entry | R-111, R-112 | Phase 3 — "CI + quality gates + registry; Sentry + PostHog" |
+| Sentry error sink now wired (`src/lib/sentry.ts`, fed by `log('error', …)`, DSN from GCP SM `XPELEVATOR_SENTRY_DSN`); PostHog + service/feature-registry entry still pending | R-111, R-112 | Phase 3 — "CI + quality gates + registry; Sentry ✅ / PostHog" |
 | No operator hierarchy above `Organization` | R-040 | Phase 4 — operator model on multi-tenant scaffolding |
 | Seat catalog exists (`plans.ts`) but no Stripe products/metering/gating | R-041, R-042 | Phase 4 — wholesale seat billing (test-mode → 🔒 live) |
 | LLM calls Groq directly, no AI Gateway | R-120 | Phase 5 — LLM onto `@latimer-woods-tech/llm` chain |

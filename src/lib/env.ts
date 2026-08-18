@@ -31,6 +31,12 @@ const ENV_VARS: EnvVarSpec[] = [
     required: true,
     description: 'Groq API key for AI-powered virtual customer responses',
   },
+  {
+    key: 'SENTRY_DSN',
+    required: false,
+    description:
+      'Sentry ingest DSN (#154 observability) — server error sink. Optional: absent → the sink no-ops, requests are unaffected.',
+  },
 ];
 
 function validateEnv(): void {
@@ -76,6 +82,14 @@ export const DATABASE_URL = process.env.DATABASE_URL ?? '';
 
 /** NextAuth secret — required for session signing */
 export const AUTH_SECRET = process.env.AUTH_SECRET ?? '';
+
+/**
+ * Sentry ingest DSN for the server error sink (#154). Optional — an empty value
+ * makes `@/lib/sentry` no-op, so a DSN-less deploy runs unaffected. Read directly
+ * from `process.env` by the sink itself to stay off the env→log→sentry cycle;
+ * exported here only so the var is documented in one canonical registry.
+ */
+export const SENTRY_DSN = process.env.SENTRY_DSN ?? '';
 
 /**
  * Whether GitHub OAuth is configured.
