@@ -3,6 +3,8 @@
  */
 
 import { getCloudflareContext } from '@opennextjs/cloudflare';
+import { fallbackChain, isModelUnavailableError } from './model-fallback';
+import { log } from './log';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -59,6 +61,31 @@ export interface ChatCompletionResponse {
   usage?: GroqTokenUsage;
 }
 
+/**
+ * A non-OK Groq HTTP response, carrying the parsed `status` + raw `body` so
+ * callers (and the model-fallback ladder) can classify it without re-parsing a
+ * message string. The `message` keeps the historical `Groq API error: <status>
+ * - <body>` shape so existing log/grep expectations are unchanged; `status` is
+ * additionally surfaced as a field (the `/api/debug/groq` diagnostic already
+ * reads `error.status`).
+ */
+export class GroqApiError extends Error {
+  readonly status: number;
+  readonly body: string;
+
+  constructor(status: number, body: string) {
+    super(`Groq API error: ${status} - ${body}`);
+    this.name = 'GroqApiError';
+    this.status = status;
+    this.body = body;
+  }
+
+  /** True when a DIFFERENT model might succeed (decommissioned / unknown id). */
+  get isModelUnavailable(): boolean {
+    return isModelUnavailableError(this.status, this.body);
+  }
+}
+
 export class GroqFetchClient {
   private apiKey: string;
   private baseURL = 'https://api.groq.com/openai/v1';
@@ -67,28 +94,69 @@ export class GroqFetchClient {
     this.apiKey = apiKey;
   }
 
-  async chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Groq API error: ${response.status} - ${error}`);
+  /**
+   * Walk the model-fallback chain for `request.model`, invoking `attempt` for
+   * each candidate. A {@link GroqApiError} in the "model unavailable" class
+   * (decommissioned / unknown id) advances to the next model in the chain (a
+   * `warn`-level `ai.model_fallback` line records the degradation for ops); any
+   * other error — auth, rate-limit, transport — throws immediately so it is
+   * never masked. When the chain is exhausted the last error propagates. Shared
+   * by both the buffered and streaming paths; the fallback for streaming is safe
+   * because a model-unavailable error is raised at connect time, before any
+   * token has been yielded.
+   */
+  private async withModelFallback<T>(
+    model: string,
+    attempt: (model: string) => Promise<T>,
+  ): Promise<T> {
+    const chain = fallbackChain(model);
+    let lastError: unknown;
+    for (let i = 0; i < chain.length; i++) {
+      const candidate = chain[i];
+      try {
+        return await attempt(candidate);
+      } catch (error) {
+        lastError = error;
+        const canFallback =
+          error instanceof GroqApiError &&
+          error.isModelUnavailable &&
+          i < chain.length - 1;
+        if (!canFallback) throw error;
+        log('warn', 'ai.model_fallback', {
+          from: candidate,
+          to: chain[i + 1],
+          status: (error as GroqApiError).status,
+        });
+      }
     }
-
-    return response.json();
+    throw lastError;
   }
 
-  async* chatCompletionStream(
-    request: ChatCompletionRequest,
-    onUsage?: (usage: GroqTokenUsage) => void,
-  ): AsyncGenerator<string> {
+  async chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    return this.withModelFallback(request.model, async (model) => {
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...request, model }),
+      });
+
+      if (!response.ok) {
+        throw new GroqApiError(response.status, await response.text());
+      }
+
+      return response.json() as Promise<ChatCompletionResponse>;
+    });
+  }
+
+  /**
+   * Open the streaming connection for one model, throwing a {@link GroqApiError}
+   * on a non-OK response (before any byte is read, so the caller may safely try
+   * a fallback model). Returns the live `Response` for the reader loop.
+   */
+  private async openStream(request: ChatCompletionRequest, model: string): Promise<Response> {
     const response = await fetch(`${this.baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -100,21 +168,34 @@ export class GroqFetchClient {
       // metered without a second billable call (R-132, #155).
       body: JSON.stringify({
         ...request,
+        model,
         stream: true,
         stream_options: { include_usage: true },
       }),
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Groq API error: ${response.status} - ${error}`);
+      throw new GroqApiError(response.status, await response.text());
     }
 
     if (!response.body) {
       throw new Error('Response body is null');
     }
 
-    const reader = response.body.getReader();
+    return response;
+  }
+
+  async* chatCompletionStream(
+    request: ChatCompletionRequest,
+    onUsage?: (usage: GroqTokenUsage) => void,
+  ): AsyncGenerator<string> {
+    // Resolve the connection through the model-fallback ladder FIRST — the only
+    // point a substitute model is still safe (nothing has been yielded yet).
+    const response = await this.withModelFallback(request.model, (model) =>
+      this.openStream(request, model),
+    );
+
+    const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
 
