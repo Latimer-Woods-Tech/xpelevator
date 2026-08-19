@@ -32,27 +32,45 @@ export interface ModelPrice {
  * pricing. Surfaced on the ledger response so a stale table is visible, not
  * silent — list prices drift, and a wrong price quietly skews the margin.
  */
-export const PRICING_AS_OF = '2026-08-08' as const;
+export const PRICING_AS_OF = '2026-08-19' as const;
 
 /** Human-readable provenance for the price table (shown on the ledger). */
 export const PRICING_SOURCE =
   'Groq on-demand list pricing (USD per 1M tokens)';
 
 /**
- * The two Groq models this app actually calls on the token-bearing hot paths
- * (`src/lib/ai.ts`): the fast 8B model for easy/medium live customer turns and
- * the 70B realism model for hard turns. Keyed by the exact `model` string
- * persisted on the reply row, so a lookup is a direct match with no normalising.
+ * Every Groq model the ledger must be able to price — keyed by the exact `model`
+ * string persisted on the reply row, so a lookup is a direct match with no
+ * normalising. Two groups:
+ *
+ * 1. **Current** — the models `src/lib/ai.ts` calls today (`CUSTOMER_MODEL_FAST`
+ *    / `CUSTOMER_MODEL_REALISM`): `gpt-oss-20b` for easy/medium live customer
+ *    turns and `gpt-oss-120b` for hard turns + scoring. These were swapped in on
+ *    2026-08-19 (#248/#262) after Groq decommissioned the previous llama tiers.
+ * 2. **Retained (historical)** — the decommissioned `llama-3.1-8b-instant` and
+ *    `llama-3.3-70b-versatile`. The app no longer calls them, but `chat_messages`
+ *    rows written before the swap still carry those `model` strings, and the
+ *    #155 margin ledger prices historical spend. Dropping the keys would flip
+ *    every pre-swap turn to *unpriced* — so they stay, at their last list price.
  *
  * Prices are Groq's published on-demand rates as of {@link PRICING_AS_OF}. They
  * are deliberately data (not code) so a price change or a founder-negotiated
  * rate is a one-line edit; an unknown/added model is handled explicitly by
- * {@link computeCostMicroUsd} returning `null` rather than a wrong zero.
+ * {@link computeCostMicroUsd} returning `null` rather than a wrong zero. Keep the
+ * *current* group in sync with `src/lib/ai.ts` and `REQUIRED_GROQ_MODELS` in
+ * `scripts/uptime-check.mjs` whenever the tiers change.
  */
 export const GROQ_PRICES: Readonly<Record<string, ModelPrice>> = {
+  // --- Current tiers (called by the app today) ---
   // Fast tier — easy/medium live customer turns (CUSTOMER_MODEL_FAST).
-  'llama-3.1-8b-instant': { inputPerMillion: 0.05, outputPerMillion: 0.08 },
+  'openai/gpt-oss-20b': { inputPerMillion: 0.075, outputPerMillion: 0.3 },
   // Realism tier — hard live turns + scoring (CUSTOMER_MODEL_REALISM).
+  'openai/gpt-oss-120b': { inputPerMillion: 0.15, outputPerMillion: 0.6 },
+
+  // --- Retained for historical rows (decommissioned 2026-08-17, #248) ---
+  // Prior fast tier — priced so pre-swap chat_messages rows stay priceable.
+  'llama-3.1-8b-instant': { inputPerMillion: 0.05, outputPerMillion: 0.08 },
+  // Prior realism/scoring tier — retained for the same reason.
   'llama-3.3-70b-versatile': { inputPerMillion: 0.59, outputPerMillion: 0.79 },
 };
 
