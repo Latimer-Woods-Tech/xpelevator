@@ -24,6 +24,12 @@ import { operatorWorkspaceView, type WorkspaceState } from '@/lib/operator-works
 import type { Branding } from '@/lib/branding';
 import { brandingToForm, validateBrandingForm, type BrandingForm } from '@/lib/branding-form';
 import { ORG_PLANS, tierForPlan, getSeatTier, type OrgPlan } from '@/lib/plans';
+import {
+  tierLines,
+  hasSeatUsage,
+  orgDisplayName,
+  type SeatUsageApiResponse,
+} from '@/lib/seat-usage-view';
 
 interface ClientOrg {
   id: string;
@@ -160,6 +166,7 @@ export default function OperatorWorkspacePage() {
     <Shell>
       <div className="space-y-12">
         <OperatorClients orgId={view.orgId} isNew={view.isNew} />
+        <SeatUsagePanel isNew={view.isNew} />
         <BrandingEditor orgId={view.orgId} />
       </div>
     </Shell>
@@ -653,6 +660,191 @@ function ClientRow({
         )}
       </div>
     </li>
+  );
+}
+
+// ─── Seat usage meter ────────────────────────────────────────────────────────
+
+/**
+ * The operator's seat meter (issue #16, Phase 4 item 2 — the transparency half
+ * of the "vending machine").
+ *
+ * Reads the metered INVOICE BASIS from `GET /api/reports/seats?scope=clients` —
+ * the portfolio roll-up of distinct active trainees (billable seats), bucketed
+ * into their billable tier (Chat → Voice → Phone), per client org and summed
+ * across the operator's book. That endpoint is ADMIN-only and tenant-scoped
+ * server-side (`resolveOperatorRollup`), so this panel never widens access; it
+ * only surfaces the number the operator will be invoiced on.
+ *
+ * It shows COUNTS only — no price. Wholesale amounts live in Stripe behind the
+ * 🔒 live-mode founder gate; the seat meter is left of that gate, so an operator
+ * can see exactly what their usage totals to before any billing goes live.
+ *
+ * A brand-new operator (no clients yet) has no metered usage, so the panel is
+ * skipped entirely for them.
+ */
+function SeatUsagePanel({ isNew }: { isNew: boolean }) {
+  const [report, setReport] = useState<SeatUsageApiResponse | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  // Billing window — the operator's "monthly cut" (R-065), same contract as the
+  // session reports. Empty = all-time. The server validates the dates and
+  // narrows the meter to seats active in-range.
+  const [since, setSince] = useState('');
+  const [until, setUntil] = useState('');
+
+  const load = useCallback(() => {
+    setLoadError(false);
+    setReport(null);
+    const parts = [
+      since ? `since=${encodeURIComponent(since)}` : '',
+      until ? `until=${encodeURIComponent(until)}` : '',
+    ].filter(Boolean);
+    const url = `/api/reports/seats?scope=clients${parts.length ? `&${parts.join('&')}` : ''}`;
+    fetch(url, { headers: { Accept: 'application/json' } })
+      .then(res => {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.json() as Promise<SeatUsageApiResponse>;
+      })
+      .then(data => setReport(data))
+      .catch(() => setLoadError(true));
+  }, [since, until]);
+
+  useEffect(() => {
+    // A brand-new operator has no clients beneath them yet — nothing to meter.
+    if (!isNew) load();
+  }, [isNew, load]);
+
+  if (isNew) return null;
+
+  const totalLines = tierLines(report?.totals?.seatsByTier);
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-blue-950/40 border border-blue-800/30 rounded-xl px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="font-semibold text-blue-200 text-sm">Seat usage</div>
+            <p className="text-slate-400 text-xs mt-1 leading-relaxed max-w-md">
+              Active trainee seats across your client workspaces — the basis you
+              are billed on. One seat is a trainee who completed at least one
+              session in the window, counted at the highest tier they practised
+              (Chat → Voice → Phone).
+            </p>
+          </div>
+          {/* Billing window — the "monthly cut". Empty = all-time. */}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 shrink-0">
+            <span className="text-slate-400">Window</span>
+            <label className="flex items-center gap-1.5">
+              <span className="sr-only">Seat usage from date</span>
+              <input
+                type="date"
+                value={since}
+                max={until || undefined}
+                onChange={e => setSince(e.target.value)}
+                aria-label="Seat usage from date"
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200 transition-colors"
+              />
+            </label>
+            <span className="text-slate-400">to</span>
+            <label className="flex items-center gap-1.5">
+              <span className="sr-only">Seat usage to date</span>
+              <input
+                type="date"
+                value={until}
+                min={since || undefined}
+                onChange={e => setUntil(e.target.value)}
+                aria-label="Seat usage to date"
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200 transition-colors"
+              />
+            </label>
+            {since || until ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSince('');
+                  setUntil('');
+                }}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                Clear
+              </button>
+            ) : (
+              <span className="text-slate-400">all-time</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {loadError ? (
+        <p className="text-slate-400 text-sm">
+          Could not load seat usage. Refresh to try again.
+        </p>
+      ) : report === null ? (
+        <p className="text-slate-400 text-sm">Loading seat usage…</p>
+      ) : !hasSeatUsage(report) ? (
+        <p className="text-slate-400 text-sm">
+          No metered seat usage in this window. Seats appear here once your
+          clients’ trainees complete sessions.
+        </p>
+      ) : (
+        <div className="space-y-5">
+          {/* Portfolio totals — the invoice basis. */}
+          <div className="rounded-2xl bg-slate-800/40 border border-slate-700 px-5 py-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-slate-300 text-sm font-medium">
+                Billable seats (all clients)
+              </span>
+              <span className="text-2xl font-bold text-blue-300">
+                {report.totals.activeSeats}
+              </span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-4">
+              {totalLines.map(line => (
+                <div key={line.id} className="text-xs text-slate-400">
+                  <span className="text-slate-300 font-medium">{line.seats}</span>{' '}
+                  {line.name}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {report.truncated ? (
+            <p className="text-amber-400/80 text-xs">
+              Showing a capped slice of usage — narrow the window for an exact
+              count.
+            </p>
+          ) : null}
+
+          {/* Per-client seat rows. */}
+          <ul className="divide-y divide-slate-800 rounded-2xl bg-slate-800/40 border border-slate-700 overflow-hidden">
+            {report.perOrg.map((row, i) => (
+              <li
+                key={row.orgId ?? `unassigned-${i}`}
+                className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"
+              >
+                <div>
+                  <div className="font-medium text-sm">{orgDisplayName(row)}</div>
+                  <div className="text-slate-400 text-xs mt-0.5">
+                    {tierLines(row.seatsByTier)
+                      .filter(l => l.seats > 0)
+                      .map(l => `${l.seats} ${l.name}`)
+                      .join(' · ') || 'no billable seats'}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-base font-semibold text-blue-300">
+                    {row.activeSeats}
+                  </div>
+                  <div className="text-slate-400 text-xs">
+                    {row.activeSeats === 1 ? 'seat' : 'seats'}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
