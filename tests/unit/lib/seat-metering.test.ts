@@ -105,6 +105,36 @@ describe('computeSeatUsage', () => {
     expect(report.perOrg.map((o) => o.orgId)).toEqual(['big', 'small']);
   });
 
+  it('backfills an org name from a later fact when the first lacked one', () => {
+    // First fact for the org carries no name; a later one does → the row is
+    // named (a NULL-name join row must not permanently blank the org).
+    const report = computeSeatUsage([
+      f({ orgId: 'org-9', orgName: null, traineeKey: 't1', modality: 'CHAT' }),
+      f({ orgId: 'org-9', orgName: 'Named Later', traineeKey: 't2', modality: 'CHAT' }),
+    ]);
+    expect(report.perOrg[0].orgName).toBe('Named Later');
+    expect(report.perOrg[0].activeSeats).toBe(2);
+  });
+
+  it('breaks equal-seat ties by name, then by id (null names sort first)', () => {
+    const report = computeSeatUsage([
+      // three orgs each with exactly one seat → tie on activeSeats
+      f({ orgId: 'z-id', orgName: 'Zephyr', traineeKey: 'x', modality: 'CHAT' }),
+      f({ orgId: 'a-id', orgName: 'Apex', traineeKey: 'y', modality: 'CHAT' }),
+      f({ orgId: 'n-id', orgName: null, traineeKey: 'z', modality: 'CHAT' }),
+    ]);
+    // '' (null name) < 'Apex' < 'Zephyr' by localeCompare on the name key.
+    expect(report.perOrg.map((o) => o.orgId)).toEqual(['n-id', 'a-id', 'z-id']);
+  });
+
+  it('breaks a full tie (equal seats AND equal names) by org id', () => {
+    const report = computeSeatUsage([
+      f({ orgId: 'id-2', orgName: 'Same', traineeKey: 'x', modality: 'CHAT' }),
+      f({ orgId: 'id-1', orgName: 'Same', traineeKey: 'y', modality: 'CHAT' }),
+    ]);
+    expect(report.perOrg.map((o) => o.orgId)).toEqual(['id-1', 'id-2']);
+  });
+
   it('handles a null-org (personal workspace) bucket', () => {
     const report = computeSeatUsage([
       f({ orgId: null, orgName: null, traineeKey: 't1', modality: 'CHAT' }),
