@@ -55,6 +55,18 @@ const BRANDED = 'https://xpelevator.com';
 const ALIAS = 'https://xpelevator-sim.pages.dev';
 const GROQ_KEY = process.env.GROQ_API_KEY?.replace(/\r/g, '').trim();
 
+// The exact Groq model ids the app calls on the scoring + live-turn hot paths
+// (mirror of CUSTOMER_MODEL_REALISM / CUSTOMER_MODEL_FAST in src/lib/ai.ts). A
+// valid key that lists /v1/models is NOT enough — the models themselves can be
+// decommissioned out from under the app while the key still authenticates, which
+// is exactly what happened on ~2026-08-17 (#248): `llama-3.3-70b-versatile` +
+// `llama-3.1-8b-instant` were removed, every scoring completion 400'd, scores went
+// null, and this monitor stayed green because it only checked the key. We now
+// assert BOTH ids are still present in the model list, so a future decommission
+// opens an alert in ≤15 min instead of silently nulling scores. Keep in sync with
+// src/lib/ai.ts when the tiers change.
+const REQUIRED_GROQ_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+
 // A slug no real org can hold: slugify() (src/lib/org-hierarchy.ts) only ever
 // produces [a-z0-9-], so a value with underscores can never match an existing
 // row. GET /api/branding/[slug] runs a real `SELECT ... WHERE slug = $1`, so this
@@ -184,6 +196,38 @@ async function checkGroqCredential() {
         `makes every session score null). \`/api/health\` will still be 200 because it ` +
         `only checks the var is present, not that it authenticates.` +
         `\n\n\`\`\`\n${body.slice(0, 300)}\n\`\`\``,
+    );
+    return; // no model list to inspect if the credential itself was rejected
+  }
+
+  // Credential is live — now verify the models the app ACTUALLY calls are still
+  // offered. A decommissioned model (the #248 outage) leaves the key valid and
+  // this endpoint 200, but drops the model from the list, so every scoring
+  // completion 400s and scores go null while the check above stays green.
+  let ids = [];
+  try {
+    const parsed = JSON.parse(body);
+    ids = Array.isArray(parsed?.data)
+      ? parsed.data.map((m) => m?.id).filter((s) => typeof s === 'string')
+      : [];
+  } catch {
+    ids = [];
+  }
+  const missing = REQUIRED_GROQ_MODELS.filter((m) => !ids.includes(m));
+  const modelsOk = missing.length === 0;
+  log(
+    `${modelsOk ? '✓' : '✗'} Groq models present [${REQUIRED_GROQ_MODELS.join(', ')}] -> ` +
+      `${modelsOk ? 'ALL LIVE' : `MISSING: ${missing.join(', ')}`}`,
+  );
+  if (!modelsOk) {
+    failures.push(
+      `**Scoring model DECOMMISSIONED** — the Groq model(s) the app calls are no longer ` +
+        `offered by \`/v1/models\`: \`${missing.join('`, `')}\`. The \`GROQ_API_KEY\` is VALID ` +
+        `(the check above passed), but every chat/scoring completion against a decommissioned ` +
+        `model 400s — the customer turn falls back to a canned line and sessions score NULL. ` +
+        `This is the 2026-08-17 #248 failure mode. Fix: update the model ids in \`src/lib/ai.ts\` ` +
+        `(and \`REQUIRED_GROQ_MODELS\` here) to Groq's current replacements ` +
+        `(console.groq.com/docs/deprecations).`,
     );
   }
 }

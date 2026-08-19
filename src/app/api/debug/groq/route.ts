@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGroqClient } from '@/lib/groq-fetch';
+import { CUSTOMER_MODEL_REALISM } from '@/lib/ai';
 import { requireAuth, AuthError } from '@/lib/auth-api';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { enforceRateLimit, type RateLimitOptions } from '@/lib/rate-limit';
@@ -48,7 +49,10 @@ export async function GET(request: NextRequest) {
     
     log('info', 'debug_groq.client_ready', { requestId });
     const completion = await client.chatCompletion({
-      model: 'llama-3.3-70b-versatile',
+      // Probe the model scoring actually uses, so this diagnostic reflects the
+      // real scoring path (a decommissioned model — the #248 outage — surfaces
+      // here as a failed completion, not a false "key missing").
+      model: CUSTOMER_MODEL_REALISM,
       messages: [{ role: 'user', content: 'Say "test successful" and nothing else.' }],
       temperature: 0.5,
       max_tokens: 20,

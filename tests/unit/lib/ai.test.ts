@@ -424,10 +424,10 @@ describe('lib/ai — scoreSession', () => {
     expect(result[0].criteriaName).toBe('Empathy');
   });
 
-  it('scores with the strong (70B) model — trust-critical, off the latency path (R-061)', async () => {
+  it('scores with the strong (realism) model — trust-critical, off the latency path (R-061)', async () => {
     // Scoring is async + post-session (not a live turn), and the /10 scores must
-    // be defensible to managers. The judge therefore uses the realism (70B) model,
-    // NOT the fast 8B tier the customer turns use. This is the fast-turn/strong-
+    // be defensible to managers. The judge therefore uses the realism (120B) model,
+    // NOT the fast 20B tier the customer turns use. This is the fast-turn/strong-
     // score split the founder-delegate recommended (#16, 2026-07-13).
     fetchMock.mockResolvedValueOnce(
       completionResponse(JSON.stringify([
@@ -439,8 +439,8 @@ describe('lib/ai — scoreSession', () => {
 
     const [, init] = fetchMock.mock.calls[0];
     const sent = JSON.parse((init as RequestInit).body as string);
-    expect(sent.model).toBe('llama-3.3-70b-versatile');
-    expect(sent.model).not.toBe('llama-3.1-8b-instant');
+    expect(sent.model).toBe('openai/gpt-oss-120b');
+    expect(sent.model).not.toBe('openai/gpt-oss-20b');
     expect(sent.stream).not.toBe(true); // scoring is a single non-streaming judgment
   });
 
@@ -682,7 +682,7 @@ describe('lib/ai — streamNextCustomerMessage', () => {
     expect(tokens).toEqual(['Hello!']);
   });
 
-  it('defaults to the realism (70B) model when no model is passed', async () => {
+  it('defaults to the realism (120B) model when no model is passed', async () => {
     fetchMock.mockResolvedValueOnce(streamResponse(['ok']));
 
     for await (const _ of streamNextCustomerMessage('prompt', [])) {
@@ -691,7 +691,7 @@ describe('lib/ai — streamNextCustomerMessage', () => {
 
     const [, init] = fetchMock.mock.calls[0];
     const sent = JSON.parse((init as RequestInit).body as string);
-    expect(sent.model).toBe('llama-3.3-70b-versatile');
+    expect(sent.model).toBe('openai/gpt-oss-120b');
   });
 
   it('sends the model it is given to Groq (fast tier)', async () => {
@@ -700,14 +700,14 @@ describe('lib/ai — streamNextCustomerMessage', () => {
     for await (const _ of streamNextCustomerMessage(
       'prompt',
       [],
-      'llama-3.1-8b-instant'
+      'openai/gpt-oss-20b'
     )) {
       /* drain */
     }
 
     const [, init] = fetchMock.mock.calls[0];
     const sent = JSON.parse((init as RequestInit).body as string);
-    expect(sent.model).toBe('llama-3.1-8b-instant');
+    expect(sent.model).toBe('openai/gpt-oss-20b');
     expect(sent.stream).toBe(true);
   });
 
@@ -758,18 +758,18 @@ describe('lib/ai — streamNextCustomerMessage', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('lib/ai — customerModelForDifficulty', () => {
-  it('keeps the realism (70B) model for HARD scenarios', () => {
-    expect(customerModelForDifficulty('hard')).toBe('llama-3.3-70b-versatile');
+  it('keeps the realism (120B) model for HARD scenarios', () => {
+    expect(customerModelForDifficulty('hard')).toBe('openai/gpt-oss-120b');
   });
 
-  it('uses the fast (8B) model for easy and medium', () => {
-    expect(customerModelForDifficulty('easy')).toBe('llama-3.1-8b-instant');
-    expect(customerModelForDifficulty('medium')).toBe('llama-3.1-8b-instant');
+  it('uses the fast (20B) model for easy and medium', () => {
+    expect(customerModelForDifficulty('easy')).toBe('openai/gpt-oss-20b');
+    expect(customerModelForDifficulty('medium')).toBe('openai/gpt-oss-20b');
   });
 
-  it('falls back to the fast (8B) model for unknown/undefined difficulty', () => {
-    expect(customerModelForDifficulty(undefined)).toBe('llama-3.1-8b-instant');
-    expect(customerModelForDifficulty('impossible')).toBe('llama-3.1-8b-instant');
+  it('falls back to the fast (20B) model for unknown/undefined difficulty', () => {
+    expect(customerModelForDifficulty(undefined)).toBe('openai/gpt-oss-20b');
+    expect(customerModelForDifficulty('impossible')).toBe('openai/gpt-oss-20b');
   });
 });
 
@@ -789,10 +789,10 @@ describe('lib/ai — resolveScenarioDifficulty', () => {
     // End-to-end of the two helpers as the route composes them.
     expect(
       customerModelForDifficulty(resolveScenarioDifficulty({ difficulty: 'hard' }))
-    ).toBe('llama-3.3-70b-versatile');
+    ).toBe('openai/gpt-oss-120b');
     expect(
       customerModelForDifficulty(resolveScenarioDifficulty({ difficulty: 'medium' }))
-    ).toBe('llama-3.1-8b-instant');
+    ).toBe('openai/gpt-oss-20b');
   });
 });
 
