@@ -85,11 +85,14 @@ describe('buildSpendLedger — aggregation', () => {
     expect(withNull.sessions[0].date).toBe('');
   });
 
-  it('echoes the pricing basis (source + asOf + both models)', () => {
+  it('echoes the pricing basis (source + asOf + all priced models)', () => {
     const ledger = buildSpendLedger([group()]);
     expect(ledger.pricing.asOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // The pricing basis lists every priceable model: the current gpt-oss tiers
+    // the app calls today plus the retained legacy tiers (still priced so
+    // pre-swap history isn't silently unpriced).
     expect(ledger.pricing.models.map((m) => m.model).sort()).toEqual(
-      [FAST, REALISM].sort(),
+      ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', FAST, REALISM].sort(),
     );
   });
 

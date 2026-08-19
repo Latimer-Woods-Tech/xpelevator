@@ -11,25 +11,38 @@ import {
 // unpriced tokens downstream), never `0` — a silent zero would understate Groq
 // spend and overstate the Phase-4 seat margin, the exact blind spot #155 closes.
 
-const FAST = 'llama-3.1-8b-instant';
-const REALISM = 'llama-3.3-70b-versatile';
+// Current tiers the app calls today (src/lib/ai.ts).
+const FAST = 'openai/gpt-oss-20b';
+const REALISM = 'openai/gpt-oss-120b';
+// Decommissioned tiers retained only to keep pre-swap history priceable (#248).
+const LEGACY_FAST = 'llama-3.1-8b-instant';
+const LEGACY_REALISM = 'llama-3.3-70b-versatile';
 
 describe('computeCostMicroUsd — pricing', () => {
-  it('prices the fast 8B model exactly (input 0.05 / output 0.08 per 1M)', () => {
-    // 1000·0.05 + 200·0.08 = 50 + 16 = 66 micro-USD.
-    expect(computeCostMicroUsd(1000, 200, FAST)).toBe(66);
+  it('prices the fast gpt-oss-20b model exactly (input 0.075 / output 0.30 per 1M)', () => {
+    // 1000·0.075 + 200·0.30 = 75 + 60 = 135 micro-USD.
+    expect(computeCostMicroUsd(1000, 200, FAST)).toBe(135);
   });
 
-  it('prices the 70B realism model exactly (input 0.59 / output 0.79 per 1M)', () => {
+  it('prices the realism gpt-oss-120b model exactly (input 0.15 / output 0.60 per 1M)', () => {
+    // 1000·0.15 + 500·0.60 = 150 + 300 = 450 micro-USD.
+    expect(computeCostMicroUsd(1000, 500, REALISM)).toBe(450);
+  });
+
+  it('still prices the retained legacy tiers (pre-swap history stays priceable)', () => {
+    // 1000·0.05 + 200·0.08 = 50 + 16 = 66 micro-USD.
+    expect(computeCostMicroUsd(1000, 200, LEGACY_FAST)).toBe(66);
     // 1000·0.59 + 500·0.79 = 590 + 395 = 985 micro-USD.
-    expect(computeCostMicroUsd(1000, 500, REALISM)).toBe(985);
+    expect(computeCostMicroUsd(1000, 500, LEGACY_REALISM)).toBe(985);
   });
 
   it('rounds to an integer micro-USD (exact aggregation)', () => {
-    // 1·0.05 + 1·0.08 = 0.13 → rounds to 0.
+    // 1·0.075 + 1·0.30 = 0.375 → rounds to 0.
     expect(computeCostMicroUsd(1, 1, FAST)).toBe(0);
-    // 7·0.59 = 4.13 → rounds to 4.
-    expect(computeCostMicroUsd(7, 0, REALISM)).toBe(4);
+    // 0·0.075 + 2·0.30 = 0.6 → rounds up to 1.
+    expect(computeCostMicroUsd(0, 2, FAST)).toBe(1);
+    // 7·0.15 = 1.05 → rounds to 1.
+    expect(computeCostMicroUsd(7, 0, REALISM)).toBe(1);
   });
 
   it('zero tokens are priceable and cost 0 (not null)', () => {
@@ -64,13 +77,19 @@ describe('isPricedModel', () => {
   it('true only for models in the table', () => {
     expect(isPricedModel(FAST)).toBe(true);
     expect(isPricedModel(REALISM)).toBe(true);
+    expect(isPricedModel(LEGACY_FAST)).toBe(true);
+    expect(isPricedModel(LEGACY_REALISM)).toBe(true);
     expect(isPricedModel('mystery')).toBe(false);
     expect(isPricedModel(null)).toBe(false);
     expect(isPricedModel(undefined)).toBe(false);
   });
 
-  it('covers exactly the two models the app calls on the token-bearing paths', () => {
-    expect(Object.keys(GROQ_PRICES).sort()).toEqual([FAST, REALISM].sort());
+  it('covers the current app tiers plus the retained legacy tiers', () => {
+    // Current models MUST be priced — the #248 swap left them unpriced until
+    // this slice, silently understating Groq spend / overstating seat margin.
+    expect(Object.keys(GROQ_PRICES).sort()).toEqual(
+      [FAST, REALISM, LEGACY_FAST, LEGACY_REALISM].sort(),
+    );
   });
 });
 
