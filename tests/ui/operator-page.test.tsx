@@ -331,6 +331,105 @@ describe('Operator workspace — non-operator views', () => {
   });
 });
 
+describe('Operator workspace — seat usage meter', () => {
+  const SEAT_REPORT = {
+    window: { since: null, until: null },
+    unit: 'seat',
+    interval: 'month',
+    perOrg: [
+      {
+        orgId: 'c1',
+        orgName: 'Northwind Retail',
+        activeSeats: 3,
+        sessions: 12,
+        seatsByTier: { chat: 1, voice: 0, phone: 2 },
+      },
+      {
+        orgId: 'c2',
+        orgName: null,
+        activeSeats: 1,
+        sessions: 2,
+        seatsByTier: { chat: 1, voice: 0, phone: 0 },
+      },
+    ],
+    totals: {
+      activeSeats: 4,
+      sessions: 14,
+      seatsByTier: { chat: 2, voice: 0, phone: 2 },
+    },
+    truncated: false,
+  };
+
+  it('renders the metered seat totals + per-client rows from /api/reports/seats', async () => {
+    const fetchSpy = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.resolve(jsonResponse(OPERATOR_ME));
+      if (url.startsWith('/api/reports/seats'))
+        return Promise.resolve(jsonResponse(SEAT_REPORT));
+      return Promise.resolve(jsonResponse([]));
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    await renderPage();
+
+    // The scope=clients portfolio roll-up is what the panel meters on.
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some(([u]) =>
+          String(u).startsWith('/api/reports/seats?scope=clients')
+        )
+      ).toBe(true)
+    );
+
+    // Portfolio total seats surfaced.
+    await waitFor(() => expect(screen.getByText('Billable seats (all clients)')).toBeInTheDocument());
+    // Per-client rows, including the null-name fallback.
+    expect(screen.getByText('Northwind Retail')).toBeInTheDocument();
+    expect(screen.getByText('Unnamed workspace')).toBeInTheDocument();
+    // Tier breakdown for Northwind (1 Chat · 2 Phone; the zero Voice is dropped).
+    expect(screen.getByText('1 Chat · 2 Phone')).toBeInTheDocument();
+    // Copy rule holds on this surface too.
+    expect(document.body.textContent).not.toMatch(/\bAI\b/);
+  });
+
+  it('shows the empty state when the operator has no metered usage', async () => {
+    const fetchSpy = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.resolve(jsonResponse(OPERATOR_ME));
+      if (url.startsWith('/api/reports/seats'))
+        return Promise.resolve(
+          jsonResponse({
+            ...SEAT_REPORT,
+            perOrg: [],
+            totals: { activeSeats: 0, sessions: 0, seatsByTier: {} },
+          })
+        );
+      return Promise.resolve(jsonResponse([]));
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/No metered seat usage in this window/)).toBeInTheDocument()
+    );
+  });
+
+  it('surfaces a load error when the seats endpoint fails', async () => {
+    const fetchSpy = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.resolve(jsonResponse(OPERATOR_ME));
+      if (url.startsWith('/api/reports/seats'))
+        return Promise.resolve(jsonResponse({ error: 'nope' }, 500));
+      return Promise.resolve(jsonResponse([]));
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    await renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/Could not load seat usage/)).toBeInTheDocument()
+    );
+  });
+});
+
 describe('Operator workspace — branding editor', () => {
   const BRANDING = {
     displayName: 'Northwind',
