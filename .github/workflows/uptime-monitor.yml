@@ -32,7 +32,12 @@ name: Uptime + scoring monitor
 #
 #   scoring-canary (every 6h) — drives one full authenticated session against the
 #     live branded domain and asserts a NON-NULL score, then prunes old canary
-#     sessions so the live DB doesn't accrete monitor rows.
+#     sessions so the live DB doesn't accrete monitor rows. It MINTS its own
+#     Auth.js v5 session cookie, so its AUTH_SECRET must match the value the live
+#     worker verifies with. Production's AUTH_SECRET was cut over to GCP SM
+#     (XPELEVATOR_AUTH_SECRET) and rotated by PR #252; this job now sources the
+#     same secret from GCP SM (validated SM-first, GitHub-secret fallback) so the
+#     mint and the verify agree — see the job for the 2026-08-17 regression (#248).
 #
 # Any failure opens (or comments on) a single GitHub alert issue, so a red run in
 # the Actions tab becomes an actual notification. Touches NO DNS.
@@ -58,6 +63,7 @@ concurrency:
 permissions:
   contents: read
   issues: write
+  id-token: write   # WIF/OIDC → GCP Secret Manager for the canary's AUTH_SECRET
 
 jobs:
   health:
@@ -93,6 +99,18 @@ jobs:
     env:
       BASE_URL: https://xpelevator.com
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # No-lockout default. The canary MINTS an Auth.js v5 session cookie with this
+      # secret (scripts/phase1-canary.mjs step 2) and presents it to the live
+      # worker, which decodes it with ITS runtime AUTH_SECRET. Production's
+      # AUTH_SECRET was cut over to GCP SM (XPELEVATOR_AUTH_SECRET, a fresh 64-hex)
+      # and rotated by PR #252, so this stale GitHub-secret value no longer matches
+      # — the minted cookie failed to decode and the canary went red on the auth
+      # step for ~2 days (alert #248, 2026-08-17 → 2026-08-19, "server user.email
+      # mismatch" / GET /api/auth/session -> null). The "Resolve AUTH_SECRET from
+      # GCP SM" step below sources the SAME value production verifies with (Standing
+      # Law 3 — one source of truth), so the mint and the verify agree again. An
+      # absent/short SM copy or unavailable WIF leaves this value in place
+      # (no-lockout fallback).
       AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
     steps:
       - uses: actions/checkout@v7
@@ -102,6 +120,71 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
+      - name: Detect OIDC availability
+        id: oidc
+        # ACTIONS_ID_TOKEN_REQUEST_URL is present only when id-token:write is
+        # granted. Gate the GCP auth path on it so the job falls back to the
+        # GitHub-secret AUTH_SECRET when OIDC is unavailable (no-lockout).
+        run: |
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Authenticate to GCP (WIF)
+        if: steps.oidc.outputs.available == 'true'
+        # continue-on-error: no-lockout. A misconfigured WIF trust must never break
+        # the canary — it falls back to the GitHub-secret AUTH_SECRET.
+        continue-on-error: true
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          service_account: factory-sa@factory-495015.iam.gserviceaccount.com
+          workload_identity_provider: projects/891842778224/locations/global/workloadIdentityPools/github-factory/providers/github
+      - name: Set up gcloud
+        if: steps.oidc.outputs.available == 'true'
+        continue-on-error: true
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Resolve AUTH_SECRET from GCP SM (validated SM-first, GitHub-secret fallback)
+        id: sm-auth
+        if: steps.oidc.outputs.available == 'true'
+        # Mirror the deploy job's AUTH_SECRET cutover (deploy.yml, PR #252): source
+        # the canary's minting secret from GCP SM XPELEVATOR_AUTH_SECRET so it
+        # matches the value the live worker verifies with. No external service to
+        # authenticate against, so validate structurally (non-empty, >=32 chars) and
+        # export to $GITHUB_ENV ONLY on PASS (SM wins, overriding the job-level
+        # GitHub-secret default for the canary step). An absent/short/failing SM copy
+        # or unavailable WIF writes nothing, leaving the GitHub-secret AUTH_SECRET in
+        # place (no-lockout). continue-on-error so a fallback path never blocks the
+        # canary; the mint/verify round-trip in phase1-canary.mjs stays the real
+        # fail-capable gate (a wrong secret → red canary), so this is proof-capable,
+        # not a rubber stamp.
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          proj="factory-495015"
+          auth_pass=FAIL
+          # fetch into a LOCAL var only; strip UTF-8 BOM + CR/LF; mask
+          auth="$(gcloud secrets versions access latest --secret=XPELEVATOR_AUTH_SECRET --project="$proj" --quiet 2>/dev/null \
+                | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || auth=""
+          [ -n "$auth" ] && echo "::add-mask::$auth"
+          if [ -z "$auth" ]; then
+            echo "⚠️  XPELEVATOR_AUTH_SECRET absent in SM — keeping GitHub-secret AUTH_SECRET"
+          elif [ "${#auth}" -lt 32 ]; then
+            echo "❌ SM XPELEVATOR_AUTH_SECRET too short (${#auth}<32) — keeping GitHub-secret AUTH_SECRET"
+          else
+            auth_pass=PASS
+            echo "AUTH_SECRET=$auth" >> "$GITHUB_ENV"
+            echo "✅ SM XPELEVATOR_AUTH_SECRET valid (${#auth} chars) → (AUTH_SECRET ← GCP SM); matches the deployed worker"
+          fi
+          src_auth="GitHub secret (fallback)"; [ "$auth_pass" = "PASS" ] && src_auth="GCP SM"
+          {
+            echo "### scoring-canary AUTH_SECRET source (validated SM-first, GitHub-secret fallback)"
+            echo ""
+            echo "| secret (GCP SM) | validation | result | source used |"
+            echo "|---|---|---|---|"
+            echo "| XPELEVATOR_AUTH_SECRET | structural (>=32 chars) | $auth_pass | $src_auth |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "CANARY AUTH_SECRET SOURCE: $auth_pass ($src_auth)"
       - name: Drive a full session and assert a non-null score
         run: node scripts/phase1-canary.mjs
       - name: Prune old canary sessions (keep newest 3)
