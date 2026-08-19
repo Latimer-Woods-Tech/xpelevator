@@ -1367,6 +1367,42 @@ jobs:
           fi
           echo "✅ /api/reports/sessions (detail + portfolio summary, CSV + PDF) rejects anonymous callers (401) on both hosts"
 
+      - name: Verify seat metering is auth-gated (Phase 4 item 2)
+        # The seat-metering invoice basis (GET /api/reports/seats) returns a
+        # tenant's distinct active-trainee counts (the number wholesale seat
+        # billing invoices on) — ADMIN-only and org-scoped, and must NEVER be
+        # readable anonymously. The /api/* middleware matcher gates it and the
+        # handler additionally requires role=ADMIN. Permanent regression gate: an
+        # anonymous caller must get 401 on both hosts for the own-org meter AND
+        # the operator portfolio roll-up (?scope=clients) — a 200 here would leak
+        # cross-tenant usage. It carries no price (wholesale amounts stay in
+        # Stripe behind the live-mode gate), so this is a pure auth check.
+        run: |
+          set -e
+          fail=0
+          for PATH_Q in \
+            "/api/reports/seats" \
+            "/api/reports/seats?scope=clients"; do
+            for BASE in "https://${CF_PROJECT}.pages.dev" "https://xpelevator.com"; do
+              code=000
+              for i in 1 2 3 4 5; do
+                code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$PATH_Q" || echo 000)
+                if [ "$code" = "401" ]; then break; fi
+                sleep 6
+              done
+              echo "GET $BASE$PATH_Q -> HTTP $code"
+              if [ "$code" != "401" ]; then
+                echo "::error::$BASE$PATH_Q must require auth (got $code) — seat metering would leak tenant usage"
+                fail=1
+              fi
+            done
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Seat metering auth-gate verification failed"
+            exit 1
+          fi
+          echo "✅ /api/reports/seats (own-org + portfolio roll-up) rejects anonymous callers (401) on both hosts"
+
       - name: Verify spend ledger is auth-gated (#155)
         # The LLM spend ledger (GET /api/reports/spend) returns a tenant's
         # per-session Groq token spend — ADMIN-only and org-scoped, and must
