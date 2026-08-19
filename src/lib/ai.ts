@@ -10,14 +10,28 @@ export type { ScenarioScript, ScoreResult, ChatMessage };
 
 // ─── Model tiers ──────────────────────────────────────────────────────────────
 // The live customer turn's model is the single biggest conversation-speed lever.
-// `8b-instant` delivers roughly ~3x the tokens/sec and a lower time-to-first-token
-// than `70b-versatile` — the difference a trainee feels as "half speed vs. real".
-// We keep the higher-realism 70B model only for HARD scenarios (angry / nuanced
-// de-escalation, where roleplay realism is the product differentiator) and use the
-// snappier 8B model for easy/medium live turns. To retune the speed/realism
-// trade-off for the conversation, edit this one mapping.
-const CUSTOMER_MODEL_REALISM = 'llama-3.3-70b-versatile';
-const CUSTOMER_MODEL_FAST = 'llama-3.1-8b-instant';
+// The compact `gpt-oss-20b` delivers a lower time-to-first-token and higher
+// tokens/sec than the larger `gpt-oss-120b` — the difference a trainee feels as
+// "half speed vs. real". We keep the higher-realism 120B model only for HARD
+// scenarios (angry / nuanced de-escalation, where roleplay realism is the product
+// differentiator) and use the snappier 20B model for easy/medium live turns. To
+// retune the speed/realism trade-off for the conversation, edit this one mapping.
+//
+// 2026-08-19 EMERGENCY MODEL SWAP (#248 / #16): the previous tiers,
+// `llama-3.3-70b-versatile` (realism/scoring) and `llama-3.1-8b-instant` (fast),
+// were DEPRECATED by Groq on 2026-06-17 and DECOMMISSIONED (~2026-08-17). Every
+// chat/scoring completion then failed instantly (400 model_decommissioned) — the
+// customer turn fell back to the canned line and scoring produced ZERO scores —
+// while `/api/health`'s Groq `/v1/models` probe stayed green (the key still
+// authenticates; a decommissioned MODEL is a different failure). These are Groq's
+// own 1:1 recommended replacements (console.groq.com/docs/deprecations) and its
+// current production OSS models. The health probe now also asserts these exact
+// model ids are present in `/v1/models` (scripts/uptime-check.mjs) so a future
+// decommission opens an alert in ≤15 min instead of silently nulling scores.
+/** Realism tier — hard live customer turns + the trust-critical scoring judge. */
+export const CUSTOMER_MODEL_REALISM = 'openai/gpt-oss-120b';
+/** Fast tier — easy/medium live customer turns (lower TTFT, higher tok/s). */
+export const CUSTOMER_MODEL_FAST = 'openai/gpt-oss-20b';
 
 // ─── Scoring model ────────────────────────────────────────────────────────────
 // Scoring is a DIFFERENT concern from the live conversation. It runs once, at the
@@ -137,7 +151,7 @@ ${script.hints?.length ? `\nCONTEXT DETAILS:\n${script.hints.map(h => `- ${h}`).
 export async function generateResponse(messages: ChatMessage[]): Promise<string> {
   const client = getGroqClient();
   const completion = await client.chatCompletion({
-    model: 'llama-3.3-70b-versatile',
+    model: CUSTOMER_MODEL_REALISM,
     messages,
     temperature: 0.75,
     max_tokens: 400,
