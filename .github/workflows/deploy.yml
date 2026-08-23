@@ -388,11 +388,26 @@ jobs:
           # write-only + safe-to-embed, but is still masked + kept off logs.
           posthog="$(gcloud secrets versions access latest --secret=XPELEVATOR_POSTHOG_KEY --project="$proj" --quiet 2>/dev/null \
                 | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || posthog=""
+          # Telnyx phone-modality credentials (Sentry XPELEVATOR-WEB-2,
+          # `telnyx.webhook_public_key_missing`, firing hourly): the webhook
+          # verifier fails CLOSED without TELNYX_PUBLIC_KEY, taking the phone
+          # modality dark. Both live in GCP SM — the ed25519 signing key under
+          # `TELNYX_PUBLIC_KEY`, the API key under the `XPELEVATOR_TELNYX_API`
+          # alias. NOT lockout-critical for the deploy (absent → only the phone
+          # path is affected; chat/voice unaffected), so like the Sentry/PostHog
+          # keys they are fetched-and-exported (no probe gate) and stay OUT of
+          # the fail-capable assertion below. Masked + kept off logs.
+          telnyx_pub="$(gcloud secrets versions access latest --secret=TELNYX_PUBLIC_KEY --project="$proj" --quiet 2>/dev/null \
+                | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || telnyx_pub=""
+          telnyx_api="$(gcloud secrets versions access latest --secret=XPELEVATOR_TELNYX_API --project="$proj" --quiet 2>/dev/null \
+                | sed $'1s/^\xEF\xBB\xBF//' | tr -d '\r\n')" || telnyx_api=""
           [ -n "$db" ]   && echo "::add-mask::$db"
           [ -n "$groq" ] && echo "::add-mask::$groq"
           [ -n "$auth" ] && echo "::add-mask::$auth"
           [ -n "$sentry" ] && echo "::add-mask::$sentry"
           [ -n "$posthog" ] && echo "::add-mask::$posthog"
+          [ -n "$telnyx_pub" ] && echo "::add-mask::$telnyx_pub"
+          [ -n "$telnyx_api" ] && echo "::add-mask::$telnyx_api"
           # --- Neon SELECT 1 (read-only) — export DATABASE_URL ONLY on PASS ---
           if [ -z "$db" ]; then
             echo "⚠️  XPELEVATOR_CONNECTION_STRING absent in SM — keeping GitHub-secret DATABASE_URL"
@@ -460,6 +475,27 @@ jobs:
           else
             echo "ℹ️  XPELEVATOR_POSTHOG_KEY absent in SM — PostHog sink will no-op (non-fatal)"
           fi
+          # --- Telnyx phone credentials (Sentry XPELEVATOR-WEB-2): non-empty
+          #     checks only, export TELNYX_PUBLIC_KEY / TELNYX_API_KEY so the
+          #     Pages-secret step picks them up. No gate: absent → the phone
+          #     webhook verifier stays fail-closed (status quo), chat/voice
+          #     unaffected, deploy unaffected. ---
+          telnyx_pub_pass=ABSENT
+          if [ -n "$telnyx_pub" ]; then
+            telnyx_pub_pass=PASS
+            echo "TELNYX_PUBLIC_KEY=$telnyx_pub" >> "$GITHUB_ENV"
+            echo "✅ SM TELNYX_PUBLIC_KEY present (${#telnyx_pub} chars) → (TELNYX_PUBLIC_KEY ← GCP SM)"
+          else
+            echo "ℹ️  TELNYX_PUBLIC_KEY absent in SM — phone webhook verifier stays fail-closed (non-fatal)"
+          fi
+          telnyx_api_pass=ABSENT
+          if [ -n "$telnyx_api" ]; then
+            telnyx_api_pass=PASS
+            echo "TELNYX_API_KEY=$telnyx_api" >> "$GITHUB_ENV"
+            echo "✅ SM XPELEVATOR_TELNYX_API present (${#telnyx_api} chars) → (TELNYX_API_KEY ← GCP SM)"
+          else
+            echo "ℹ️  XPELEVATOR_TELNYX_API absent in SM — phone outbound calls unavailable (non-fatal)"
+          fi
           # --- job-summary evidence table (source actually used) ---
           src_db="GitHub secret (fallback)";   [ "$db_pass" = "PASS" ]   && src_db="GCP SM"
           src_groq="GitHub secret (fallback)"; [ "$groq_pass" = "PASS" ] && src_groq="GCP SM"
@@ -474,8 +510,10 @@ jobs:
             echo "| XPELEVATOR_AUTH_SECRET | structural (>=32 chars) | $auth_pass | $src_auth |"
             echo "| XPELEVATOR_SENTRY_DSN | structural (scheme+@), non-gating | $sentry_pass | $([ "$sentry_pass" = "PASS" ] && echo 'GCP SM' || echo '— (sink no-ops)') |"
             echo "| XPELEVATOR_POSTHOG_KEY | non-empty, non-gating | $posthog_pass | $([ "$posthog_pass" = "PASS" ] && echo 'GCP SM' || echo '— (sink no-ops)') |"
+            echo "| TELNYX_PUBLIC_KEY | non-empty, non-gating | $telnyx_pub_pass | $([ "$telnyx_pub_pass" = "PASS" ] && echo 'GCP SM' || echo '— (webhook fail-closed)') |"
+            echo "| XPELEVATOR_TELNYX_API | non-empty, non-gating | $telnyx_api_pass | $([ "$telnyx_api_pass" = "PASS" ] && echo 'GCP SM' || echo '— (outbound unavailable)') |"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "CUTOVER RESULT: DATABASE_URL=$db_pass ($src_db) GROQ=$groq_pass ($src_groq) AUTH_SECRET=$auth_pass ($src_auth) SENTRY_DSN=$sentry_pass POSTHOG_KEY=$posthog_pass"
+          echo "CUTOVER RESULT: DATABASE_URL=$db_pass ($src_db) GROQ=$groq_pass ($src_groq) AUTH_SECRET=$auth_pass ($src_auth) SENTRY_DSN=$sentry_pass POSTHOG_KEY=$posthog_pass TELNYX_PUBLIC_KEY=$telnyx_pub_pass TELNYX_API_KEY=$telnyx_api_pass"
           # Fail-capable (non-blocking) unless ALL THREE SM copies validated: keeps
           # proof-of-rejection honest — a stale/absent SM value yields a red step AND falls back.
           [ "$db_pass" = "PASS" ] && [ "$groq_pass" = "PASS" ] && [ "$auth_pass" = "PASS" ]
@@ -533,6 +571,22 @@ jobs:
             echo "✅ POSTHOG_KEY set on Pages production (PostHog product-event sink live)"
           else
             echo "ℹ️  POSTHOG_KEY unset — skipping (PostHog sink no-ops)"
+          fi
+          # TELNYX_PUBLIC_KEY / TELNYX_API_KEY (Sentry XPELEVATOR-WEB-2): set
+          # ONLY when resolved from SM (guarded) — an unset value leaves the
+          # phone webhook verifier fail-closed rather than writing an empty
+          # secret. The public key is what stops `telnyx.webhook_public_key_missing`.
+          if [ -n "${TELNYX_PUBLIC_KEY:-}" ]; then
+            printf '%s' "$TELNYX_PUBLIC_KEY" | npx wrangler pages secret put TELNYX_PUBLIC_KEY --project-name="$CF_PROJECT"
+            echo "✅ TELNYX_PUBLIC_KEY set on Pages production (phone webhook verifier live)"
+          else
+            echo "ℹ️  TELNYX_PUBLIC_KEY unset — skipping (phone webhook stays fail-closed)"
+          fi
+          if [ -n "${TELNYX_API_KEY:-}" ]; then
+            printf '%s' "$TELNYX_API_KEY" | npx wrangler pages secret put TELNYX_API_KEY --project-name="$CF_PROJECT"
+            echo "✅ TELNYX_API_KEY set on Pages production (phone outbound calls live)"
+          else
+            echo "ℹ️  TELNYX_API_KEY unset — skipping (phone outbound unavailable)"
           fi
 
       - name: Set Pages PREVIEW-environment secrets (Pages REST API)
