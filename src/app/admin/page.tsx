@@ -24,6 +24,7 @@ const blankScenario = {
   customerObjective: '',
   difficulty: 'medium' as 'easy' | 'medium' | 'hard',
   hints: [] as string[],
+  openingLine: '',
 };
 
 // One badge colour per modality so VOICE reads as its own modality, not grouped
@@ -370,6 +371,9 @@ function ScenariosTab() {
       customerObjective: form.customerObjective,
       difficulty: form.difficulty,
       hints: form.hints.filter(h => h.trim()),
+      // Authored first words (plan W2.8): kept only when non-blank, so clearing
+      // the field returns the scenario to the generated opener.
+      ...(form.openingLine.trim() ? { openingLine: form.openingLine.trim() } : {}),
     };
     const body = { name: form.name, jobTitleId: form.jobTitleId, type: form.type, description: form.description, script };
     let res: Response;
@@ -402,7 +406,7 @@ function ScenariosTab() {
   };
 
   const startEdit = (s: Scenario) => {
-    const script = ((s.script || {}) as { customerPersona?: string; customerObjective?: string; difficulty?: string; hints?: string[] });
+    const script = ((s.script || {}) as { customerPersona?: string; customerObjective?: string; difficulty?: string; hints?: string[]; openingLine?: string });
     setEditingId(s.id);
     setForm({
       name: s.name,
@@ -413,6 +417,7 @@ function ScenariosTab() {
       customerObjective: script.customerObjective || '',
       difficulty: (script.difficulty as 'easy' | 'medium' | 'hard') || 'medium',
       hints: script.hints || [],
+      openingLine: typeof script.openingLine === 'string' ? script.openingLine : '',
     });
     setShowForm(true);
   };
@@ -524,6 +529,20 @@ function ScenariosTab() {
                   placeholder="e.g. A full refund, or guaranteed re-shipment within 48 hours with a discount code as compensation."
                   value={form.customerObjective}
                   onChange={e => setForm({ ...form, customerObjective: e.target.value })}
+                  className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 text-sm resize-none"
+                />
+              </div>
+              <div>
+                <label htmlFor="scenario-opening-line" className="block text-xs text-slate-400 mb-1">
+                  What does the customer say first? (optional)
+                  <Tooltip text="The customer's exact first words when the session starts, in their own voice. One or two short sentences, no stage directions. Leave blank to have the opening improvised from the persona each time." />
+                </label>
+                <textarea
+                  id="scenario-opening-line"
+                  rows={2}
+                  placeholder="e.g. Hi, I paid for express shipping two weeks ago and my order still hasn't arrived."
+                  value={form.openingLine}
+                  onChange={e => setForm({ ...form, openingLine: e.target.value })}
                   className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 text-sm resize-none"
                 />
               </div>

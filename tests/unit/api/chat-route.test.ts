@@ -327,6 +327,104 @@ describe('POST /api/chat — streaming + terminal', () => {
     expect(insertedAgent).toBe(false);
   });
 
+  // ── Scripted opening line (plan W2.8 · G804) ────────────────────────────────
+  it('PROOF-OF-REJECTION: [START] with a scripted openingLine streams it with ZERO model calls', async () => {
+    asUser('u1', 'o1');
+    const line = "Hi, I'm locked out and I have a board report due in under an hour.";
+    wireSql({
+      postLoad: [
+        sessionRow({
+          scenario: { id: 's1', name: 'Locked out', script: { difficulty: 'easy', openingLine: line } },
+        }),
+      ],
+      insertCustomer: [],
+    });
+
+    const frames = await collectSSE(await POST(postReq({ sessionId: 'sess1', content: '[START]' })));
+
+    expect(aiMock.streamNextCustomerMessage).not.toHaveBeenCalled();
+    // Same SSE framing the client already consumes: chunk(s) then done.
+    expect(frames.filter((f) => f.type === 'chunk').map((f) => f.content).join('')).toBe(line);
+    const done = frames.find((f) => f.type === 'done');
+    expect(done?.content).toBe(line);
+    // Persisted as the CUSTOMER opener, stamped as scripted with no token usage.
+    const custCall = sqlMock.mock.calls.find((c) => queryText(c[0]).includes("'CUSTOMER'"));
+    expect(custCall).toBeDefined();
+    const values = custCall!.slice(1);
+    expect(values).toContain(line);
+    expect(values).toContain('scripted');
+    expect(values).toContain('scripted-opening');
+    expect(values.slice(-3)).toEqual([null, null, null]);
+    // No AGENT row for the [START] control signal.
+    expect(sqlMock.mock.calls.some((c) => queryText(c[0]).includes("'AGENT'"))).toBe(false);
+  });
+
+  it('scripted opener: a failed CUSTOMER insert surfaces an error frame, not a done', async () => {
+    asUser('u1', 'o1');
+    sqlMock.mockImplementation((strings?: TemplateStringsArray) => {
+      const tag = classify(queryText(strings));
+      if (tag === 'postLoad') {
+        return Promise.resolve([
+          sessionRow({ scenario: { id: 's1', name: 'X', script: { openingLine: 'Hi there.' } } }),
+        ]);
+      }
+      if (tag === 'insertCustomer') return Promise.reject(new Error('neon down'));
+      return Promise.resolve([]);
+    });
+
+    const frames = await collectSSE(await POST(postReq({ sessionId: 'sess1', content: '[START]' })));
+
+    expect(aiMock.streamNextCustomerMessage).not.toHaveBeenCalled();
+    const types = frames.map((f) => f.type);
+    expect(types).toContain('error');
+    expect(types).not.toContain('done');
+  });
+
+  it('[START] without an openingLine still generates the opener with the model', async () => {
+    asUser('u1', 'o1');
+    aiMock.streamNextCustomerMessage.mockImplementation(streamOf('Hi, I need help'));
+    wireSql({ postLoad: [sessionRow()], insertCustomer: [] });
+
+    const frames = await collectSSE(await POST(postReq({ sessionId: 'sess1', content: '[START]' })));
+
+    expect(aiMock.streamNextCustomerMessage).toHaveBeenCalledTimes(1);
+    expect(frames.find((f) => f.type === 'done')?.content).toBe('Hi, I need help');
+  });
+
+  it('[START] on a session that already has messages ignores openingLine (no duplicate opener)', async () => {
+    asUser('u1', 'o1');
+    aiMock.streamNextCustomerMessage.mockImplementation(streamOf('As I was saying'));
+    wireSql({
+      postLoad: [
+        sessionRow({
+          scenario: { id: 's1', name: 'Locked out', script: { openingLine: 'Hi, I am locked out.' } },
+          messages: [{ role: 'CUSTOMER', content: 'Hi, I am locked out.' }],
+        }),
+      ],
+      insertCustomer: [],
+    });
+
+    const frames = await collectSSE(await POST(postReq({ sessionId: 'sess1', content: '[START]' })));
+
+    expect(aiMock.streamNextCustomerMessage).toHaveBeenCalledTimes(1);
+    expect(frames.find((f) => f.type === 'done')?.content).toBe('As I was saying');
+  });
+
+  it('a normal trainee turn never replays openingLine', async () => {
+    asUser('u1', 'o1');
+    aiMock.streamNextCustomerMessage.mockImplementation(streamOf('Okay, thanks'));
+    wireSql({
+      postLoad: [sessionRow({ scenario: { id: 's1', name: 'X', script: { openingLine: 'Hi there.' } } })],
+      insertAgent: [],
+      insertCustomer: [],
+    });
+
+    const frames = await collectSSE(await POST(postReq({ sessionId: 'sess1', content: 'How can I help?' })));
+
+    expect(aiMock.streamNextCustomerMessage).toHaveBeenCalledTimes(1);
+    expect(frames.find((f) => f.type === 'done')?.content).toBe('Okay, thanks');
+  });
+
   it('[RESOLVED] in the reply auto-ends: session_ending → session_ended, and scores', async () => {
     asUser('u1', 'o1');
     aiMock.streamNextCustomerMessage.mockImplementation(streamOf('All sorted, thanks [RESOLVED]'));

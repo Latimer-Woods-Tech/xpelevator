@@ -53,6 +53,12 @@ export interface PackScenarioScript {
   customerObjective: string;
   /** How hard the customer is to handle. */
   difficulty: ScenarioDifficulty;
+  /**
+   * The customer's authored first words (`ScenarioScript.openingLine`) — the
+   * opener is sent as-is with zero model calls. Every shipped pack scenario
+   * carries one (`tests/unit/lib/scenario-opening-lines.test.ts`).
+   */
+  openingLine?: string;
   /** Optional context the customer knows but won't volunteer unprompted. */
   hints?: string[];
 }
@@ -94,8 +100,13 @@ export interface ScenarioPack {
 /**
  * Bump when the pack set / scenario shape changes so callers (catalog cache,
  * import idempotency) can detect drift. A unit test pins the current value.
+ *
+ * History: 1 = initial starter library; 2 = every scenario gained an authored
+ * `openingLine` (plan W2.8 · G804). Orgs that imported at 1 see the opt-in
+ * upgrade; `scripts/backfill-opening-lines.ts` is the non-clobbering
+ * alternative that only adds the line to unedited rows.
  */
-export const PACK_CATALOG_VERSION = 1 as const;
+export const PACK_CATALOG_VERSION = 2 as const;
 
 /**
  * The starter library — a set of per-vertical packs, each a role plus four
@@ -128,6 +139,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Regain access to the account in time to export the report. Will feel reassured if given a clear time estimate and a fallback.',
           difficulty: 'easy',
+          openingLine:
+            "Hi, I can't get into my account and I have a board report due in less than an hour. Can you help me get back in quickly?",
           hints: [
             'She reset her password yesterday and may be typing the old one.',
             'She has admin rights but has never used the account-recovery flow.',
@@ -146,6 +159,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Understand exactly why the bill rose and get it corrected or credited if it was an error. Success = a clear line-item explanation and a concrete next step.',
           difficulty: 'medium',
+          openingLine:
+            "Hi. My invoice this month is about double what it was last month, and nobody told me why.",
           hints: [
             'He added five seats mid-cycle, which triggered a proration he did not notice.',
             'He will threaten to cancel if he feels the charge is being defended before it is explained.',
@@ -164,6 +179,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Get the integration syncing again, or a credible root-cause and ETA. Success = being treated as technical and given a real diagnostic path.',
           difficulty: 'hard',
+          openingLine:
+            "Hi, our data sync stopped running overnight and nothing changed on our end that I can see. I've already checked the obvious things, so I need someone who can actually dig in.",
           hints: [
             'An API token rotated on her side two days ago and was never updated in the integration.',
             'She will disengage if asked to "try turning it off and on again" before her setup is acknowledged.',
@@ -182,6 +199,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Feel heard and see that someone owns the problem. She will stay if given genuine acknowledgement plus one concrete commitment — not a discount thrown at her to end the call.',
           difficulty: 'hard',
+          openingLine:
+            "I want to cancel our account today. I've been with you three years, and after this week I'm done.",
           hints: [
             'A discount offered too early reads as dismissive and hardens her position.',
             'She references a support ticket that sat two days without a reply.',
@@ -214,6 +233,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Leave with a gift they feel good about. Happy to trade up if the reason is genuine, put off by a hard sell.',
           difficulty: 'easy',
+          openingLine:
+            "Hi! My sister's birthday is coming up and I honestly have no idea what to get her.",
           hints: [
             'The gift is for a sibling who likes the outdoors.',
             'A sincere "this one is a little more but here is why" lands; a scripted upsell does not.',
@@ -232,6 +253,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Get her money back, or failing that, a fair alternative. Success = feeling respected even if the exact ask cannot be met.',
           difficulty: 'medium',
+          openingLine:
+            "Hi, I'd like to return this. I know the receipt is a few days past the window, but I was travelling and couldn't get here sooner.",
           hints: [
             'Store credit or an exchange is within the associate’s discretion; a cash refund is not.',
             'She escalates only if she feels the policy is being quoted at her without any flexibility.',
@@ -250,6 +273,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'A genuine apology and confidence it will not happen again. Warms quickly to sincere ownership; hardens if handed a scripted "sorry for the inconvenience".',
           difficulty: 'medium',
+          openingLine:
+            "Excuse me, I've been waiting forty minutes and nobody said a word to me about a delay.",
           hints: [
             'The delay was a staffing gap, not his fault — he will relax once that is owned honestly.',
             'A small gesture offered after the apology lands well; offered instead of one, it does not.',
@@ -268,6 +293,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'A replacement or refund and an admission the product was faulty. Will not accept a solution offered before she has finished venting.',
           difficulty: 'hard',
+          openingLine:
+            "Yes, hi, I bought this from you yesterday and it's already broken! I paid good money for it and I feel completely cheated.",
           hints: [
             'Letting her finish her first full sentence before responding cuts the volume in half.',
             'She has the receipt and the faulty item — the resolution is straightforward once she is calm.',
@@ -300,6 +327,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Figure out whether this is a fit and what the next step is. Responds well to good questions, drifts if pitched at before being understood.',
           difficulty: 'easy',
+          openingLine:
+            "Hi, thanks for getting back to me. A colleague recommended you, but I'm honestly not sure yet what we need.",
           hints: [
             'Their team of eight is outgrowing a spreadsheet-based process.',
             'A crisp recap of their need plus a proposed next step earns the meeting.',
@@ -318,6 +347,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Get to a number or a value story she can defend to her manager. Success = a reframe around outcomes, not a knee-jerk discount.',
           difficulty: 'medium',
+          openingLine:
+            "Hi, thanks for sending the proposal. We really like it, but it's more than we budgeted for.",
           hints: [
             'The real blocker is proving ROI to her manager, not the sticker price itself.',
             'An immediate discount signals the price was soft and invites more pushback.',
@@ -336,6 +367,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Escape the call quickly — unless the rep earns 60 more seconds with one sharp, relevant question. Success = a real next step, not a PDF into the void.',
           difficulty: 'hard',
+          openingLine:
+            "Yeah, hi, I'm right between meetings. Can you just email me something and I'll take a look?",
           hints: [
             'One specific question about his current process cuts through the brush-off; a generic pitch does not.',
             'He will agree to a short follow-up if it is framed around his time, not the rep’s pipeline.',
@@ -354,6 +387,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Decide whether this is worth a deeper evaluation. Success = honest, specific answers — including where the product is not the best fit — that earn a technical follow-up.',
           difficulty: 'hard',
+          openingLine:
+            "Good afternoon. I'll be upfront: we already use one of your competitors, so I'm listening for a reason to look any further.",
           hints: [
             'He will test a weak point on purpose; admitting a real limitation builds more trust than deflecting.',
             'He respects a rep who knows the competitor honestly and does not trash it.',
@@ -386,6 +421,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Move from "just exploring" to committing to one concrete, small next step. Success = she feels understood and takes the small action herself, never a hard close she agrees to just to end the call.',
           difficulty: 'easy',
+          openingLine:
+            "Hi! I really enjoyed the workshop, but I should say I'm just exploring right now.",
           hints: [
             'She has wanted to change direction for two years but keeps postponing the first step.',
             'A high-pressure close makes her retreat to "let me think about it" and go quiet.',
@@ -404,6 +441,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Get him to separate the past programs from this decision and name what would make it worth it. Success = he states his own success criteria out loud instead of dismissing on reflex.',
           difficulty: 'medium',
+          openingLine:
+            "I'll be honest with you, I've paid for two programs like this before and got nothing out of either one.",
           hints: [
             'His last program was all motivation and no accountability — that gap is the real objection under the words.',
             'He will disengage the moment he hears anything that sounds rehearsed.',
@@ -422,6 +461,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Reconnect him to why he started and get one small commitment back on the board. Success = he re-owns the goal and names the next action himself, not because he was shamed into it.',
           difficulty: 'medium',
+          openingLine:
+            "Hey. I'll be straight with you, I've kind of stopped doing the work, and I'm thinking about stepping away from the program.",
           hints: [
             'He hit one setback in week three and privately decided he "is not the type who follows through."',
             'Telling him to just try harder confirms that story and loses him.',
@@ -440,6 +481,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Surface that the real objection is belief in herself, not the price, and help her decide from there. Success = an honest decision either way — a genuine yes or a real not-now — never a pressured yes she cancels the next day.',
           difficulty: 'hard',
+          openingLine:
+            "Hi. I've thought about it a lot, and honestly, it's a lot of money and I just don't have the time right now.",
           hints: [
             'She can afford it; the fear is committing publicly and then failing.',
             'Dropping the price validates the wrong objection and quietly lowers her belief that it will work.',
@@ -472,6 +515,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Get her to name what she is afraid of and commit to one real dial while still on the call. Success = she makes the first call herself because she wants to, not because she was ordered to hit an activity number.',
           difficulty: 'easy',
+          openingLine:
+            "Hi! I've been cleaning up my list and going over the script again, so I'm almost ready to start dialling.",
           hints: [
             'She is convinced the first "no" will prove she was a bad hire.',
             'Being told to "just pick up the phone, it is easy" makes her feel more alone, not braver.',
@@ -490,6 +535,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Get him to own the part of the outcome that is his and pick one action he controls this week. Success = he names his own next move instead of re-litigating the leads.',
           difficulty: 'medium',
+          openingLine:
+            "Before you start, I know I missed the number again. But have you actually looked at the leads they're giving us?",
           hints: [
             'His real fear is that if he tries his hardest and still misses, the excuse is gone.',
             'Arguing that the leads are fine hands him the fight he wants and dodges the real work.',
@@ -508,6 +555,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Reconnect them to their own track record and get one small commitment for tomorrow back on the board. Success = they re-own the goal and name the next step, not a hollow "I am fine" to end the call.',
           difficulty: 'medium',
+          openingLine:
+            "So you heard we lost the big one. Honestly, I'm wondering if I'm even cut out for this.",
           hints: [
             'One brutal loss has overwritten a year of wins in their head.',
             'A generic "shake it off, next one is yours" confirms the coach does not get how much it hurt.',
@@ -526,6 +575,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Get him to raise his own bar for the rest of the quarter instead of coasting, from pride not pressure. Success = he sets a stretch he chose himself and commits to it out loud.',
           difficulty: 'hard',
+          openingLine:
+            "What's this about? I already hit my number three weeks ago.",
           hints: [
             'He is bored, not lazy — coasting is what boredom looks like on a strong rep.',
             'Threatening or invoking the quota makes him do the minimum out of spite.',
@@ -558,6 +609,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Leave the session with one concrete goal in her own words and a first tiny step she chose. Success = she names something measurable ("walk before work three days") instead of another vague wish.',
           difficulty: 'easy',
+          openingLine:
+            "Hi, I'm a little nervous. I just want to be better, more disciplined, you know, less stuck.",
           hints: [
             'Every time she is vague she is testing whether the coach will do the naming for her — they should not.',
             'She has a real, specific goal underneath; she is afraid it sounds too small to say out loud.',
@@ -576,6 +629,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Get him to commit to one small thing he will do the very next day, not next Monday, and small enough that quitting is not worth it. Success = he trades the grand restart for one action he starts now and can repeat.',
           difficulty: 'medium',
+          openingLine:
+            "Okay, so last week didn't go great, but I've got a brand new plan and I'm starting fresh on Monday.",
           hints: [
             'The clean-slate Monday is the addiction — planning feels like doing, so he never has to risk actually doing.',
             'Another ambitious multi-step plan is what he wants; it lets him fail big and restart again.',
@@ -594,6 +649,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Reconnect her to the reason she started and the ground she has already gained, and get one commitment to stay the course through the flat stretch. Success = she re-owns the goal for herself instead of a hollow "maybe you are right" to end the call.',
           difficulty: 'medium',
+          openingLine:
+            "Hi. I've done everything you asked for six weeks, and I just don't think this is working.",
           hints: [
             'The plateau is normal and expected here, but to her it reads as proof the effort is wasted.',
             'A cheerful "just push through, it gets easier" rings hollow and confirms the coach is not really listening.',
@@ -612,6 +669,8 @@ export const SCENARIO_PACKS: readonly ScenarioPack[] = [
           customerObjective:
             'Get him past the busy-life story to the honest fact that he chose other things over the goal, and to one commitment he actually controls this week. Success = he stops defending the excuse and names his own next move.',
           difficulty: 'hard',
+          openingLine:
+            "Hey, sorry I've gone quiet. Things have been absolutely crazy at work and at home, you wouldn't believe the last three weeks.",
           hints: [
             'He is not too busy — he deprioritised the goal and "busy" is the socially acceptable way to say so.',
             'Accepting the excuse lets him off the hook; shaming him for it gives him a reason to disappear for good.',

@@ -39,7 +39,7 @@ vi.mock('@/lib/audit', () => ({
 
 import { POST } from '@/app/api/scenario-packs/import/route';
 import { AuthError } from '@/lib/auth-api';
-import { SCENARIO_PACKS } from '@/lib/scenario-packs';
+import { SCENARIO_PACKS, PACK_CATALOG_VERSION } from '@/lib/scenario-packs';
 
 const PACK = SCENARIO_PACKS[0];
 
@@ -145,7 +145,7 @@ describe('POST /api/scenario-packs/import — write path', () => {
     expect(body.scenarios.created).toBe(PACK.scenarios.length);
     expect(body.scenarios.skipped).toBe(0);
     expect(body.scenarios.total).toBe(PACK.scenarios.length);
-    expect(body.packVersion).toBe(1);
+    expect(body.packVersion).toBe(PACK_CATALOG_VERSION);
     // Audits the real import against the pack (issue #157 §10).
     expect(recordAuditMock).toHaveBeenCalledWith(
       expect.objectContaining({
