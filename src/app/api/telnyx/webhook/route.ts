@@ -46,6 +46,11 @@ import {
   type PersistedTurnTelemetry,
 } from '@/lib/latency';
 import { errorFields, log, requestIdFrom } from '@/lib/log';
+import {
+  SCRIPTED_OPENING_MODEL,
+  SCRIPTED_OPENING_ROUTE_REASON,
+  scriptedOpeningLine,
+} from '@/lib/opening-line';
 
 /** Canonical path label attached to this route's structured log lines. */
 const ROUTE_PATH = '/api/telnyx/webhook';
@@ -212,33 +217,48 @@ async function handleEvent(
         const scenario: any = scenarioRows[0] ?? null;
         const script = (scenario?.script ?? {}) as Record<string, unknown>;
 
-        // Generate AI opening line via Groq
+        // Generate the opening line — scripted when authored, else via Groq.
         // Conversation-speed lever (R-059): mirror the chat path — pick the model
         // tier by scenario difficulty instead of hard-coding the heavy 70B model
         // on every phone turn. Hard scenarios keep the higher-realism 70B model;
         // easy/medium use the ~3x faster 8B model so the simulated customer starts
         // speaking closer to real-time (directly targeting the founder's
         // "half-speed" voice signal — R-058 showed the phone path ran 70B always).
-        const customerModel = customerModelForDifficulty(resolveScenarioDifficulty(script));
-        const systemPromptOpening = buildSessionSystemPrompt(state.scenarioName, script, state.sessionId);
-        const client = getGroqClient();
-        const opening = await client.chatCompletion({
-          model: customerModel,
-          messages: [
-            { role: 'system', content: systemPromptOpening },
-            { role: 'user', content: '[START_CONVERSATION]' },
-          ],
-          max_tokens: 100,
-        });
+        //
+        // Scripted opener (plan W2.8 · G804): a scenario that carries an authored
+        // `openingLine` speaks it as-is — zero model calls, zero generation wait.
+        // Only a scenario without one pays for the generated opener below.
+        const scriptedLine = scriptedOpeningLine(script);
+        let customerModel: string;
+        let openRouteReason: string;
+        let openingUsage: GroqTokenUsage | null | undefined = null;
+        let cleanOpening: string;
+        if (scriptedLine) {
+          customerModel = SCRIPTED_OPENING_MODEL;
+          openRouteReason = SCRIPTED_OPENING_ROUTE_REASON;
+          cleanOpening = scriptedLine;
+        } else {
+          customerModel = customerModelForDifficulty(resolveScenarioDifficulty(script));
+          openRouteReason = routeReasonForDifficulty(resolveScenarioDifficulty(script));
+          const systemPromptOpening = buildSessionSystemPrompt(state.scenarioName, script, state.sessionId);
+          const client = getGroqClient();
+          const opening = await client.chatCompletion({
+            model: customerModel,
+            messages: [
+              { role: 'system', content: systemPromptOpening },
+              { role: 'user', content: '[START_CONVERSATION]' },
+            ],
+            max_tokens: 100,
+          });
+          openingUsage = opening.usage;
+          const openingText = opening.choices[0]?.message?.content?.trim() ?? 'Hello?';
+          cleanOpening = openingText.replace('[RESOLVED]', '').trim();
+        }
         const openReplyReadyMs = Date.now() - openTurnStart;
-
-        const openingText = opening.choices[0]?.message?.content?.trim() ?? 'Hello?';
-        const cleanOpening = openingText.replace('[RESOLVED]', '').trim();
 
         // Save AI opening (CUSTOMER role) — keep its id so this turn's latency
         // telemetry (R-070) can be stamped once callSpeak gives the dispatch total.
         const openingMsgId = await saveMessage(state.sessionId, 'CUSTOMER', cleanOpening);
-        const openRouteReason = routeReasonForDifficulty(resolveScenarioDifficulty(script));
 
         // Speak the opening — call.speak.ended will trigger startTranscription
         const newState = { ...state, turnCount: 1 };
@@ -253,7 +273,7 @@ async function handleEvent(
           await stampTurnTelemetry(
             openingMsgId,
             phoneTurnTelemetry(openTiming, customerModel, openRouteReason),
-            opening.usage,
+            openingUsage,
           );
           log('info', 'telnyx.turn_latency', {
             requestId,

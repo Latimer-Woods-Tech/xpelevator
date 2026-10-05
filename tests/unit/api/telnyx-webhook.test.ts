@@ -325,6 +325,69 @@ describe('call.answered', () => {
   });
 });
 
+// ── call.answered with a scripted opening line (plan W2.8 · G804) ─────────────
+
+describe('call.answered — scripted openingLine', () => {
+  const LINE = "Yeah, hi. I want to cancel my account today, so let's just do that.";
+
+  function stampValues() {
+    const stampCall = sqlMock.mock.calls.find(
+      (c) => Array.isArray(c[0]) && c[0].join(' ').includes('UPDATE chat_messages'),
+    );
+    return stampCall?.slice(1);
+  }
+
+  it('PROOF-OF-REJECTION: speaks the authored line with ZERO model calls', async () => {
+    sqlState.scenarioAnswered = [{ id: 'scn-1', script: { difficulty: 'hard', openingLine: LINE } }];
+    await post(event('call.answered'));
+    // No model client is even constructed, let alone called.
+    expect(getGroqClientMock).not.toHaveBeenCalled();
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+    // The spoken text and the saved CUSTOMER turn are exactly the authored line.
+    expect(callSpeakMock).toHaveBeenCalledTimes(1);
+    expect(callSpeakMock.mock.calls[0][1].payload).toBe(LINE);
+    expect(ranInsertCustomer(LINE)).toBe(true);
+    // Telemetry marks the turn as scripted, with no token usage.
+    const values = stampValues();
+    expect(values).toBeDefined();
+    expect(values).toContain('scripted');
+    expect(values).toContain('scripted-opening');
+    expect(values!.slice(-4, -1)).toEqual([null, null, null]);
+  });
+
+  it('trims surrounding whitespace from the authored line', async () => {
+    sqlState.scenarioAnswered = [{ id: 'scn-1', script: { openingLine: `  ${LINE}\n` } }];
+    await post(event('call.answered'));
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+    expect(callSpeakMock.mock.calls[0][1].payload).toBe(LINE);
+  });
+
+  it('falls back to the model when openingLine is absent', async () => {
+    sqlState.scenarioAnswered = [{ id: 'scn-1', script: { difficulty: 'easy' } }];
+    groqReply('Hi, I need help with my order');
+    await post(event('call.answered'));
+    expect(chatCompletionMock).toHaveBeenCalledTimes(1);
+    expect(callSpeakMock.mock.calls[0][1].payload).toBe('Hi, I need help with my order');
+  });
+
+  it('falls back to the model when openingLine is blank', async () => {
+    sqlState.scenarioAnswered = [{ id: 'scn-1', script: { openingLine: '   ' } }];
+    groqReply('Hello, is this support?');
+    await post(event('call.answered'));
+    expect(chatCompletionMock).toHaveBeenCalledTimes(1);
+    expect(callSpeakMock.mock.calls[0][1].payload).toBe('Hello, is this support?');
+  });
+
+  it('still records [SPEAK_ERROR] and hangs up when speaking the scripted line fails', async () => {
+    sqlState.scenarioAnswered = [{ id: 'scn-1', script: { openingLine: LINE } }];
+    callSpeakMock.mockRejectedValueOnce(new Error('telnyx 502'));
+    await post(event('call.answered'));
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+    expect(ranInsertCustomer('[SPEAK_ERROR] telnyx 502')).toBe(true);
+    expect(callHangupMock).toHaveBeenCalledWith('cc-1');
+  });
+});
+
 // ── event-ID idempotency (withIdempotency) ───────────────────────────────────
 
 describe('event-ID idempotency', () => {

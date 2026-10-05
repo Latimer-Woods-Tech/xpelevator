@@ -22,7 +22,8 @@ const VALID_TYPES = ['PHONE', 'CHAT', 'VOICE'];
 
 describe('scenario-packs — starter library data', () => {
   it('pins the catalog version', () => {
-    expect(PACK_CATALOG_VERSION).toBe(1);
+    // 2 = every scenario gained an authored openingLine (plan W2.8 · G804).
+    expect(PACK_CATALOG_VERSION).toBe(2);
   });
 
   it('ships at least three per-vertical packs with unique ids', () => {
