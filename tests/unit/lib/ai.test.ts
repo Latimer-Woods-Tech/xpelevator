@@ -10,7 +10,7 @@
  * Covered:
  *   1. System prompt construction        — persona/objective/difficulty/hints
  *   2. Fallback script when no script     — default customer still renders
- *   3. generateResponse returns content   — and '' when choices empty
+ *   3. generateResponse stays deleted     — no dead completion export (G807)
  *   4. scoreSession parses valid JSON, strips markdown fences, clamps 1–10,
  *      tolerates malformed JSON ([]), filters out-of-range criteria indices
  *   5. streamNextCustomerMessage yields streamed tokens + skips empty deltas
@@ -20,7 +20,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import {
   buildSessionSystemPrompt,
-  generateResponse,
   scoreSession,
   parseScoreRows,
   streamNextCustomerMessage,
@@ -48,14 +47,6 @@ function completionResponse(content: string) {
     }),
     { status: 200, headers: { 'content-type': 'application/json' } }
   );
-}
-
-/** Build a Groq Response whose choices array is empty. */
-function emptyChoicesResponse() {
-  return new Response(JSON.stringify({ choices: [] }), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  });
 }
 
 /**
@@ -377,19 +368,14 @@ describe('lib/ai — persona owns the name (E-root #4)', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('lib/ai — generateResponse', () => {
-  it('returns the message content', async () => {
-    fetchMock.mockResolvedValueOnce(
-      completionResponse('Hello, I need help with my bill.')
-    );
-    const result = await generateResponse([{ role: 'user', content: 'Hi' }]);
-    expect(result).toBe('Hello, I need help with my bill.');
-  });
-
-  it('returns empty string when choices is empty', async () => {
-    fetchMock.mockResolvedValueOnce(emptyChoicesResponse());
-    const result = await generateResponse([]);
-    expect(result).toBe('');
+describe('lib/ai — no dead completion export (W0.6 #8, G807)', () => {
+  // `generateResponse` was a non-streaming Groq completion with no caller
+  // outside this test file. It was deleted so nothing can start spending on a
+  // model through an unused path. Proof-of-rejection: this fails while the
+  // export exists.
+  it('does not export generateResponse', async () => {
+    const mod = await import('@/lib/ai');
+    expect('generateResponse' in mod).toBe(false);
   });
 });
 

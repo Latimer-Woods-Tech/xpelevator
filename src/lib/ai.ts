@@ -146,20 +146,6 @@ ${script.hints?.length ? `\nCONTEXT DETAILS:\n${script.hints.map(h => `- ${h}`).
 // ─── Chat Completion ──────────────────────────────────────────────────────────
 
 /**
- * Generate text (non-streaming) from the Groq API.
- */
-export async function generateResponse(messages: ChatMessage[]): Promise<string> {
-  const client = getGroqClient();
-  const completion = await client.chatCompletion({
-    model: CUSTOMER_MODEL_REALISM,
-    messages,
-    temperature: 0.75,
-    max_tokens: 400,
-  });
-  return completion.choices[0]?.message.content ?? '';
-}
-
-/**
  * Shown to the trainee — and persisted as the customer's turn — whenever a live
  * customer turn cannot be generated: an empty model stream OR a Groq/transport
  * error. It stays in character and MUST NOT carry internal error detail or the
