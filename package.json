@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
@@ -30,14 +30,14 @@
     "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-neon": "^6.19.2",
     "@prisma/client": "^6.9.0",
-    "next": "^15.5.24",
+    "next": "^16.4.0",
     "next-auth": "^5.0.0-beta.32",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
   "devDependencies": {
     "@cloudflare/next-on-pages": "^1.13.16",
-    "@opennextjs/cloudflare": "^1.20.1",
+    "@opennextjs/cloudflare": "^1.20.10",
     "@playwright/test": "^1.56.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/dom": "^10.4.1",
