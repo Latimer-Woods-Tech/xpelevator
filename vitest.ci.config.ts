@@ -52,7 +52,8 @@ import tsconfigPaths from 'vite-tsconfig-paths';
  */
 export default defineConfig({
   plugins: [tsconfigPaths({ projects: ['./tsconfig.test.json'] })],
-  esbuild: { jsx: 'automatic' },
+  // Vite 8: Oxc (not esbuild) transforms TS/JSX — see vitest.config.ts.
+  oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     dedupe: ['react', 'react-dom'],
   },
