@@ -8,7 +8,12 @@ export default defineConfig({
   // Element), which throws "React is not defined" when rendering those files in
   // the ui tier. Force the automatic runtime so component tests transform the
   // same way `next build` does.
-  esbuild: { jsx: 'automatic' },
+  //
+  // Vite 8 replaced esbuild with Oxc as the TS/JSX transformer, so the old
+  // `esbuild: { jsx: 'automatic' }` option is no longer honoured and the
+  // tsconfig's `"jsx": "preserve"` (required by Next) leaks through — vite's
+  // import analysis then fails on raw JSX. Configure the Oxc transformer.
+  oxc: { jsx: { runtime: 'automatic' } },
   resolve: {
     // Note: 'node' condition was previously needed for next-auth v5 package
     // exports resolution. Removed because it causes React to resolve differently

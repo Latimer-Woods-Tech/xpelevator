@@ -145,3 +145,66 @@ describe('Admin Scenarios — Duplicate action', () => {
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('/api/scenarios'));
   });
 });
+
+describe('Admin Scenarios — opening line (plan W2.8 · G804)', () => {
+  const LINE = "Hi, I can't get into my account and I have a report due in under an hour.";
+  const WITH_LINE = [
+    {
+      id: 's-chat',
+      name: 'Chat scenario',
+      description: null,
+      type: 'CHAT',
+      jobTitleId: 'job-1',
+      script: { customerPersona: 'Dana', customerObjective: 'Get back in', difficulty: 'easy', hints: [], openingLine: LINE },
+    },
+  ];
+
+  function stubFetchWithLine() {
+    const fetchSpy = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>((url) => {
+      if (url === '/api/scenarios') return Promise.resolve(jsonResponse(WITH_LINE));
+      if (url === '/api/jobs') return Promise.resolve(jsonResponse(JOBS));
+      if (url === '/api/criteria') return Promise.resolve(jsonResponse([]));
+      return Promise.resolve(jsonResponse({}));
+    });
+    // @ts-expect-error – install the stub on the test global
+    globalThis.fetch = fetchSpy;
+    return fetchSpy;
+  }
+
+  function savedScript(fetchSpy: ReturnType<typeof stubFetchWithLine>) {
+    const put = fetchSpy.mock.calls.find(([url, init]) => url === '/api/scenarios/s-chat' && init?.method === 'PUT');
+    expect(put).toBeDefined();
+    return JSON.parse(String(put![1]!.body)).script as Record<string, unknown>;
+  }
+
+  it('PROOF-OF-REJECTION: editing a scenario keeps its openingLine on save', async () => {
+    const fetchSpy = stubFetchWithLine();
+    await openScenariosTab();
+    await waitFor(() => expect(screen.getByText('Chat scenario')).toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!);
+    // The authored line is loaded into its own field.
+    expect(screen.getByLabelText(/What does the customer say first/)).toHaveValue(LINE);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update Scenario' }));
+    await waitFor(() => expect(savedScript(fetchSpy).openingLine).toBe(LINE));
+  });
+
+  it('saves an edited opening line, and drops it when cleared', async () => {
+    const fetchSpy = stubFetchWithLine();
+    await openScenariosTab();
+    await waitFor(() => expect(screen.getByText('Chat scenario')).toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!);
+    const field = screen.getByLabelText(/What does the customer say first/);
+    fireEvent.change(field, { target: { value: '  Hello, is this support?  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Scenario' }));
+    await waitFor(() => expect(savedScript(fetchSpy).openingLine).toBe('Hello, is this support?'));
+
+    fetchSpy.mockClear();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!);
+    fireEvent.change(screen.getByLabelText(/What does the customer say first/), { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update Scenario' }));
+    await waitFor(() => expect(savedScript(fetchSpy)).not.toHaveProperty('openingLine'));
+  });
+});

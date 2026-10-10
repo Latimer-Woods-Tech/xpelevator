@@ -152,6 +152,28 @@ export class GroqFetchClient {
   }
 
   /**
+   * List the model ids Groq currently offers (`GET /v1/models`). Not billable:
+   * no completion is made. Used by the `/api/debug/groq` diagnostic to check
+   * the credential AND that the model ids the app calls are still offered (a
+   * decommissioned model leaves the key valid — the #248 outage). Throws a
+   * {@link GroqApiError} on a non-OK response.
+   */
+  async listModels(): Promise<string[]> {
+    const response = await fetch(`${this.baseURL}/models`, {
+      headers: { 'Authorization': `Bearer ${this.apiKey}` },
+    });
+
+    if (!response.ok) {
+      throw new GroqApiError(response.status, await response.text());
+    }
+
+    const parsed = (await response.json()) as { data?: Array<{ id?: unknown }> };
+    return Array.isArray(parsed?.data)
+      ? parsed.data.map((m) => m?.id).filter((id): id is string => typeof id === 'string')
+      : [];
+  }
+
+  /**
    * Open the streaming connection for one model, throwing a {@link GroqApiError}
    * on a non-OK response (before any byte is read, so the caller may safely try
    * a fallback model). Returns the live `Response` for the reader loop.

@@ -22,6 +22,11 @@ import {
 } from '@/lib/limits';
 import { finalizeAndScoreSession } from '@/lib/session-scoring';
 import { errorFields, log, requestIdFrom } from '@/lib/log';
+import {
+  SCRIPTED_OPENING_MODEL,
+  SCRIPTED_OPENING_ROUTE_REASON,
+  scriptedOpeningLine,
+} from '@/lib/opening-line';
 
 
 // POST /api/chat
@@ -202,6 +207,20 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── 3.75. Scripted opener (plan W2.8 · G804) ──────────────────────────────
+    // A fresh session's [START] on a scenario with an authored `openingLine`
+    // sends that line as-is: zero model calls, zero generation wait. Same SSE
+    // framing (chunk → done) the client already consumes. Only the very first
+    // turn qualifies — a [START] on a session that already has messages falls
+    // through to the model so the opener is never duplicated.
+    const scriptedLine =
+      isStart && session.messages.length === 0
+        ? scriptedOpeningLine(session.scenario?.script)
+        : null;
+    if (scriptedLine) {
+      return scriptedOpeningStream(sessionId, scriptedLine, requestId);
+    }
+
     // ── 4. Build history for AI ───────────────────────────────────────────────
     const systemPrompt = buildSessionSystemPrompt(
       session.scenario.name,
@@ -365,6 +384,52 @@ export async function POST(request: Request) {
     log('error', 'chat.post_failed', { requestId, path: '/api/chat', method: 'POST', ...errorFields(error) });
     return NextResponse.json({ error: 'Failed to process message' }, { status: 500 });
   }
+}
+
+/**
+ * Send a scenario's authored opening line as the customer's first turn (plan
+ * W2.8 · G804) — no model call. Persists it as the CUSTOMER opener with its
+ * latency telemetry stamped `model = 'scripted'` / `route_reason =
+ * 'scripted-opening'` (so latency analytics never credit a model that did not
+ * run) and NULL token columns, then emits the same chunk → done SSE frames a
+ * generated opener produces.
+ */
+function scriptedOpeningStream(sessionId: string, line: string, requestId: string): Response {
+  const encoder = new TextEncoder();
+  const readable = new ReadableStream({
+    async start(controller) {
+      const turnStart = Date.now();
+      try {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'chunk', content: line })}\n\n`));
+        const elapsed = Date.now() - turnStart;
+        const timing = classifyTurnLatency(elapsed, elapsed);
+        await sql`
+          INSERT INTO chat_messages
+            (id, session_id, role, content, timestamp,
+             ttft_ms, total_ms, latency_tier, model, route_reason,
+             prompt_tokens, completion_tokens, total_tokens)
+          VALUES
+            (gen_random_uuid(), ${sessionId}, 'CUSTOMER', ${line}, NOW(),
+             ${timing.ttftMs}, ${timing.totalMs}, ${timing.tier}, ${SCRIPTED_OPENING_MODEL}, ${SCRIPTED_OPENING_ROUTE_REASON},
+             ${null}, ${null}, ${null})
+        `;
+        log('info', 'chat.scripted_opening', { requestId, sessionId: sessionId.substring(0, 8) });
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', content: line, timing })}\n\n`));
+        controller.close();
+      } catch (err) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: 'Simulation error' })}\n\n`));
+        controller.close();
+        log('error', 'chat.stream_error', { requestId, sessionId, ...errorFields(err) });
+      }
+    },
+  });
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+    },
+  });
 }
 
 // GET /api/chat?sessionId=...

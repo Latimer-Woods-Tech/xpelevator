@@ -195,3 +195,38 @@ describe('scoreSession — end-to-end #248 reproduction', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('listModels — the non-billable probe behind /api/debug/groq (W1.12)', () => {
+  it('GETs /v1/models (never /chat/completions) and returns the offered ids', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: [{ id: 'openai/gpt-oss-120b' }, { id: 'openai/gpt-oss-20b' }, { foo: 1 }],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    const client = new GroqFetchClient('gsk_test_unit_key');
+    const ids = await client.listModels();
+
+    expect(ids).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b']);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.groq.com/openai/v1/models');
+    expect(init?.method ?? 'GET').toBe('GET');
+    expect(init?.body).toBeUndefined();
+  });
+
+  it('throws a GroqApiError carrying the status on a rejected credential', async () => {
+    fetchMock.mockResolvedValueOnce(errorResponse(401, '{"error":{"message":"Invalid API Key"}}'));
+
+    const client = new GroqFetchClient('gsk_test_unit_key');
+    const err = await client.listModels().catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(GroqApiError);
+    expect((err as GroqApiError).status).toBe(401);
+  });
+});
