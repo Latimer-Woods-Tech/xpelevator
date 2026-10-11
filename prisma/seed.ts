@@ -8,9 +8,15 @@
  */
 
 import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaNeonHttp } from '@prisma/adapter-neon';
 import { SEED_SCENARIOS as SCENARIOS } from './seed-scenarios';
 
-const prisma = new PrismaClient();
+// Prisma 7 has no built-in query engine: every client needs a driver adapter.
+// Same Neon HTTP adapter as src/lib/prisma.ts (the seed only issues single
+// upserts/finds, no interactive transactions).
+const databaseUrl = process.env.DATABASE_URL?.replace(/\r/g, '');
+if (!databaseUrl) throw new Error('DATABASE_URL is not set');
+const prisma = new PrismaClient({ adapter: new PrismaNeonHttp(databaseUrl, {}) });
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 

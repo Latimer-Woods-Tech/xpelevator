@@ -9,7 +9,7 @@
 // Do not import this module from application code — the Prisma client has known
 // runtime incompatibilities on the Cloudflare Workers edge (see LESSONS_LEARNED).
 //
-// Uses PrismaNeonHTTP which communicates with Neon via HTTP. The HTTP adapter
+// Uses PrismaNeonHttp which communicates with Neon via HTTP. The HTTP adapter
 // completely bypasses Prisma's query engine, sending SQL directly to Neon's API.
 //
 // CRITICAL for Cloudflare Workers: Standard @prisma/client includes Node.js
@@ -20,7 +20,7 @@
 //
 // Reference: https://www.prisma.io/docs/orm/prisma-client/deployment/edge/deploy-to-cloudflare#neon
 import { PrismaClient as PrismaClientEdge, Prisma } from '@prisma/client';
-import { PrismaNeonHTTP } from '@prisma/adapter-neon';
+import { PrismaNeonHttp } from '@prisma/adapter-neon';
 
 // Lazy client initialization - only create when first accessed
 let cachedClient: PrismaClientEdge | undefined;
@@ -31,7 +31,7 @@ function createPrismaClient() {
   if (!url) throw new Error('DATABASE_URL is not set');
 
   // Create HTTP adapter - this bypasses ALL Prisma engine code
-  const adapter = new PrismaNeonHTTP(url, {});
+  const adapter = new PrismaNeonHttp(url, {});
   
   // Initialize with adapter - engine detection code runs here but is never
   // actually used because the adapter handles all queries
