@@ -9,6 +9,20 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    # G943: hold `next` below 16.4. Next 16.4 reads
+    # .next/server/preview-props.json at server start, and
+    # @opennextjs/cloudflare (1.20.10, latest as of 2026-10-11) doesn't inline
+    # it. Every request on Workers then throws CF error 1101. That is how #287
+    # failed the preview gate before it was reverted in #291 and re-landed
+    # pinned to ~16.3.8 in #292. A 16.4 bump still passes CI and only fails the
+    # deploy's fail-closed preview gate, so the bump would leave main
+    # undeployable.
+    # Lift this ignore only when an @opennextjs/cloudflare release supports
+    # 16.4. Prove that first: `wrangler pages dev` on the OpenNext bundle must
+    # return 200 on /api/health and /.
+    ignore:
+      - dependency-name: next
+        versions: [">=16.4.0"]
     groups:
       production-minor-patch:
         dependency-type: production
