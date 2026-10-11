@@ -91,16 +91,25 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
-  // eslint-config-next@15 exports legacy ESLint v8 format, incompatible with
-  // ESLint v9 flat config used in eslint.config.mjs. Skip lint during build;
-  // run `npm run lint` separately for code quality checks.
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
+  // `next` is pinned to ~16.3.8 in package.json on purpose. Next 16.4 reads
+  // .next/server/preview-props.json when the server starts, and
+  // @opennextjs/cloudflare 1.20.10 doesn't inline that manifest. On Workers
+  // every request then throws "Unexpected loadManifest(...preview-props.json)
+  // call!" (CF error 1101), which is how #287 failed the preview gate.
+  // Lift the pin only after a `wrangler pages dev` run of the OpenNext bundle
+  // returns 200 on a 16.4+ build.
+  //
+  // Next 16 no longer runs ESLint during `next build` (and removed the
+  // `eslint` config key), so the old `eslint.ignoreDuringBuilds` is gone;
+  // `npm run lint` is the lint gate, as before.
+  //
   // ── WASM support (prepare for CF Workers deployment) ──────────────────────
   // When BL-045 (CF build) is resolved, the production build may switch to
   // @prisma/client/wasm for the CF Workers runtime. Required then.
   // Harmless to keep during local dev (asyncWebAssembly is inert if no .wasm imports).
+  // Next 16 defaults `next build` to Turbopack and refuses a custom webpack
+  // config there, so package.json's `build` passes `--webpack` to keep the
+  // bundler this app (and its OpenNext/Cloudflare worker build) ships with.
   webpack: (config) => {
     config.experiments = {
       ...config.experiments,
