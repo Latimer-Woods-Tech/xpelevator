@@ -262,56 +262,94 @@ export class GroqFetchClient {
     return response;
   }
 
+  /**
+   * Max times to (re)open a streaming completion that CONNECTS (HTTP 200) but
+   * yields ZERO content before `[DONE]`. A 200-with-empty-stream is NOT a 4xx
+   * the model-fallback ladder classifies ({@link isModelUnavailableError}) — it
+   * is a transient Groq generation hiccup. On 2026-10-15 the realism model
+   * `openai/gpt-oss-120b` returned exactly this for ~18 min, taking every live
+   * customer turn down to the canned `CUSTOMER_TURN_FALLBACK` with no recourse
+   * (the ladder's only 120b substitute, `gpt-oss-20b`, was org-blocked), and
+   * opening alert #304 — while the same model answered normally minutes later.
+   * Reopening the SAME model once absorbs that blip; capped at 2 so a
+   * persistently-empty model cannot loop (it falls through to the caller's
+   * in-character fallback turn, behaviour unchanged once retries are exhausted).
+   */
+  private static readonly MAX_STREAM_ATTEMPTS = 2;
+
   async* chatCompletionStream(
     request: ChatCompletionRequest,
     onUsage?: (usage: GroqTokenUsage) => void,
   ): AsyncGenerator<string> {
-    // Resolve the connection through the model-fallback ladder FIRST — the only
-    // point a substitute model is still safe (nothing has been yielded yet).
-    const response = await this.withModelFallback(request.model, (model) =>
-      this.openStream(request, model),
-    );
+    // Forward the terminal token-usage block to the sink at most once across all
+    // attempts — a retried empty attempt must never double-count R-132/#155 spend.
+    let usageForwarded = false;
+    const forwardUsage = (usage: GroqTokenUsage): void => {
+      if (onUsage && !usageForwarded) {
+        usageForwarded = true;
+        onUsage(usage);
+      }
+    };
 
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+    for (let attempt = 1; attempt <= GroqFetchClient.MAX_STREAM_ATTEMPTS; attempt++) {
+      // Resolve the connection through the model-fallback ladder FIRST — the only
+      // point a substitute model is still safe (nothing has been yielded yet). A
+      // model-unavailable error here walks the ladder; any other non-OK class
+      // (auth/rate-limit/transport) throws unchanged, before the read loop.
+      const response = await this.withModelFallback(request.model, (model) =>
+        this.openStream(request, model),
+      );
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let yieldedContent = false;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.substring(6).trim();
-            if (data === '[DONE]') continue;
-            
-            try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content;
-              if (content) {
-                yield content;
-              }
-              // The terminal usage chunk has empty `choices` + a token block
-              // carried at top-level `usage` OR under `x_groq.usage`; surface
-              // whichever is present via the sink without disturbing the
-              // content stream (R-132, #155 — see pickStreamTokenUsage).
-              if (onUsage) {
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.substring(6).trim();
+              if (data === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(data);
+                const content = parsed.choices?.[0]?.delta?.content;
+                if (content) {
+                  yieldedContent = true;
+                  yield content;
+                }
+                // The terminal usage chunk has empty `choices` + a token block
+                // carried at top-level `usage` OR under `x_groq.usage`; surface
+                // whichever is present via the sink without disturbing the
+                // content stream (R-132, #155 — see pickStreamTokenUsage).
                 const usage = pickStreamTokenUsage(parsed);
-                if (usage) onUsage(usage);
+                if (usage) forwardUsage(usage);
+              } catch {
+                // Skip unparseable lines
               }
-            } catch {
-              // Skip unparseable lines
             }
           }
         }
+      } finally {
+        reader.releaseLock();
       }
-    } finally {
-      reader.releaseLock();
+
+      // Any content streamed → done (a partial stream is NOT retried: content
+      // was already yielded and reopening would duplicate it). A stream that
+      // connected but yielded nothing is the transient #304 empty-stream:
+      // reopen the SAME model once more, else fall through and return empty.
+      if (yieldedContent) return;
+      if (attempt < GroqFetchClient.MAX_STREAM_ATTEMPTS) {
+        log('warn', 'ai.stream_empty_retry', { model: request.model, attempt });
+      }
     }
   }
 }
