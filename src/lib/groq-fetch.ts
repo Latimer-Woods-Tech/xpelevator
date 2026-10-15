@@ -46,18 +46,46 @@ export function isGroqTokenUsage(v: unknown): v is GroqTokenUsage {
 }
 
 /**
- * Pull the token-usage block from a streaming chunk, tolerating BOTH shapes Groq
+ * Bounded recursive search for the FIRST usage-shaped block anywhere inside a
+ * parsed streaming chunk. The canonical locations are tried first by
+ * {@link pickStreamTokenUsage}; this is the last-resort net that tolerates a
+ * location Groq has not used before, so a future shift of the token block
+ * cannot silently null per-turn spend again (the R-132 / #155 failure mode).
+ *
+ * Depth is capped (Groq chunks are shallow) and the search is read-only. A
+ * usage block is identified structurally by {@link isGroqTokenUsage}, so a
+ * `prompt_tokens`-only partial or a `*_tokens_details` sub-object is not
+ * mistaken for the real block.
+ */
+function deepFindTokenUsage(value: unknown, depth = 0): GroqTokenUsage | null {
+  if (depth > 6 || typeof value !== 'object' || value === null) return null;
+  if (isGroqTokenUsage(value)) return value;
+  for (const v of Object.values(value as Record<string, unknown>)) {
+    if (v && typeof v === 'object') {
+      const found = deepFindTokenUsage(v, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * Pull the token-usage block from a streaming chunk, tolerating every shape Groq
  * uses for it (R-132, #155).
  *
- * Groq emits the terminal usage block either at the OpenAI-compatible top-level
- * `usage` (what `stream_options.include_usage` documents) OR nested under its
- * vendor `x_groq.usage` envelope — and which one carries it varies by model and
- * has shifted over time. Reading only `parsed.usage` meant a shift to the
- * `x_groq` envelope silently nulled per-turn spend with no code change and no
- * unit-test signal — exactly the regression the live scoring canary caught on
- * 2026-10-05 (alert #278). Read whichever location holds a valid block.
+ * Groq emits the terminal usage block at the OpenAI-compatible top-level `usage`
+ * (what `stream_options.include_usage` documents) OR nested under its vendor
+ * `x_groq.usage` envelope — and which one carries it varies by model and has
+ * shifted over time. Reading only `parsed.usage` meant a shift to the `x_groq`
+ * envelope silently nulled per-turn spend with no code change and no unit-test
+ * signal — exactly the regression the live scoring canary caught on 2026-10-05
+ * (alert #278). PR #295 added `x_groq.usage`; the canary stayed red on the live
+ * `openai/gpt-oss-*` stream, so the block is reaching NEITHER named location.
+ * We therefore try the two canonical locations first (preserving their
+ * precedence) and fall back to a bounded recursive scan for a usage-shaped
+ * block anywhere in the chunk — robust to whatever nesting the live models use.
  *
- * @returns the usage block, or `null` when neither location carries a valid one.
+ * @returns the usage block, or `null` when no location carries a valid one.
  */
 export function pickStreamTokenUsage(parsed: unknown): GroqTokenUsage | null {
   if (typeof parsed !== 'object' || parsed === null) return null;
@@ -68,7 +96,8 @@ export function pickStreamTokenUsage(parsed: unknown): GroqTokenUsage | null {
     const nested = (xGroq as Record<string, unknown>).usage;
     if (isGroqTokenUsage(nested)) return nested;
   }
-  return null;
+  // Last resort: a location neither name covers (the live #278/#296 shape).
+  return deepFindTokenUsage(o);
 }
 
 export interface ChatCompletionResponse {
