@@ -58,6 +58,22 @@ function streamOf(token: string) {
   return new Response(body, { status: 200 });
 }
 
+/**
+ * A 200 SSE stream that CONNECTS but yields ZERO content (only the terminal
+ * `[DONE]`) — the transient #304 shape: `openai/gpt-oss-120b` returned HTTP 200
+ * with no streamed content for ~18 min, nulling every live customer turn.
+ */
+function emptyStream() {
+  const enc = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(enc.encode('data: [DONE]\n\n'));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200 });
+}
+
 /** The model id sent on the Nth fetch call (parsed from the request body). */
 function modelOfCall(mock: ReturnType<typeof vi.fn>, n: number): string {
   return JSON.parse(mock.mock.calls[n][1].body).model;
@@ -350,5 +366,113 @@ describe('listModels — the non-billable probe behind /api/debug/groq (W1.12)',
 
     expect(err).toBeInstanceOf(GroqApiError);
     expect((err as GroqApiError).status).toBe(401);
+  });
+});
+
+describe('chatCompletionStream — empty-stream retry (#304)', () => {
+  // PROOF-OF-REJECTION (Standing Law 1): on 2026-10-15 the realism model
+  // `openai/gpt-oss-120b` returned HTTP 200 with ZERO streamed content for
+  // ~18 min (alert #304). A 200-empty-stream is not a 4xx the fallback ladder
+  // classifies, so there was no recourse — every live customer turn fell to the
+  // canned CUSTOMER_TURN_FALLBACK. These tests assert the client now reopens the
+  // SAME model once and recovers, while a persistently-empty model cannot loop.
+
+  async function drain(client: GroqFetchClient): Promise<string> {
+    const out: string[] = [];
+    for await (const chunk of client.chatCompletionStream({
+      model: 'openai/gpt-oss-120b',
+      messages: [{ role: 'user', content: 'hi' }],
+    })) {
+      out.push(chunk);
+    }
+    return out.join('');
+  }
+
+  it('retries a 200 empty stream ONCE on the SAME model, then streams content', async () => {
+    fetchMock
+      .mockResolvedValueOnce(emptyStream()) // #304: 200, no content
+      .mockResolvedValueOnce(streamOf('recovered'));
+
+    const client = new GroqFetchClient('gsk_test_unit_key');
+    expect(await drain(client)).toBe('recovered');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The retry reopens the SAME model (a transient blip, not a model swap) —
+    // an empty 200 is not a model-unavailable error, so the ladder is untouched.
+    expect(modelOfCall(fetchMock, 0)).toBe('openai/gpt-oss-120b');
+    expect(modelOfCall(fetchMock, 1)).toBe('openai/gpt-oss-120b');
+  });
+
+  it('caps the retry: a persistently empty stream yields nothing after exactly 2 attempts', async () => {
+    fetchMock
+      .mockResolvedValueOnce(emptyStream())
+      .mockResolvedValueOnce(emptyStream())
+      .mockResolvedValueOnce(streamOf('should-never-be-reached'));
+
+    const client = new GroqFetchClient('gsk_test_unit_key');
+    expect(await drain(client)).toBe(''); // caller then yields CUSTOMER_TURN_FALLBACK
+    expect(fetchMock).toHaveBeenCalledTimes(2); // no third attempt — cap holds
+  });
+
+  it('does NOT retry when the first attempt streams content (happy path = one call)', async () => {
+    fetchMock.mockResolvedValueOnce(streamOf('hello'));
+    const client = new GroqFetchClient('gsk_test_unit_key');
+    expect(await drain(client)).toBe('hello');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards the token-usage block exactly once across a retry', async () => {
+    const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
+    fetchMock
+      .mockResolvedValueOnce(emptyStream()) // empty, no usage
+      .mockResolvedValueOnce(streamWithUsage('hi', 'top', usage));
+
+    const client = new GroqFetchClient('gsk_test_unit_key');
+    const captured: TokenUsage[] = [];
+    let content = '';
+    for await (const chunk of client.chatCompletionStream(
+      { model: 'openai/gpt-oss-120b', messages: [{ role: 'user', content: 'hi' }] },
+      (u) => captured.push(u as TokenUsage),
+    )) {
+      content += chunk;
+    }
+
+    expect(content).toBe('hi');
+    expect(captured).toEqual([usage]); // once, not duplicated by the retry
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the usage from an empty-content attempt that still carried a usage chunk (dedups the retry)', async () => {
+    // Edge: a stream with NO content deltas but a terminal usage chunk — zero
+    // content still triggers the retry, and the first attempt's usage must win
+    // (the retry must not overwrite/duplicate it).
+    const enc = new TextEncoder();
+    const firstUsage = { prompt_tokens: 7, completion_tokens: 0, total_tokens: 7 };
+    const emptyWithUsage = new Response(
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [], usage: firstUsage })}\n\n`));
+          c.enqueue(enc.encode('data: [DONE]\n\n'));
+          c.close();
+        },
+      }),
+      { status: 200 },
+    );
+    fetchMock
+      .mockResolvedValueOnce(emptyWithUsage)
+      .mockResolvedValueOnce(streamWithUsage('hi', 'top', { prompt_tokens: 9, completion_tokens: 3, total_tokens: 12 }));
+
+    const client = new GroqFetchClient('gsk_test_unit_key');
+    const captured: TokenUsage[] = [];
+    let content = '';
+    for await (const chunk of client.chatCompletionStream(
+      { model: 'openai/gpt-oss-120b', messages: [{ role: 'user', content: 'hi' }] },
+      (u) => captured.push(u as TokenUsage),
+    )) {
+      content += chunk;
+    }
+
+    expect(content).toBe('hi'); // retry recovered a real turn
+    expect(captured).toEqual([firstUsage]); // forwarded exactly once, first wins
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
