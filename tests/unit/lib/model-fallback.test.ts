@@ -57,12 +57,30 @@ describe('isModelUnavailableError', () => {
     expect(isModelUnavailableError(404, 'Not Found')).toBe(true);
   });
 
+  it('matches a 403 model_permission_blocked_org (the live #296 signature)', () => {
+    // The exact body the probe observed for openai/gpt-oss-20b: a model that
+    // EXISTS + is listed by /v1/models but is disabled for this org, so the
+    // fast customer-turn tier must degrade UP to the enabled 120B rather than
+    // fall back to the canned line with NULL usage.
+    expect(
+      isModelUnavailableError(
+        403,
+        '{"error":{"message":"The model `openai/gpt-oss-20b` is blocked at the organization level...","type":"permissions_error","code":"model_permission_blocked_org"}}'
+      )
+    ).toBe(true);
+  });
+
   it('does NOT match auth / rate-limit / server errors (never retry a new model)', () => {
     expect(isModelUnavailableError(401, 'invalid_api_key')).toBe(false);
     expect(isModelUnavailableError(429, 'rate_limit_exceeded')).toBe(false);
     expect(isModelUnavailableError(500, 'internal_server_error')).toBe(false);
     // A plain 400 that is NOT about model availability must not fall back.
     expect(isModelUnavailableError(400, 'invalid_request: max_tokens too large')).toBe(false);
+    // Proof-of-rejection: a 403 that is NOT a model block (account-level
+    // forbidden / auth) must NOT fall back — swapping models can't fix it and
+    // doing so silently would mask a real permission alarm.
+    expect(isModelUnavailableError(403, 'Forbidden')).toBe(false);
+    expect(isModelUnavailableError(403, '{"code":"insufficient_quota"}')).toBe(false);
   });
 });
 
