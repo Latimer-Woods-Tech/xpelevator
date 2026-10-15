@@ -232,6 +232,112 @@ async function checkGroqCredential() {
   }
 }
 
+// A live STREAMING completion probe — the gap /v1/models cannot see. A model id
+// can be present in the list yet 400 on an actual `/chat/completions` call (bad
+// param, reasoning-only model, decommission-in-progress), in which case the live
+// customer turn throws and `streamResponse` serves the canned CUSTOMER_TURN_FALLBACK
+// with NO token usage — scoring still "passes" on the transcript, so the 6-hourly
+// scoring canary only caught it via the token-usage gate (R-132), and only after
+// #277 scripted the opener and removed the one model turn that masked it. This
+// probe replicates the app's EXACT fast-tier request (src/lib/ai.ts streamResponse
+// → groq-fetch openStream) and asserts a real streamed completion: content tokens
+// arrive AND a usage block is present. On failure it reports the HTTP status, the
+// error body, and — when the stream opens — exactly where (if anywhere) the usage
+// block appeared, so a parse/shape mismatch is named, not guessed.
+async function checkGroqCompletion() {
+  if (!GROQ_KEY) return; // credential check already recorded the missing key
+  const model = 'openai/gpt-oss-20b'; // CUSTOMER_MODEL_FAST — the live-turn hot path
+  let status = 0;
+  let errBody = '';
+  let content = '';
+  let usageTop = false;
+  let usageXGroq = false;
+  let terminalKeys = '';
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20000);
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: 'You are a terse customer. Reply in one short sentence.' },
+          { role: 'user', content: 'Hello, I need help with my order.' },
+        ],
+        temperature: 0.75,
+        max_tokens: 400,
+        stream: true,
+        stream_options: { include_usage: true },
+      }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    status = res.status;
+    if (res.status !== 200 || !res.body) {
+      try { errBody = await res.text(); } catch { /* ignore */ }
+    } else {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]' || !data) continue;
+          let p;
+          try { p = JSON.parse(data); } catch { continue; }
+          const c = p.choices?.[0]?.delta?.content;
+          if (typeof c === 'string') content += c;
+          const hasTop = p.usage && typeof p.usage.total_tokens === 'number';
+          const hasX = p.x_groq?.usage && typeof p.x_groq.usage.total_tokens === 'number';
+          if (hasTop) usageTop = true;
+          if (hasX) usageXGroq = true;
+          // Record the top-level keys of any empty-choices (terminal) chunk so an
+          // unexpected usage location is visible, not guessed.
+          if (!c && (Array.isArray(p.choices) ? p.choices.length === 0 : true)) {
+            terminalKeys = Object.keys(p).join(',');
+          }
+        }
+      }
+    }
+  } catch (e) {
+    errBody = String(e?.message || e);
+  }
+
+  const contentOk = content.trim().length > 0;
+  const usageOk = usageTop || usageXGroq;
+  log(
+    `${status === 200 && contentOk ? '✓' : '✗'} Groq streaming completion [${model}] -> HTTP ${status}; ` +
+      `content=${contentOk ? `${content.length}b` : 'NONE'}; ` +
+      `usage: top=${usageTop} x_groq=${usageXGroq}` +
+      (terminalKeys ? `; terminal-chunk keys=[${terminalKeys}]` : '') +
+      (errBody ? `; err=${errBody.slice(0, 200)}` : ''),
+  );
+  if (status !== 200 || !contentOk) {
+    failures.push(
+      `**Live customer-turn generation DOWN** — the Groq STREAMING \`/chat/completions\` call ` +
+        `the app makes for every live customer turn (model \`${model}\`) returned HTTP ${status}` +
+        `${contentOk ? '' : ' with NO streamed content'}. The live turn throws and the trainee ` +
+        `gets the canned \`CUSTOMER_TURN_FALLBACK\` line instead of a real simulated customer — ` +
+        `and the reply row records NO token usage (R-132 / #155 margin input). /v1/models cannot ` +
+        `see this (the id is listed; the completion still fails).` +
+        (errBody ? `\n\n\`\`\`\n${errBody.slice(0, 400)}\n\`\`\`` : ''),
+    );
+  } else if (!usageOk) {
+    failures.push(
+      `**Groq streaming usage missing** — model \`${model}\` streamed content but emitted NO token ` +
+        `usage block at top-level \`usage\` or \`x_groq.usage\` (terminal keys: [${terminalKeys || 'none seen'}]). ` +
+        `Per-turn spend (R-132 / #155) cannot be recorded. Groq may have moved the usage block.`,
+    );
+  }
+}
+
 async function main() {
   log(`=== xpelevator uptime + scoring-credential probe ===\n`);
   await checkHealth(BRANDED, { requireOk: true });
@@ -241,6 +347,7 @@ async function main() {
   await checkWebhookReachability(BRANDED);
   await checkWebhookReachability(ALIAS);
   await checkGroqCredential();
+  await checkGroqCompletion();
 
   if (failures.length > 0) {
     const report =
