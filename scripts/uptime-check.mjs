@@ -232,21 +232,10 @@ async function checkGroqCredential() {
   }
 }
 
-// A live STREAMING completion probe — the gap /v1/models cannot see. A model id
-// can be present in the list yet 400 on an actual `/chat/completions` call (bad
-// param, reasoning-only model, decommission-in-progress), in which case the live
-// customer turn throws and `streamResponse` serves the canned CUSTOMER_TURN_FALLBACK
-// with NO token usage — scoring still "passes" on the transcript, so the 6-hourly
-// scoring canary only caught it via the token-usage gate (R-132), and only after
-// #277 scripted the opener and removed the one model turn that masked it. This
-// probe replicates the app's EXACT fast-tier request (src/lib/ai.ts streamResponse
-// → groq-fetch openStream) and asserts a real streamed completion: content tokens
-// arrive AND a usage block is present. On failure it reports the HTTP status, the
-// error body, and — when the stream opens — exactly where (if anywhere) the usage
-// block appeared, so a parse/shape mismatch is named, not guessed.
-async function checkGroqCompletion() {
-  if (!GROQ_KEY) return; // credential check already recorded the missing key
-  const model = 'openai/gpt-oss-20b'; // CUSTOMER_MODEL_FAST — the live-turn hot path
+// Probe ONE model with a live STREAMING completion that mirrors the app's exact
+// request (src/lib/ai.ts streamResponse → groq-fetch openStream): stream + the
+// include_usage option. Returns what arrived so the caller can classify.
+async function probeGroqStream(model) {
   let status = 0;
   let errBody = '';
   let content = '';
@@ -294,12 +283,8 @@ async function checkGroqCompletion() {
           try { p = JSON.parse(data); } catch { continue; }
           const c = p.choices?.[0]?.delta?.content;
           if (typeof c === 'string') content += c;
-          const hasTop = p.usage && typeof p.usage.total_tokens === 'number';
-          const hasX = p.x_groq?.usage && typeof p.x_groq.usage.total_tokens === 'number';
-          if (hasTop) usageTop = true;
-          if (hasX) usageXGroq = true;
-          // Record the top-level keys of any empty-choices (terminal) chunk so an
-          // unexpected usage location is visible, not guessed.
+          if (p.usage && typeof p.usage.total_tokens === 'number') usageTop = true;
+          if (p.x_groq?.usage && typeof p.x_groq.usage.total_tokens === 'number') usageXGroq = true;
           if (!c && (Array.isArray(p.choices) ? p.choices.length === 0 : true)) {
             terminalKeys = Object.keys(p).join(',');
           }
@@ -309,31 +294,69 @@ async function checkGroqCompletion() {
   } catch (e) {
     errBody = String(e?.message || e);
   }
-
   const contentOk = content.trim().length > 0;
   const usageOk = usageTop || usageXGroq;
   log(
     `${status === 200 && contentOk ? '✓' : '✗'} Groq streaming completion [${model}] -> HTTP ${status}; ` +
-      `content=${contentOk ? `${content.length}b` : 'NONE'}; ` +
-      `usage: top=${usageTop} x_groq=${usageXGroq}` +
+      `content=${contentOk ? `${content.length}b` : 'NONE'}; usage: top=${usageTop} x_groq=${usageXGroq}` +
       (terminalKeys ? `; terminal-chunk keys=[${terminalKeys}]` : '') +
       (errBody ? `; err=${errBody.slice(0, 200)}` : ''),
   );
-  if (status !== 200 || !contentOk) {
+  return { status, errBody, contentOk, usageOk, terminalKeys };
+}
+
+// The gap /v1/models cannot see: a model id can be LISTED yet fail an actual
+// `/chat/completions` call (org-level block, bad param, decommission-in-progress).
+// That is exactly how `openai/gpt-oss-20b` (the fast tier) went dark — HTTP 403
+// "blocked at the organization level" — while the credential stayed valid and the
+// id stayed in /v1/models, so this monitor and scoring both looked green while
+// every easy/medium live turn threw and served the canned CUSTOMER_TURN_FALLBACK
+// with NO token usage (R-132 / #155). (Fixed in the app by #301's fallback ladder.)
+//
+// What the app actually requires: the REALISM model (gpt-oss-120b) must answer —
+// it is the scoring model AND the fast tier's fallback target (model-fallback.ts),
+// so if it works, every tier can produce a real turn (fast degrades UP to it). We
+// therefore HARD-FAIL only when realism is down (a true core-loop outage), and
+// WARN — without failing — when the fast model is blocked but realism carries it,
+// because #301's fallback ladder turns that into a graceful cost-tier degradation,
+// not an outage. Hard-failing on the still-org-blocked fast model would leave this
+// monitor permanently red (alert fatigue that masks the next real failure). The
+// warning still surfaces the block so the founder can re-enable the cheaper model
+// (console.groq.com/settings/limits).
+async function checkGroqCompletion() {
+  if (!GROQ_KEY) return; // credential check already recorded the missing key
+  const REALISM = 'openai/gpt-oss-120b'; // scoring + fast-tier fallback floor
+  const FAST = 'openai/gpt-oss-20b'; // CUSTOMER_MODEL_FAST — the cheap live-turn tier
+
+  const realism = await probeGroqStream(REALISM);
+  if (realism.status !== 200 || !realism.contentOk) {
     failures.push(
-      `**Live customer-turn generation DOWN** — the Groq STREAMING \`/chat/completions\` call ` +
-        `the app makes for every live customer turn (model \`${model}\`) returned HTTP ${status}` +
-        `${contentOk ? '' : ' with NO streamed content'}. The live turn throws and the trainee ` +
-        `gets the canned \`CUSTOMER_TURN_FALLBACK\` line instead of a real simulated customer — ` +
-        `and the reply row records NO token usage (R-132 / #155 margin input). /v1/models cannot ` +
-        `see this (the id is listed; the completion still fails).` +
-        (errBody ? `\n\n\`\`\`\n${errBody.slice(0, 400)}\n\`\`\`` : ''),
+      `**Live customer-turn generation DOWN** — the Groq STREAMING \`/chat/completions\` call for the ` +
+        `scoring + fallback-floor model \`${REALISM}\` returned HTTP ${realism.status}` +
+        `${realism.contentOk ? '' : ' with NO streamed content'}. Every live turn throws and serves the ` +
+        `canned \`CUSTOMER_TURN_FALLBACK\` with NO token usage (R-132 / #155), and sessions can no longer ` +
+        `degrade to a working model. /v1/models cannot see this (the id is listed; the completion fails).` +
+        (realism.errBody ? `\n\n\`\`\`\n${realism.errBody.slice(0, 400)}\n\`\`\`` : ''),
     );
-  } else if (!usageOk) {
+  } else if (!realism.usageOk) {
     failures.push(
-      `**Groq streaming usage missing** — model \`${model}\` streamed content but emitted NO token ` +
-        `usage block at top-level \`usage\` or \`x_groq.usage\` (terminal keys: [${terminalKeys || 'none seen'}]). ` +
-        `Per-turn spend (R-132 / #155) cannot be recorded. Groq may have moved the usage block.`,
+      `**Groq streaming usage missing** — \`${REALISM}\` streamed content but emitted NO token usage at ` +
+        `top-level \`usage\` or \`x_groq.usage\` (terminal keys: [${realism.terminalKeys || 'none seen'}]). ` +
+        `Per-turn spend (R-132 / #155) cannot be recorded; Groq may have moved the usage block.`,
+    );
+  }
+
+  // Fast tier: informational. A block here is absorbed by the fallback ladder
+  // (degrades to realism), so it is a cost-tier warning, NOT a monitor failure —
+  // UNLESS realism is also down, already failed above.
+  const fast = await probeGroqStream(FAST);
+  if ((fast.status !== 200 || !fast.contentOk) && realism.status === 200 && realism.contentOk) {
+    log(
+      `⚠️  fast tier degraded — \`${FAST}\` returned HTTP ${fast.status} (likely org-blocked at ` +
+        `console.groq.com/settings/limits). The app's model-fallback ladder degrades these turns UP to ` +
+        `\`${REALISM}\` (real reply + usage preserved), so this is a COST impact (every easy/medium turn ` +
+        `uses the pricier model), not an outage. Re-enable \`${FAST}\` to restore the cheap tier.` +
+        (fast.errBody ? ` err=${fast.errBody.slice(0, 160)}` : ''),
     );
   }
 }
