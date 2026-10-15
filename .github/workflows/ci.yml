@@ -279,15 +279,29 @@ jobs:
           set -euo pipefail
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
             -c "DROP DATABASE IF EXISTS negctl;" -c "CREATE DATABASE negctl;"
-          tmp="$(mktemp -d)"
+          # Inside the workspace (not /tmp) so the throwaway prisma.config.ts can
+          # resolve `prisma/config` from this checkout's node_modules.
+          tmp="$(mktemp -d -p "$GITHUB_WORKSPACE" .negctl-XXXX)"
           cp -r prisma "$tmp/prisma"
           printf 'provider = "postgresql"\n' > "$tmp/prisma/migrations/migration_lock.toml"
           bad="$tmp/prisma/migrations/29990101000000_negctl_broken"
           mkdir -p "$bad"
           echo 'ALTER TABLE "table_that_does_not_exist" ADD COLUMN "x" TEXT;' > "$bad/migration.sql"
+          # Prisma 7 takes the migrations directory from prisma.config.ts, NOT
+          # from the folder beside `--schema`: with the old `--schema` flag this
+          # step silently replayed the REAL (good) migrations and exited 0. Point
+          # a throwaway config at the broken copy instead.
+          cat > "$tmp/prisma.config.ts" <<'EOF'
+          import { defineConfig } from 'prisma/config';
+          export default defineConfig({
+            schema: 'prisma/schema.prisma',
+            migrations: { path: 'prisma/migrations' },
+            datasource: { url: process.env.DATABASE_URL ?? '' },
+          });
+          EOF
           set +e
           DATABASE_URL="postgresql://prisma:prisma@localhost:5432/negctl" \
-            npx prisma migrate deploy --schema "$tmp/prisma/schema.prisma"
+            npx prisma migrate deploy --config "$tmp/prisma.config.ts"
           code=$?
           set -e
           if [ "$code" = "0" ]; then
@@ -306,9 +320,12 @@ jobs:
       # RLS migration that doesn't diff clean — fails this job.
       - name: Schema↔migration drift must be empty [#215]
         run: |
+          # Prisma 7: --from-url/--to-schema-datamodel became
+          # --from-config-datasource (DATABASE_URL via prisma.config.ts) and
+          # --to-schema.
           npx prisma migrate diff \
-            --from-url "$DATABASE_URL" \
-            --to-schema-datamodel prisma/schema.prisma \
+            --from-config-datasource \
+            --to-schema prisma/schema.prisma \
             --exit-code
 
   # NOTE: the DETERMINISTIC tiers — unit (tests/unit, 73 tests) and ui

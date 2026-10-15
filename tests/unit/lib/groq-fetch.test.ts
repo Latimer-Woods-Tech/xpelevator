@@ -13,7 +13,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { GroqFetchClient, GroqApiError } from '@/lib/groq-fetch';
+import { GroqFetchClient, GroqApiError, pickStreamTokenUsage } from '@/lib/groq-fetch';
 import { scoreSession } from '@/lib/ai';
 
 // ── fetch response helpers ────────────────────────────────────────────────────
@@ -61,6 +61,47 @@ function streamOf(token: string) {
 /** The model id sent on the Nth fetch call (parsed from the request body). */
 function modelOfCall(mock: ReturnType<typeof vi.fn>, n: number): string {
   return JSON.parse(mock.mock.calls[n][1].body).model;
+}
+
+type TokenUsage = { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+
+/**
+ * An SSE stream that yields one content token, then a terminal usage chunk
+ * (empty `choices`) carrying the token block where `where` puts it — mirroring
+ * the two shapes Groq actually emits `include_usage` in: top-level `usage`, or
+ * nested under the vendor `x_groq.usage` envelope.
+ */
+function streamWithUsage(token: string, where: 'top' | 'x_groq', usage: TokenUsage) {
+  const enc = new TextEncoder();
+  const terminal =
+    where === 'top'
+      ? { choices: [], usage }
+      : { choices: [], x_groq: { id: 'req_test', usage } };
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: token } }] })}\n\n`));
+      controller.enqueue(enc.encode(`data: ${JSON.stringify(terminal)}\n\n`));
+      controller.enqueue(enc.encode('data: [DONE]\n\n'));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200 });
+}
+
+/** Drive a stream to completion, returning the captured usage (or null). */
+async function captureStreamUsage(res: Response): Promise<TokenUsage | null> {
+  fetchMock.mockResolvedValueOnce(res);
+  const client = new GroqFetchClient('gsk_test_unit_key');
+  let captured: TokenUsage | null = null;
+  for await (const _ of client.chatCompletionStream(
+    { model: 'openai/gpt-oss-120b', messages: [{ role: 'user', content: 'hi' }] },
+    (u) => {
+      captured = u as TokenUsage;
+    },
+  )) {
+    void _;
+  }
+  return captured;
 }
 
 // ── globals ───────────────────────────────────────────────────────────────────
@@ -169,6 +210,87 @@ describe('chatCompletionStream — model fallback', () => {
       }
     }).rejects.toBeInstanceOf(GroqApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('chatCompletionStream — per-turn token usage capture (R-132, #155)', () => {
+  // PROOF-OF-REJECTION (Standing Law 1): the live scoring canary caught per-turn
+  // Groq token accounting silently nulling on 2026-10-05 (alert #278) — the
+  // reply row's usage columns went NULL with no code change because the parse
+  // read ONLY top-level `usage`, and the usage block was arriving under the
+  // vendor `x_groq.usage` envelope. Nothing unit-tested the real stream→onUsage
+  // parse (only the write path downstream of it), so the shift was invisible
+  // until the Phase-4 wholesale-seat margin input (#155) had been null for days.
+  // These are that missing test.
+  const usage: TokenUsage = { prompt_tokens: 321, completion_tokens: 42, total_tokens: 363 };
+
+  it('captures usage carried at the top-level `usage` field', async () => {
+    expect(await captureStreamUsage(streamWithUsage('hi', 'top', usage))).toEqual(usage);
+  });
+
+  it('captures usage carried under the `x_groq.usage` envelope (the #278 regression)', async () => {
+    // Before pickStreamTokenUsage this returned null → the reply row's token
+    // columns were NULL → the canary's token-usage gate went red.
+    expect(await captureStreamUsage(streamWithUsage('hi', 'x_groq', usage))).toEqual(usage);
+  });
+
+  it('leaves usage uncaptured when no chunk carries a valid block', async () => {
+    expect(await captureStreamUsage(streamOf('hi'))).toBeNull();
+  });
+});
+
+describe('pickStreamTokenUsage — tolerant usage extraction', () => {
+  const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
+
+  it('reads the OpenAI-compatible top-level `usage`', () => {
+    expect(pickStreamTokenUsage({ choices: [], usage })).toEqual(usage);
+  });
+
+  it('reads the vendor `x_groq.usage` envelope', () => {
+    expect(pickStreamTokenUsage({ choices: [], x_groq: { usage } })).toEqual(usage);
+  });
+
+  it('prefers top-level `usage` when both are present', () => {
+    const other = { prompt_tokens: 99, completion_tokens: 9, total_tokens: 108 };
+    expect(pickStreamTokenUsage({ usage, x_groq: { usage: other } })).toEqual(usage);
+  });
+
+  it('returns null for a content chunk, a malformed block, or a non-object', () => {
+    expect(pickStreamTokenUsage({ choices: [{ delta: { content: 'x' } }] })).toBeNull();
+    expect(pickStreamTokenUsage({ usage: { prompt_tokens: 1 } })).toBeNull();
+    expect(pickStreamTokenUsage({ x_groq: { usage: { total_tokens: 'nope' } } })).toBeNull();
+    expect(pickStreamTokenUsage(null)).toBeNull();
+    expect(pickStreamTokenUsage('string')).toBeNull();
+  });
+
+  // The #296 live shape: PR #295 taught the parser `usage` and `x_groq.usage`,
+  // yet the live `openai/gpt-oss-*` stream stayed red — the block reaches
+  // NEITHER named location. The bounded deep-search is the net that tolerates
+  // an unanticipated nesting so a future block move cannot silently null spend.
+  it('finds a usage block nested at an unanticipated path (the #296 net)', () => {
+    expect(
+      pickStreamTokenUsage({ choices: [], x_groq: { meta: { usage } } })
+    ).toEqual(usage);
+    expect(
+      pickStreamTokenUsage({ choices: [{ delta: {}, finish_reason: 'stop' }], response: { usage } })
+    ).toEqual(usage);
+  });
+
+  // Proof-of-rejection (Standing Law 1): the deep-search must NOT be fooled by a
+  // partial block (prompt-only) or a usage-details sub-object — otherwise the
+  // canary would go green on a wrong number.
+  it('deep-search rejects partials and *_tokens_details sub-objects', () => {
+    expect(
+      pickStreamTokenUsage({ x_groq: { usage: { completion_tokens_details: { reasoning_tokens: 7 } } } })
+    ).toBeNull();
+    expect(
+      pickStreamTokenUsage({ deeply: { nested: { partial: { prompt_tokens: 3 } } } })
+    ).toBeNull();
+  });
+
+  it('deep-search still prefers the canonical top-level `usage` over a nested one', () => {
+    const other = { prompt_tokens: 99, completion_tokens: 9, total_tokens: 108 };
+    expect(pickStreamTokenUsage({ usage, nested: { deep: { usage: other } } })).toEqual(usage);
   });
 });
 

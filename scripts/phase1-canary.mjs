@@ -264,7 +264,33 @@ async function main() {
     ORDER BY timestamp
   `;
   const tok = evaluateTokenUsage(usageRows);
-  if (!tok.ok) fail(tok.reason, JSON.stringify(usageRows, null, 2));
+  if (!tok.ok) {
+    // Self-explaining failure: dump the full per-turn breakdown (every row, both
+    // roles) so a red canary names WHICH turn lost its usage and HOW it was
+    // generated — a model turn with NULL tokens points at the Groq usage parse,
+    // a `scripted`/fallback model column points elsewhere. Without this, the
+    // bare `[{null,null,null}]` dump cannot distinguish those causes (the
+    // 2026-10-05 R-132 regression burned a diagnosis cycle on exactly that).
+    const rows = await sql`
+      SELECT role, model, route_reason AS "routeReason",
+             left(content, 60) AS "contentHead",
+             prompt_tokens AS "promptTokens",
+             completion_tokens AS "completionTokens",
+             total_tokens AS "totalTokens"
+      FROM chat_messages
+      WHERE session_id = ${sessionId}
+      ORDER BY timestamp
+    `;
+    console.error('\n── session turn breakdown (role · model · route_reason · tokens) ──');
+    for (const r of rows) {
+      console.error(
+        `  ${r.role} · model=${r.model ?? '∅'} · route=${r.routeReason ?? '∅'} · ` +
+          `tokens p/c/t=${r.promptTokens ?? '∅'}/${r.completionTokens ?? '∅'}/${r.totalTokens ?? '∅'} · ` +
+          `"${(r.contentHead ?? '').replace(/\s+/g, ' ')}"`
+      );
+    }
+    fail(tok.reason, JSON.stringify(usageRows, null, 2));
+  }
   console.log(
     `✓ token usage persisted: ${tok.withTokens}/${usageRows.length} CUSTOMER ` +
       `replies carry usage; session total ${tok.total} tokens.`

@@ -55,18 +55,35 @@ export function fallbackChain(model: string): string[] {
  * Classify a Groq HTTP error as the "model unavailable" class — the ONLY class
  * for which trying a different model is a sensible remedy.
  *
- * Matches a `404` (Groq returns this for an unknown model id) and the `400`
+ * Matches a `404` (Groq returns this for an unknown model id), the `400`
  * bodies Groq emits when a model id is retired or mistyped
- * (`model_decommissioned`, `model_not_found`, "... does not exist"). A plain
- * deprecation is intentionally NOT matched: a deprecated-but-live model still
- * serves, so it must keep being used until it is actually decommissioned.
- * Everything else (401 auth, 429 rate limit, 5xx, network) returns `false` so
- * the original error surfaces unchanged.
+ * (`model_decommissioned`, `model_not_found`, "... does not exist"), and a
+ * `403 model_permission_blocked_org` — Groq's code for a model that EXISTS and
+ * is listed by `/v1/models` but is disabled for this org (console → Settings →
+ * Limits). That last case is the live #296 regression: `openai/gpt-oss-20b`
+ * (the fast customer-turn tier) was blocked org-wide, so every easy/medium
+ * customer reply 403'd and fell back to the canned line with NULL token usage —
+ * while the `/v1/models` health probe stayed green (it only lists ids, it does
+ * not exercise chat permission, exactly the #248 blind spot). Trying a different
+ * model is the correct remedy for a blocked model (the chain degrades the 20B
+ * fast tier UP to the still-enabled 120B), so it joins this class.
+ *
+ * A plain deprecation is intentionally NOT matched: a deprecated-but-live model
+ * still serves, so it must keep being used until it is actually decommissioned.
+ * A 403 that is NOT a model block (auth/forbidden with no `model_permission_*`
+ * code) is NOT matched — swapping models cannot fix an account-level 403, and
+ * silently doing so would mask a real credential/permission alarm. Everything
+ * else (401 auth, 429 rate limit, 5xx, network) returns `false` so the original
+ * error surfaces unchanged.
  */
 export function isModelUnavailableError(status: number, body: string): boolean {
   if (status === 404) return true;
-  if (status !== 400) return false;
   const b = body.toLowerCase();
+  // A model blocked/disabled for the org: the model exists but this org may not
+  // call it. Scoped to the `model_permission_blocked` code so a non-model 403
+  // (account auth/forbidden) still surfaces unchanged.
+  if (status === 403) return b.includes('model_permission_blocked');
+  if (status !== 400) return false;
   return (
     b.includes('model_decommissioned') ||
     b.includes('model_not_found') ||

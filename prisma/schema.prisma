@@ -1,11 +1,11 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
+  // Driver adapters are GA in Prisma 7 (no preview flag). The connection URL
+  // for Migrate/CLI moved to prisma.config.ts.
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ── Organisation / multi-tenant models ──────────────────────────────────────────
