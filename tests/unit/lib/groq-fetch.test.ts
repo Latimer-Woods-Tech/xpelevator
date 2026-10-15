@@ -262,6 +262,36 @@ describe('pickStreamTokenUsage — tolerant usage extraction', () => {
     expect(pickStreamTokenUsage(null)).toBeNull();
     expect(pickStreamTokenUsage('string')).toBeNull();
   });
+
+  // The #296 live shape: PR #295 taught the parser `usage` and `x_groq.usage`,
+  // yet the live `openai/gpt-oss-*` stream stayed red — the block reaches
+  // NEITHER named location. The bounded deep-search is the net that tolerates
+  // an unanticipated nesting so a future block move cannot silently null spend.
+  it('finds a usage block nested at an unanticipated path (the #296 net)', () => {
+    expect(
+      pickStreamTokenUsage({ choices: [], x_groq: { meta: { usage } } })
+    ).toEqual(usage);
+    expect(
+      pickStreamTokenUsage({ choices: [{ delta: {}, finish_reason: 'stop' }], response: { usage } })
+    ).toEqual(usage);
+  });
+
+  // Proof-of-rejection (Standing Law 1): the deep-search must NOT be fooled by a
+  // partial block (prompt-only) or a usage-details sub-object — otherwise the
+  // canary would go green on a wrong number.
+  it('deep-search rejects partials and *_tokens_details sub-objects', () => {
+    expect(
+      pickStreamTokenUsage({ x_groq: { usage: { completion_tokens_details: { reasoning_tokens: 7 } } } })
+    ).toBeNull();
+    expect(
+      pickStreamTokenUsage({ deeply: { nested: { partial: { prompt_tokens: 3 } } } })
+    ).toBeNull();
+  });
+
+  it('deep-search still prefers the canonical top-level `usage` over a nested one', () => {
+    const other = { prompt_tokens: 99, completion_tokens: 9, total_tokens: 108 };
+    expect(pickStreamTokenUsage({ usage, nested: { deep: { usage: other } } })).toEqual(usage);
+  });
 });
 
 describe('scoreSession — end-to-end #248 reproduction', () => {
