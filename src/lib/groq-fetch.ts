@@ -45,6 +45,32 @@ export function isGroqTokenUsage(v: unknown): v is GroqTokenUsage {
   );
 }
 
+/**
+ * Pull the token-usage block from a streaming chunk, tolerating BOTH shapes Groq
+ * uses for it (R-132, #155).
+ *
+ * Groq emits the terminal usage block either at the OpenAI-compatible top-level
+ * `usage` (what `stream_options.include_usage` documents) OR nested under its
+ * vendor `x_groq.usage` envelope — and which one carries it varies by model and
+ * has shifted over time. Reading only `parsed.usage` meant a shift to the
+ * `x_groq` envelope silently nulled per-turn spend with no code change and no
+ * unit-test signal — exactly the regression the live scoring canary caught on
+ * 2026-10-05 (alert #278). Read whichever location holds a valid block.
+ *
+ * @returns the usage block, or `null` when neither location carries a valid one.
+ */
+export function pickStreamTokenUsage(parsed: unknown): GroqTokenUsage | null {
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const o = parsed as Record<string, unknown>;
+  if (isGroqTokenUsage(o.usage)) return o.usage;
+  const xGroq = o.x_groq;
+  if (typeof xGroq === 'object' && xGroq !== null) {
+    const nested = (xGroq as Record<string, unknown>).usage;
+    if (isGroqTokenUsage(nested)) return nested;
+  }
+  return null;
+}
+
 export interface ChatCompletionResponse {
   id: string;
   object: string;
@@ -241,10 +267,13 @@ export class GroqFetchClient {
               if (content) {
                 yield content;
               }
-              // The terminal usage chunk has empty `choices` + a `usage` block;
-              // surface it via the sink without disturbing the content stream.
-              if (onUsage && isGroqTokenUsage(parsed.usage)) {
-                onUsage(parsed.usage);
+              // The terminal usage chunk has empty `choices` + a token block
+              // carried at top-level `usage` OR under `x_groq.usage`; surface
+              // whichever is present via the sink without disturbing the
+              // content stream (R-132, #155 — see pickStreamTokenUsage).
+              if (onUsage) {
+                const usage = pickStreamTokenUsage(parsed);
+                if (usage) onUsage(usage);
               }
             } catch {
               // Skip unparseable lines
