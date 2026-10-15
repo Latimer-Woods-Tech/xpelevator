@@ -60,13 +60,32 @@ export function fallbackChain(model: string): string[] {
  * (`model_decommissioned`, `model_not_found`, "... does not exist"). A plain
  * deprecation is intentionally NOT matched: a deprecated-but-live model still
  * serves, so it must keep being used until it is actually decommissioned.
- * Everything else (401 auth, 429 rate limit, 5xx, network) returns `false` so
- * the original error surfaces unchanged.
+ *
+ * Also matches the `403` Groq returns when a model is **blocked at the
+ * organization level** (`"The model \`X\` is blocked at the organization level.
+ * Please have the org admin enable this model ..."`). This is a per-model
+ * availability failure identical in effect to a decommission: the credential is
+ * valid and `/v1/models` still LISTS the id, but every completion 403s, so the
+ * live customer turn throws and serves the canned fallback with no token usage
+ * (R-132 / #155). This is exactly how `openai/gpt-oss-20b` (the fast tier) went
+ * dark on the live deploy while `gpt-oss-120b` stayed enabled — degrading the
+ * blocked model to its live substitute keeps real turns flowing instead of
+ * outaging the tier. The match is narrowed to a model-block body (not any 403)
+ * so a credential-wide 403 is NOT silently retried across models.
+ *
+ * Everything else (401 auth, 429 rate limit, a non-model 403, 5xx, network)
+ * returns `false` so the original error surfaces unchanged.
  */
 export function isModelUnavailableError(status: number, body: string): boolean {
   if (status === 404) return true;
-  if (status !== 400) return false;
   const b = body.toLowerCase();
+  if (status === 403) {
+    // Per-model org block (console.groq.com/settings/limits), not a blanket
+    // credential denial: require both the model reference and the block/enable
+    // wording so a key-wide 403 still surfaces unchanged.
+    return b.includes('model') && (b.includes('blocked') || b.includes('not enabled'));
+  }
+  if (status !== 400) return false;
   return (
     b.includes('model_decommissioned') ||
     b.includes('model_not_found') ||

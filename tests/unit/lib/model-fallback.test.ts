@@ -57,12 +57,26 @@ describe('isModelUnavailableError', () => {
     expect(isModelUnavailableError(404, 'Not Found')).toBe(true);
   });
 
-  it('does NOT match auth / rate-limit / server errors (never retry a new model)', () => {
+  it('matches a 403 org-level model block (the gpt-oss-20b fast-tier outage)', () => {
+    // Groq lists the id in /v1/models but 403s every completion until an org
+    // admin enables it; degrade to the live substitute instead of outaging.
+    expect(
+      isModelUnavailableError(
+        403,
+        '{"error":{"message":"The model `openai/gpt-oss-20b` is blocked at the organization level. Please have the org admin enable this model in the org settings at https://console.groq.com/settings/limits"}}',
+      ),
+    ).toBe(true);
+  });
+
+  it('does NOT match auth / rate-limit / server errors or a credential-wide 403', () => {
     expect(isModelUnavailableError(401, 'invalid_api_key')).toBe(false);
     expect(isModelUnavailableError(429, 'rate_limit_exceeded')).toBe(false);
     expect(isModelUnavailableError(500, 'internal_server_error')).toBe(false);
     // A plain 400 that is NOT about model availability must not fall back.
     expect(isModelUnavailableError(400, 'invalid_request: max_tokens too large')).toBe(false);
+    // A credential-wide 403 (no model reference) must surface unchanged, not be
+    // retried across models — that would mask a real permission failure.
+    expect(isModelUnavailableError(403, '{"error":{"message":"Forbidden: insufficient permissions"}}')).toBe(false);
   });
 });
 
