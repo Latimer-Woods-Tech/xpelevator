@@ -48,9 +48,6 @@ describe('GITHUB_OAUTH_ENABLED (src/lib/env.ts)', () => {
 
   it('is false when neither GitHub env var is set', async () => {
     vi.resetModules();
-    vi.mock('next-auth', () => ({ default: vi.fn(() => ({ handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() })) }));
-    vi.mock('next-auth/providers/github', () => ({ default: vi.fn() }));
-    vi.mock('next-auth/providers/credentials', () => ({ default: vi.fn((c: unknown) => c) }));
     const { GITHUB_OAUTH_ENABLED } = await import('@/lib/env');
     expect(GITHUB_OAUTH_ENABLED).toBe(false);
   });
@@ -58,9 +55,6 @@ describe('GITHUB_OAUTH_ENABLED (src/lib/env.ts)', () => {
   it('is false when only AUTH_GITHUB_ID is set', async () => {
     process.env.AUTH_GITHUB_ID = 'only-id';
     vi.resetModules();
-    vi.mock('next-auth', () => ({ default: vi.fn(() => ({ handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() })) }));
-    vi.mock('next-auth/providers/github', () => ({ default: vi.fn() }));
-    vi.mock('next-auth/providers/credentials', () => ({ default: vi.fn((c: unknown) => c) }));
     const { GITHUB_OAUTH_ENABLED } = await import('@/lib/env');
     expect(GITHUB_OAUTH_ENABLED).toBe(false);
   });
@@ -68,9 +62,6 @@ describe('GITHUB_OAUTH_ENABLED (src/lib/env.ts)', () => {
   it('is false when only AUTH_GITHUB_SECRET is set', async () => {
     process.env.AUTH_GITHUB_SECRET = 'only-secret';
     vi.resetModules();
-    vi.mock('next-auth', () => ({ default: vi.fn(() => ({ handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() })) }));
-    vi.mock('next-auth/providers/github', () => ({ default: vi.fn() }));
-    vi.mock('next-auth/providers/credentials', () => ({ default: vi.fn((c: unknown) => c) }));
     const { GITHUB_OAUTH_ENABLED } = await import('@/lib/env');
     expect(GITHUB_OAUTH_ENABLED).toBe(false);
   });
@@ -78,9 +69,6 @@ describe('GITHUB_OAUTH_ENABLED (src/lib/env.ts)', () => {
   it('is true when both GitHub env vars are set', async () => {
     setGithubEnv();
     vi.resetModules();
-    vi.mock('next-auth', () => ({ default: vi.fn(() => ({ handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() })) }));
-    vi.mock('next-auth/providers/github', () => ({ default: vi.fn() }));
-    vi.mock('next-auth/providers/credentials', () => ({ default: vi.fn((c: unknown) => c) }));
     const { GITHUB_OAUTH_ENABLED } = await import('@/lib/env');
     expect(GITHUB_OAUTH_ENABLED).toBe(true);
   });
@@ -97,9 +85,6 @@ describe('env.ts — required variable validation', () => {
   });
 
   it('does not throw when all required vars are present (test setup)', async () => {
-    vi.mock('next-auth', () => ({ default: vi.fn(() => ({ handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() })) }));
-    vi.mock('next-auth/providers/github', () => ({ default: vi.fn() }));
-    vi.mock('next-auth/providers/credentials', () => ({ default: vi.fn((c: unknown) => c) }));
     await expect(import('@/lib/env')).resolves.not.toThrow();
   });
 
@@ -107,9 +92,6 @@ describe('env.ts — required variable validation', () => {
     (process.env as Record<string, string>).NODE_ENV = 'production';
     delete process.env.DATABASE_URL;
     vi.resetModules();
-    vi.mock('next-auth', () => ({ default: vi.fn(() => ({ handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() })) }));
-    vi.mock('next-auth/providers/github', () => ({ default: vi.fn() }));
-    vi.mock('next-auth/providers/credentials', () => ({ default: vi.fn((c: unknown) => c) }));
     await expect(import('@/lib/env')).rejects.toThrow('DATABASE_URL');
     (process.env as Record<string, string>).NODE_ENV = 'test';
   });
@@ -118,9 +100,6 @@ describe('env.ts — required variable validation', () => {
     (process.env as Record<string, string>).NODE_ENV = 'production';
     delete process.env.AUTH_SECRET;
     vi.resetModules();
-    vi.mock('next-auth', () => ({ default: vi.fn(() => ({ handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() })) }));
-    vi.mock('next-auth/providers/github', () => ({ default: vi.fn() }));
-    vi.mock('next-auth/providers/credentials', () => ({ default: vi.fn((c: unknown) => c) }));
     await expect(import('@/lib/env')).rejects.toThrow('AUTH_SECRET');
     (process.env as Record<string, string>).NODE_ENV = 'test';
   });
@@ -129,9 +108,6 @@ describe('env.ts — required variable validation', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     delete process.env.GROQ_API_KEY;
     vi.resetModules();
-    vi.mock('next-auth', () => ({ default: vi.fn(() => ({ handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() })) }));
-    vi.mock('next-auth/providers/github', () => ({ default: vi.fn() }));
-    vi.mock('next-auth/providers/credentials', () => ({ default: vi.fn((c: unknown) => c) }));
     await expect(import('@/lib/env')).resolves.not.toThrow();
     warnSpy.mockRestore();
   });

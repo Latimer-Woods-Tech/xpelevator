@@ -81,6 +81,15 @@ jobs:
       # No npm install: the probe uses only Node's global fetch.
       - name: Probe /api/health + Groq credential
         run: node scripts/uptime-check.mjs
+      # Ground-truth Groq stream usage-shape probe (R-132 / #155, alert #296).
+      # Only on merge (push) / manual dispatch — NOT the 15-min cron (it makes a
+      # billable Groq call). Non-failing: a diagnostic must never redden health.
+      # Its output (raw terminal SSE chunks + where the usage block lands) is the
+      # observed shape the sandbox cannot see — read it in this job's log to
+      # ground the per-turn-token-accounting fix.
+      - name: Probe Groq stream usage shape (diagnostic)
+        if: ${{ github.event_name != 'schedule' }}
+        run: node scripts/probe-groq-stream.mjs || true
       - name: Alert on failure
         if: failure()
         uses: actions/github-script@v9
