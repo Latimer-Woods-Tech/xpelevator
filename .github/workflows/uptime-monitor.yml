@@ -10,11 +10,20 @@ name: Uptime + scoring monitor
 #   health  (every 15 min) — /api/health 200 on xpelevator.com + the pages.dev
 #     alias, a PUBLIC DB-read canary (GET /api/branding/<nonexistent-slug> -> 404
 #     on both hosts), a PHONE-webhook reachability canary (POST an unsigned body
-#     to /api/telnyx/webhook -> 401 on both hosts), AND a direct Groq /v1/models
-#     credential probe. Silent failure modes health alone can't see:
+#     to /api/telnyx/webhook -> 401 on both hosts), a direct Groq /v1/models
+#     credential + required-model-id probe (an authenticating key whose scoring
+#     models were decommissioned still nulls every score — the #248 mode), AND a
+#     LIVE streaming /chat/completions probe on the realism model that mirrors the
+#     app's exact streamed request (with the bounded empty-200 reopen production
+#     uses) so a model id that LISTS but fails to generate is caught in <=15 min,
+#     not only by the 6-hourly end-to-end canary. Silent failure modes health
+#     alone can't see:
 #       - expired GROQ_API_KEY nulls every score while /api/health stays 200 (it
 #         only checks the var is present, not that it authenticates) — the Groq
-#         probe catches it (live-issue #1);
+#         credential probe catches it (live-issue #1); a still-valid key whose
+#         scoring model was decommissioned (#248) or whose live stream returns an
+#         empty 200 / org-block (#301/#304/#315) is caught by the required-model-id
+#         + live streaming-completion probes that run alongside it every cycle;
 #       - a DB driver/connection regression 500s every DB read while /api/health
 #         stays 200 (health touches no DB) — the branding canary catches it. On
 #         2026-07-14 #78 shipped exactly that and this monitor stayed green, so

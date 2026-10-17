@@ -6,7 +6,7 @@
  * staged-secrets pattern). Intended to be scheduled frequently — it makes NO DB
  * writes and needs no npm install (uses Node's global fetch).
  *
- * Asserts four things, each mapped to a real failure mode:
+ * Asserts the following, each mapped to a real failure mode:
  *   1. GET https://xpelevator.com/api/health   -> 200 + { ok: true }   (app is up)
  *   2. GET https://xpelevator-sim.pages.dev/api/health -> 200           (alias is up)
  *   3. GET /api/branding/<nonexistent-slug> -> 404 on both hosts        (DB read path is up)
@@ -18,11 +18,15 @@
  *      query route: a valid-but-nonexistent slug runs a real `SELECT` and returns
  *      404 (query ran, no row) when the DB path is healthy, or 500 when the driver
  *      /connection fails. A cheap, auth-free canary for exactly that class.
- *   4. GET https://api.groq.com/openai/v1/models with GROQ_API_KEY -> 200
+ *   4. GET https://api.groq.com/openai/v1/models with GROQ_API_KEY -> 200, AND
+ *      every REQUIRED_GROQ_MODELS id still present in the returned list.
  *      This is the CHEAP early-warning for live-issue #1: the original outage was
  *      an EXPIRED Groq key that made every session score null. /api/health only
  *      checks that the env var is PRESENT, not that it still authenticates — so
- *      we probe the credential directly here every cycle.
+ *      we probe the credential directly here every cycle. The model-id assertion
+ *      adds the #248 mode: a key that still authenticates (200) while the scoring
+ *      model was decommissioned out of the list, which 400s every completion and
+ *      nulls scores with the credential check still green.
  *   5. POST /api/telnyx/webhook (valid JSON, NO signature) -> 401 on both hosts
  *      The PHONE-modality reachability + fail-closed canary. The scoring canary
  *      (check above) only drives the CHAT path, so the entire phone webhook was
@@ -43,11 +47,22 @@
  *      a healthy fail-closed here). That runtime-binding key resolution is covered
  *      by the auth-api unit tests instead; this probe guards reachability + the
  *      fail-open direction, both of which were previously unmonitored.
+ *   6. A LIVE STREAMING POST /chat/completions on the realism model
+ *      (openai/gpt-oss-120b) -> 200 with non-empty streamed content, every cycle.
+ *      /v1/models (check 4) cannot see a model that LISTS but fails to GENERATE —
+ *      an org-level block or a decommission-in-progress 400s/403s the actual call
+ *      while the id stays listed. This drives the app's exact streamed request and
+ *      reopens a transient empty-200 flap up to MAX_REALISM_STREAM_ATTEMPTS
+ *      (mirroring production's groq-fetch retry, #304/#315/#316), hard-failing only
+ *      a SUSTAINED realism outage and warning (non-failing) on a fast-tier block
+ *      the #301 fallback ladder absorbs. It also warns if the stream emits no token
+ *      usage (R-132 / #155 — the per-turn spend input). The 6-hourly scoring canary
+ *      still exercises the full end-to-end DB-backed session on top of this.
  *
  * On any failure it writes a human-readable reason to ./monitor-failure.md (the
  * workflow's alert step reads it) and exits non-zero.
  *
- * Env: GROQ_API_KEY (required for check 3).
+ * Env: GROQ_API_KEY (required for checks 4 and 6).
  */
 import { writeFileSync } from 'node:fs';
 import {
