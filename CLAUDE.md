@@ -10,7 +10,7 @@ Virtual-customer training simulator. Trainees pick a job title and scenario, run
 
 This is a **standalone repo**, not a package inside `Latimer-Woods-Tech/Factory`. It does not consume `@latimer-woods-tech/*` packages except `@latimer-woods-tech/seo`, and its LLM calls go **directly to Groq** (`src/lib/groq-fetch.ts`), not through `@latimer-woods-tech/llm` — moving onto the shared LLM chain is a tracked, not-yet-done Phase 5 item on xpelevator#16. Don't assume Factory's package-dependency rules or its LLM-chain-only constraint apply here until that migration lands; do follow Factory's general hard constraints (no `process.env` outside config loading, no Node built-ins banned by the Workers runtime, no secrets in source) since this ships on Cloudflare Workers too.
 
-**Database:** Neon Postgres (serverless HTTP driver), not OCI — this app is on Factory's "still on Neon by design" list (`Latimer-Woods-Tech/Factory/CLAUDE.md`) pending a driver rewrite off `@neondatabase/serverless`. Prisma (`prisma/schema.prisma`, 9 models / 5 enums) owns the schema and migrations, but the Workers runtime queries Neon directly with parameterized raw SQL (`src/lib/db.ts`) — the Prisma client is not used at request time; see `docs/LESSONS_LEARNED.md` for why.
+**Database:** Neon Postgres (serverless HTTP driver), not OCI — this app is on Factory's "still on Neon by design" list (`Latimer-Woods-Tech/Factory/CLAUDE.md`) pending a driver rewrite off `@neondatabase/serverless`. Prisma (`prisma/schema.prisma`, 12 models / 6 enums) owns the schema and migrations, but the Workers runtime queries Neon directly with parameterized raw SQL (`src/lib/db.ts`) — the Prisma client is not used at request time; see `docs/LESSONS_LEARNED.md` for why.
 
 ## Stack
 
