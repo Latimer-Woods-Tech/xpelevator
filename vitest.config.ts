@@ -34,7 +34,7 @@ export default defineConfig({
     ],
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    exclude: ['tests/e2e/**', 'tests/voice/**', 'node_modules/**'],
+    exclude: ['node_modules/**'],
     // NOTE: no coverage gate lives here on purpose. This config runs EVERY local
     // tier (the deterministic unit + ui tests), so a coverage percentage measured
     // through it is not the reproducible floor the CI gate enforces. The
