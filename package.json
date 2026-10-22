@@ -28,12 +28,12 @@
   "dependencies": {
     "@latimer-woods-tech/seo": "^0.4.0",
     "@neondatabase/serverless": "^1.2.0",
-    "@prisma/adapter-neon": "^7.10.0",
-    "@prisma/client": "^7.10.0",
+    "@prisma/adapter-neon": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "next": "~16.3.8",
     "next-auth": "^5.0.0-beta.32",
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
     "@cloudflare/next-on-pages": "^1.13.16",
