@@ -199,8 +199,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The browser-CDN / apt fetch inside `playwright install` can stall, and a
+      # bare invocation then hangs to this job's `timeout-minutes` cap (above),
+      # reddening the whole `ci` gate and jamming the Dependabot / security merge
+      # queue (observed on #257 run 32173764009 and #330). Bound each attempt with
+      # `timeout` and retry, so a stalled fetch is killed fast and retried instead
+      # of hanging. Pure reliability wrapper: identical install, no behaviour
+      # change on the happy path (succeeds on attempt 1 in ~1-2 min); worst case
+      # 3×240s + backoff stays under the 15-min cap and fails fast as an
+      # actionable red rather than a silent timeout cancellation.
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "::group::Playwright browser install (attempt ${attempt}/3)"
+            if timeout -k 30 240 npx playwright install --with-deps chromium; then
+              echo "::endgroup::"
+              echo "Playwright browser install succeeded on attempt ${attempt}"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "attempt ${attempt} failed or timed out; retrying after backoff"
+            sleep $((attempt * 15))
+          done
+          echo "Playwright browser install failed after 3 attempts" >&2
+          exit 1
 
       - name: Build (production)
         run: npm run build
