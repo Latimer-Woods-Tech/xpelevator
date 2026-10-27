@@ -1,18 +1,14 @@
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
+import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
+import nextTypescript from "eslint-config-next/typescript";
 
 const eslintConfig = [
   // Next.js core-web-vitals + TypeScript rules. Previously eslint-config-next
   // was installed but never wired in, so `npm run lint` enforced nothing.
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  // eslint-config-next 16 ships native flat configs, so the FlatCompat /
+  // @eslint/eslintrc bridge (removed from ESLint 10's dependency tree) is no
+  // longer needed.
+  ...nextCoreWebVitals,
+  ...nextTypescript,
 
   {
     // Build output, generated files, and Node CommonJS build tooling.
@@ -36,6 +32,26 @@ const eslintConfig = [
     // warnings without a large, risky sweep through the query paths.
     rules: {
       "@typescript-eslint/no-explicit-any": "warn",
+    },
+  },
+
+  {
+    // React Compiler rules shipped by eslint-config-next 16 (new to this
+    // toolchain — eslint-config-next 15 enforced neither). They fire on
+    // pre-existing, shipped-and-working client code: `set-state-in-effect`
+    // (14 synchronous setState calls across chat/voice/phone + admin effects)
+    // and `immutability` (functions referenced in a mount effect that is
+    // lexically above their `const` declarations — safe at runtime since
+    // effects run post-render). Both are perf/style advisories, not
+    // correctness bugs. Downgraded to `warn` rather than disabled — same call
+    // as `no-explicit-any` above — so they stay visible without bundling a
+    // large, risky effects-refactor into a dev-tooling bump. The actual
+    // effect-hygiene cleanup is tracked as a dedicated follow-up (xpelevator#16
+    // Phase 5). Keeping them `error` would block the ESLint 10 / Next 16
+    // upgrade on a refactor that touches live voice/chat UX.
+    rules: {
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/immutability": "warn",
     },
   },
 
