@@ -27,10 +27,24 @@ export default function SimulatePage() {
 
   const userId = sessionData?.user?.id ?? 'anonymous';
 
-  useEffect(() => {
-    loadJobs();
-    loadEntitlements();
-  }, []);
+  const loadJobs = () => {
+    setLoading(true);
+    setFetchError(null);
+    fetch('/api/jobs')
+      .then(res => {
+        if (!res.ok) throw new Error(`Server error ${res.status}`);
+        return res.json();
+      })
+      .then(data => { setJobTitles(data); setLoading(false); })
+      .catch((err: unknown) => {
+        setFetchError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load job titles. The database may be waking up — try again in a moment.'
+        );
+        setLoading(false);
+      });
+  };
 
   const loadEntitlements = () => {
     fetch('/api/me')
@@ -51,29 +65,18 @@ export default function SimulatePage() {
       });
   };
 
+  // Load job titles and entitlements once on mount. Both helpers are declared
+  // above so the effect references them after their `const` initialization
+  // (satisfies react-hooks/immutability — no use-before-declaration).
+  useEffect(() => {
+    loadJobs();
+    loadEntitlements();
+  }, []);
+
   // A modality is shown locked only once we KNOW the entitlements and it is
   // absent — never while still loading (unlockedModalities === null).
   const isLocked = (modality: 'CHAT' | 'VOICE' | 'PHONE') =>
     unlockedModalities !== null && !unlockedModalities.includes(modality);
-
-  const loadJobs = () => {
-    setLoading(true);
-    setFetchError(null);
-    fetch('/api/jobs')
-      .then(res => {
-        if (!res.ok) throw new Error(`Server error ${res.status}`);
-        return res.json();
-      })
-      .then(data => { setJobTitles(data); setLoading(false); })
-      .catch((err: unknown) => {
-        setFetchError(
-          err instanceof Error
-            ? err.message
-            : 'Failed to load job titles. The database may be waking up — try again in a moment.'
-        );
-        setLoading(false);
-      });
-  };
 
   const startSimulation = async (scenario: Scenario, typeOverride?: 'CHAT' | 'VOICE' | 'PHONE') => {
     if (!selectedJob) return;

@@ -37,21 +37,25 @@ const eslintConfig = [
 
   {
     // React Compiler rules shipped by eslint-config-next 16 (new to this
-    // toolchain — eslint-config-next 15 enforced neither). They fire on
-    // pre-existing, shipped-and-working client code: `set-state-in-effect`
-    // (14 synchronous setState calls across chat/voice/phone + admin effects)
-    // and `immutability` (functions referenced in a mount effect that is
-    // lexically above their `const` declarations — safe at runtime since
-    // effects run post-render). Both are perf/style advisories, not
-    // correctness bugs. Downgraded to `warn` rather than disabled — same call
-    // as `no-explicit-any` above — so they stay visible without bundling a
-    // large, risky effects-refactor into a dev-tooling bump. The actual
-    // effect-hygiene cleanup is tracked as a dedicated follow-up (xpelevator#16
-    // Phase 5). Keeping them `error` would block the ESLint 10 / Next 16
-    // upgrade on a refactor that touches live voice/chat UX.
+    // toolchain — eslint-config-next 15 enforced neither).
+    //
+    // `react-hooks/immutability` is enforced as `error`: the two firings it had
+    // (use-before-declaration of the mount-effect helpers in
+    // `src/app/simulate/page.tsx`) were fixed by reordering those `const`
+    // declarations above the effect — a pure, zero-runtime-behavior change — so
+    // this class of use-before-declaration bug is now blocked going forward
+    // (xpelevator#16 Phase 5 effect-hygiene, slice 1).
+    //
+    // `react-hooks/set-state-in-effect` stays `warn` for now: its 14 firings
+    // are synchronous setState calls inside effects across the live
+    // chat/voice/phone client components. Fixing them properly is a runtime
+    // refactor of real-time UX that is not verifiable from the egress-blocked
+    // CI sandbox, so it is deferred to a dedicated follow-up rather than
+    // bundled here. Left as `warn` (not disabled) so it stays visible — same
+    // call as `no-explicit-any` above.
     rules: {
       "react-hooks/set-state-in-effect": "warn",
-      "react-hooks/immutability": "warn",
+      "react-hooks/immutability": "error",
     },
   },
 
