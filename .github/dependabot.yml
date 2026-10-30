@@ -20,9 +20,23 @@ updates:
     # Lift this ignore only when an @opennextjs/cloudflare release supports
     # 16.4. Prove that first: `wrangler pages dev` on the OpenNext bundle must
     # return 200 on /api/health and /.
+    #
+    # Hold `typescript` below 7.0 (xpelevator#16 Phase 5; PR #333 excluded it,
+    # PR #336 proved why). typescript-eslint — bundled by eslint-config-next 16
+    # — does not support TS 7.0: it hard-errors "typescript-eslint does not
+    # support TS 7.0" at config load, so `npm run lint` dies with exit code 2
+    # before linting a single file. PR #336 (typescript 5.9.3→7.0.2) confirmed
+    # this in CI: the Quality (typecheck + lint) job failed while every other
+    # gate (build/unit/ui/coverage/migration/smoke/audit) passed. Merging a TS7
+    # bump would leave main's lint permanently broken.
+    # Lift this ignore only when typescript-eslint ships TS >=7.1 support
+    # (typescript-eslint/typescript-eslint#10940). Prove it first: bump TS and
+    # confirm `npm run lint` exits 0 locally before re-arming.
     ignore:
       - dependency-name: next
         versions: [">=16.4.0"]
+      - dependency-name: typescript
+        versions: [">=7.0.0"]
     groups:
       production-minor-patch:
         dependency-type: production
