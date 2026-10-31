@@ -10,7 +10,8 @@ name: Uptime + scoring monitor
 #   health  (every 15 min) — /api/health 200 on xpelevator.com + the pages.dev
 #     alias, a PUBLIC DB-read canary (GET /api/branding/<nonexistent-slug> -> 404
 #     on both hosts), a PHONE-webhook reachability canary (POST an unsigned body
-#     to /api/telnyx/webhook -> 401 on both hosts), a direct Groq /v1/models
+#     to /api/telnyx/webhook -> 401 on both hosts) PLUS a phone signing-key
+#     readiness assert (/api/health telephony.publicKey true on both hosts), a direct Groq /v1/models
 #     credential + required-model-id probe (an authenticating key whose scoring
 #     models were decommissioned still nulls every score — the #248 mode), AND a
 #     LIVE streaming /chat/completions probe on the realism model that mirrors the
@@ -36,8 +37,11 @@ name: Uptime + scoring monitor
 #         route is reachable + fail-CLOSED (401 to an unsigned probe): 404 (route
 #         dropped), 500 (import crash), or 200 (fail-OPEN — unsigned webhook
 #         accepted) each open an alert. A valid signature needs Telnyx's private
-#         key we don't hold, so the exact #125 always-401 key bug stays covered by
-#         the auth-api unit tests, not this black-box probe.
+#         key we don't hold, so the exact #125 always-401 key bug (signing key
+#         unresolvable in prod) is caught instead by the /api/health
+#         telephony.publicKey assert — a non-secret boolean from the SAME resolver
+#         the verifier uses — which pages when the live worker can't resolve the
+#         key, the state the unsigned 401 probe cannot distinguish.
 #
 #   scoring-canary (every 6h) — drives one full authenticated session against the
 #     live branded domain and asserts a NON-NULL score, then prunes old canary
@@ -61,6 +65,7 @@ on:
     paths:
       - '.github/workflows/uptime-monitor.yml'
       - 'scripts/uptime-check.mjs'
+      - 'scripts/lib/*.mjs'
       - 'scripts/phase1-canary.mjs'
       - 'scripts/prune-canary-sessions.mjs'
       - 'scripts/monitor-alert.cjs'

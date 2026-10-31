@@ -84,6 +84,38 @@ export function getTelnyxPublicKey(): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+/**
+ * Non-secret telephony readiness snapshot for `/api/health`.
+ *
+ * Reports — as booleans only, never the values — whether each Telnyx secret is
+ * resolvable in the live worker, using the SAME resolution rules the runtime
+ * verifier/caller use ({@link getTelnyxPublicKey} + {@link getTelnyxEnv}: CF
+ * runtime binding first, `process.env` local-dev fallback). Because it shares
+ * those resolvers there is zero drift between what health reports and what the
+ * webhook verifier actually sees.
+ *
+ * `publicKey` is the load-bearing one: if it is `false` in production, the
+ * webhook signature verifier has no signing key and fails closed on EVERY
+ * Telnyx webhook — the exact #125 regression that took the phone modality dark
+ * and went unmonitored (an unsigned black-box probe returns 401 whether the key
+ * is present or absent, so only this signal can tell the two apart from the
+ * outside).
+ */
+export function getTelnyxReadiness(): {
+  publicKey: boolean;
+  apiKey: boolean;
+  connectionId: boolean;
+  webhookUrl: boolean;
+} {
+  const { apiKey, connectionId, webhookUrl } = getTelnyxEnv();
+  return {
+    publicKey: !!getTelnyxPublicKey(),
+    apiKey: apiKey.trim().length > 0,
+    connectionId: connectionId.trim().length > 0,
+    webhookUrl: webhookUrl.trim().length > 0,
+  };
+}
+
 function telnyxHeaders() {
   const { apiKey } = getTelnyxEnv();
   if (!apiKey) throw new Error('TELNYX_API_KEY is not set');
