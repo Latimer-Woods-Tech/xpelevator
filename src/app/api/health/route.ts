@@ -13,8 +13,10 @@ import { getTelnyxReadiness } from '@/lib/telnyx';
 // black-box probe of /api/telnyx/webhook returns 401 whether the key is present
 // or missing, so it cannot tell a healthy fail-closed from the #125 regression
 // (key undefined in prod → every webhook rejected → phone modality dark). The
-// uptime monitor asserts `telephony.publicKey` so that outage opens an alert in
-// ≤15 min instead of going silent. It does NOT gate `ok`/the HTTP status — the
+// uptime monitor asserts `telephony.publicKey` AND `telephony.apiKey` (the latter
+// also unconditionally required: telnyxHeaders() throws without it, so a verified
+// call still can't speak/listen) so a phone outage opens an alert in ≤15 min
+// instead of going silent. It does NOT gate `ok`/the HTTP status — the
 // core-loop readiness contract (and the deploy post-deploy gate) stays driven
 // by the three required vars only.
 export async function GET() {
