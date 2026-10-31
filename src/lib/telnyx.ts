@@ -94,12 +94,16 @@ export function getTelnyxPublicKey(): string | undefined {
  * those resolvers there is zero drift between what health reports and what the
  * webhook verifier actually sees.
  *
- * `publicKey` is the load-bearing one: if it is `false` in production, the
- * webhook signature verifier has no signing key and fails closed on EVERY
- * Telnyx webhook — the exact #125 regression that took the phone modality dark
- * and went unmonitored (an unsigned black-box probe returns 401 whether the key
- * is present or absent, so only this signal can tell the two apart from the
- * outside).
+ * `publicKey` and `apiKey` are both load-bearing: if `publicKey` is `false` in
+ * production the webhook signature verifier has no signing key and fails closed
+ * on EVERY Telnyx webhook (the #125 regression that took the phone modality dark
+ * and went unmonitored — an unsigned black-box probe returns 401 whether the key
+ * is present or absent, so only this signal tells the two apart from the
+ * outside); if `apiKey` is `false`, {@link telnyxHeaders} throws on every Call
+ * Control action, so even a verified webhook can neither speak (`callSpeak`) nor
+ * listen (`startTranscription`) — the conversation is dead. `connectionId` /
+ * `webhookUrl` only feed outbound call-initiation request params and are the
+ * informational tier.
  */
 export function getTelnyxReadiness(): {
   publicKey: boolean;

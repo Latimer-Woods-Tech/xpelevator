@@ -48,13 +48,15 @@
  *      the SAME resolver the verifier uses, so the key-missing outage is now
  *      distinguishable from the outside — this probe guards reachability + the
  *      fail-open direction, and 5b guards key resolution.
- *   5b. GET /api/health -> `telephony.publicKey` must be true on both hosts.
- *      The outside signal for the #125 phone-dark outage the unsigned probe above
- *      can't see (false → the Ed25519 verifier has no key and fail-closes every
- *      webhook). An absent block (a build predating the signal, e.g. the
- *      merge→promote window) is reported "not live yet" and never pages. The
- *      outbound call-control secrets are a non-failing warning. See
- *      scripts/lib/telephony-readiness-eval.mjs.
+ *   5b. GET /api/health -> `telephony.publicKey` AND `telephony.apiKey` must be
+ *      true on both hosts. The outside signal for the phone-dark outage the
+ *      unsigned probe above can't see: publicKey false → the Ed25519 verifier has
+ *      no key and fail-closes every webhook (#125); apiKey false → telnyxHeaders()
+ *      throws so a verified call can't speak/listen (callSpeak/startTranscription).
+ *      Either missing → phone dark → alert. An absent block (a build predating the
+ *      signal, e.g. the merge→promote window) is reported "not live yet" and never
+ *      pages. The outbound-only secrets (connectionId/webhookUrl) are a non-failing
+ *      warning. See scripts/lib/telephony-readiness-eval.mjs.
  *   6. A LIVE STREAMING POST /chat/completions on the realism model
  *      (openai/gpt-oss-120b) -> 200 with non-empty streamed content, every cycle.
  *      /v1/models (check 4) cannot see a model that LISTS but fails to GENERATE —
@@ -218,14 +220,19 @@ async function checkWebhookReachability(base) {
 //   publicKey true  → the signing key resolves in the live worker. HEALTHY.
 //   publicKey false → the #125 state: the verifier has no key and rejects every
 //                     signed webhook. Phone is dark. HARD FAIL (open an alert).
+// The HARD gate is both secrets the phone modality cannot run without:
+//   publicKey — the Ed25519 webhook signing key (absent → verifier fail-closed,
+//               the #125 outage the unsigned 401 probe can't see).
+//   apiKey    — TELNYX_API_KEY: every Call Control action (callSpeak,
+//               startTranscription, callHangup) goes through telnyxHeaders(),
+//               which THROWS without it, so even a verified webhook can't speak
+//               or listen — the conversation is dead. Both missing → phone dark.
+// The SOFT secrets (connectionId/webhookUrl) only feed outbound-init request
+// params (initiateCall, `value || undefined`) and never throw — a non-failing warning.
 // Deploy-ordering safety: a build predating this signal has no `telephony` block;
 // that is expected in the window between merge (this workflow updates at once) and
 // promote (the new health build goes live minutes later), so an ABSENT block is
 // reported as "signal not live yet" and never pages (see telephony-readiness-eval).
-// The OUTBOUND call-control secrets (apiKey/connectionId/webhookUrl) are surfaced
-// as a non-failing warning — their absence degrades outbound dialing but does not
-// take the (inbound-driven) simulation dark, matching this monitor's
-// hard-fail-only-on-proven-outage discipline.
 async function checkTelephonyReadiness(base) {
   const url = `${base}/api/health`;
   const { status, body } = await probe(url);
@@ -239,25 +246,37 @@ async function checkTelephonyReadiness(base) {
   }
 
   log(
-    `${verdict.down ? '✗' : '✓'} ${url} telephony.publicKey=${!verdict.down} ` +
-      `(webhook signing key ${verdict.down ? 'UNRESOLVABLE — phone dark' : 'resolvable in live worker'})` +
+    `${verdict.down ? '✗' : '✓'} ${url} telephony ${verdict.down ? `DARK (missing: ${verdict.missing.join(', ')})` : 'operational (publicKey + apiKey resolvable in live worker)'}` +
       (verdict.degraded.length ? `; outbound creds degraded: ${verdict.degraded.join(', ')}` : ''),
   );
 
   if (verdict.down) {
+    const needsKey = verdict.missing.includes('publicKey');
+    const needsApi = verdict.missing.includes('apiKey');
+    const detail = [
+      needsKey
+        ? '`TELNYX_PUBLIC_KEY` is unresolvable → the Ed25519 verifier fails closed and rejects EVERY ' +
+          'webhook (the 2026-07-19 #125 mode; the unsigned reachability probe returns 401 either way, ' +
+          'so only this signal catches it).'
+        : '',
+      needsApi
+        ? '`TELNYX_API_KEY` is unresolvable → telnyxHeaders() throws on every Call Control action, so a ' +
+          'verified call can neither speak (callSpeak) nor listen (startTranscription) — the conversation ' +
+          'is dead even though the signature passed.'
+        : '',
+    ].filter(Boolean).join(' ');
     failures.push(
-      `**Phone modality DARK** — \`${url}\` reports \`telephony.publicKey:false\`: the Telnyx webhook ` +
-        `signing key is NOT resolvable in the live worker, so the Ed25519 verifier fails closed and ` +
-        `rejects EVERY webhook. This is the 2026-07-19 #125 failure mode (the phone path goes dark and ` +
-        `the unsigned reachability probe can't see it — it returns 401 either way). Fix: confirm the ` +
-        `\`TELNYX_PUBLIC_KEY\` secret is set on the production Pages binding (and sourced from GCP SM ` +
-        `without a trailing newline/CR).`,
+      `**Phone modality DARK** — \`${url}\` reports \`telephony\` missing: \`${verdict.missing.join('`, `')}\`. ` +
+        detail +
+        ` Fix: confirm the named Telnyx secret(s) are set on the production Pages binding (sourced from ` +
+        `GCP SM without a trailing newline/CR).`,
     );
   } else if (verdict.degraded.length) {
     log(
       `⚠️  outbound telephony creds degraded on ${base}: ${verdict.degraded.join(', ')} not resolvable. ` +
-        `Inbound simulation (webhook-driven) is unaffected, but OUTBOUND call initiation ` +
-        `(/api/telnyx/call) would throw. Re-provision the missing Telnyx secret(s). Non-paging.`,
+        `Inbound simulation (webhook-driven, needs only publicKey + apiKey) is unaffected, but OUTBOUND ` +
+        `call initiation (/api/telnyx/call) may use an undefined connection_id/webhook_url. ` +
+        `Re-provision the missing Telnyx secret(s). Non-paging.`,
     );
   }
 }

@@ -14,15 +14,19 @@ const allReady = {
 const keyDark = {
   telephony: { publicKey: false, apiKey: true, connectionId: true, webhookUrl: true },
 };
+const apiKeyDark = {
+  telephony: { publicKey: true, apiKey: false, connectionId: true, webhookUrl: true },
+};
 const outboundDegraded = {
-  telephony: { publicKey: true, apiKey: false, connectionId: false, webhookUrl: true },
+  telephony: { publicKey: true, apiKey: true, connectionId: false, webhookUrl: false },
 };
 
-describe('evaluateTelephonyReadiness — hard gate on the inbound signing key', () => {
-  it('healthy: publicKey true → not down, available, no degradation', () => {
+describe('evaluateTelephonyReadiness — hard gate on the secrets the phone path needs', () => {
+  it('healthy: publicKey + apiKey true → not down, available, no degradation', () => {
     const v = evaluateTelephonyReadiness(allReady);
     expect(v.down).toBe(false);
     expect(v.available).toBe(true);
+    expect(v.missing).toEqual([]);
     expect(v.degraded).toEqual([]);
   });
 
@@ -31,13 +35,33 @@ describe('evaluateTelephonyReadiness — hard gate on the inbound signing key', 
     const v = evaluateTelephonyReadiness(keyDark);
     expect(v.down).toBe(true);
     expect(v.available).toBe(true);
+    expect(v.missing).toEqual(['publicKey']);
   });
 
-  it('outbound creds missing but signing key present → NOT down, reports degraded', () => {
+  // Codex P2 (#339): apiKey backs every Call Control action via telnyxHeaders()
+  // (throws when absent), so even a VERIFIED webhook can't speak/listen. A missing
+  // apiKey is a phone outage, not outbound-only degradation — it MUST page.
+  it('REJECTS apiKey missing: publicKey true but apiKey false → down (monitor red)', () => {
+    const v = evaluateTelephonyReadiness(apiKeyDark);
+    expect(v.down).toBe(true);
+    expect(v.available).toBe(true);
+    expect(v.missing).toEqual(['apiKey']);
+  });
+
+  it('both hard secrets missing → down, both reported in missing', () => {
+    const v = evaluateTelephonyReadiness({
+      telephony: { publicKey: false, apiKey: false, connectionId: true, webhookUrl: true },
+    });
+    expect(v.down).toBe(true);
+    expect(v.missing).toEqual(['publicKey', 'apiKey']);
+  });
+
+  it('only outbound-init secrets missing (connectionId/webhookUrl) → NOT down, degraded lists them', () => {
     const v = evaluateTelephonyReadiness(outboundDegraded);
     expect(v.down).toBe(false);
     expect(v.available).toBe(true);
-    expect(v.degraded).toEqual(['apiKey', 'connectionId']);
+    expect(v.missing).toEqual([]);
+    expect(v.degraded).toEqual(['connectionId', 'webhookUrl']);
   });
 });
 
@@ -50,6 +74,7 @@ describe('evaluateTelephonyReadiness — deploy-ordering safety (never a false p
       down: false,
       available: false,
       degraded: [],
+      missing: [],
     });
   });
 
@@ -59,11 +84,17 @@ describe('evaluateTelephonyReadiness — deploy-ordering safety (never a false p
   });
 
   it('null / non-object health (unreachable or non-JSON) → unavailable, never down', () => {
-    expect(evaluateTelephonyReadiness(null)).toEqual({ down: false, available: false, degraded: [] });
+    expect(evaluateTelephonyReadiness(null)).toEqual({
+      down: false,
+      available: false,
+      degraded: [],
+      missing: [],
+    });
     expect(evaluateTelephonyReadiness('not json')).toEqual({
       down: false,
       available: false,
       degraded: [],
+      missing: [],
     });
   });
 });
