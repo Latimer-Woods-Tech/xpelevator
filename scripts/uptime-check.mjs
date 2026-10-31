@@ -42,11 +42,19 @@
  *        500 → the route threw before verifying (a module-import/init crash).
  *        000 → the host was unreachable / timed out.
  *      Limit (honest): a valid Telnyx signature needs Telnyx's PRIVATE key, which
- *      we don't hold, so no black-box probe can positively prove a signed webhook
- *      still verifies (the exact #125 always-401 key bug is indistinguishable from
- *      a healthy fail-closed here). That runtime-binding key resolution is covered
- *      by the auth-api unit tests instead; this probe guards reachability + the
- *      fail-open direction, both of which were previously unmonitored.
+ *      we don't hold, so this probe alone cannot tell a healthy fail-closed 401
+ *      from the #125 always-401 key bug. Check 5b (checkTelephonyReadiness) closes
+ *      that: /api/health reports a non-secret `telephony.publicKey` boolean from
+ *      the SAME resolver the verifier uses, so the key-missing outage is now
+ *      distinguishable from the outside — this probe guards reachability + the
+ *      fail-open direction, and 5b guards key resolution.
+ *   5b. GET /api/health -> `telephony.publicKey` must be true on both hosts.
+ *      The outside signal for the #125 phone-dark outage the unsigned probe above
+ *      can't see (false → the Ed25519 verifier has no key and fail-closes every
+ *      webhook). An absent block (a build predating the signal, e.g. the
+ *      merge→promote window) is reported "not live yet" and never pages. The
+ *      outbound call-control secrets are a non-failing warning. See
+ *      scripts/lib/telephony-readiness-eval.mjs.
  *   6. A LIVE STREAMING POST /chat/completions on the realism model
  *      (openai/gpt-oss-120b) -> 200 with non-empty streamed content, every cycle.
  *      /v1/models (check 4) cannot see a model that LISTS but fails to GENERATE —
@@ -70,6 +78,7 @@ import {
   isTransientEmptyStream,
   evaluateRealismStreamProbe,
 } from './lib/stream-probe-eval.mjs';
+import { evaluateTelephonyReadiness } from './lib/telephony-readiness-eval.mjs';
 
 const BRANDED = 'https://xpelevator.com';
 const ALIAS = 'https://xpelevator-sim.pages.dev';
@@ -194,6 +203,61 @@ async function checkWebhookReachability(base) {
       `**Phone webhook UNHEALTHY** — \`POST ${url}\` (unsigned) returned HTTP ${status} (expected 401).` +
         hint +
         `\n\n\`\`\`\n${body.slice(0, 300)}\n\`\`\``,
+    );
+  }
+}
+
+// Phone-modality signing-key readiness canary — closes the blind spot the
+// unsigned webhook probe (checkWebhookReachability) cannot see. That probe gets
+// 401 whether the Ed25519 signing key is present (healthy fail-closed) OR absent
+// (the #125 outage: key undefined in the deployed Worker → verifier fail-closed
+// on EVERY webhook → phone dark, previously unmonitored). /api/health now carries
+// a non-secret `telephony.publicKey` boolean resolved through the SAME runtime
+// resolver the verifier uses (src/lib/telnyx.ts getTelnyxPublicKey), so from the
+// outside we can finally tell the two apart:
+//   publicKey true  → the signing key resolves in the live worker. HEALTHY.
+//   publicKey false → the #125 state: the verifier has no key and rejects every
+//                     signed webhook. Phone is dark. HARD FAIL (open an alert).
+// Deploy-ordering safety: a build predating this signal has no `telephony` block;
+// that is expected in the window between merge (this workflow updates at once) and
+// promote (the new health build goes live minutes later), so an ABSENT block is
+// reported as "signal not live yet" and never pages (see telephony-readiness-eval).
+// The OUTBOUND call-control secrets (apiKey/connectionId/webhookUrl) are surfaced
+// as a non-failing warning — their absence degrades outbound dialing but does not
+// take the (inbound-driven) simulation dark, matching this monitor's
+// hard-fail-only-on-proven-outage discipline.
+async function checkTelephonyReadiness(base) {
+  const url = `${base}/api/health`;
+  const { status, body } = await probe(url);
+  let json = null;
+  try { json = JSON.parse(body); } catch { /* non-JSON */ }
+  const verdict = evaluateTelephonyReadiness(json);
+
+  if (!verdict.available) {
+    log(`• ${url} telephony signal not live yet (pre-signal build / deploy window) — not asserted`);
+    return;
+  }
+
+  log(
+    `${verdict.down ? '✗' : '✓'} ${url} telephony.publicKey=${!verdict.down} ` +
+      `(webhook signing key ${verdict.down ? 'UNRESOLVABLE — phone dark' : 'resolvable in live worker'})` +
+      (verdict.degraded.length ? `; outbound creds degraded: ${verdict.degraded.join(', ')}` : ''),
+  );
+
+  if (verdict.down) {
+    failures.push(
+      `**Phone modality DARK** — \`${url}\` reports \`telephony.publicKey:false\`: the Telnyx webhook ` +
+        `signing key is NOT resolvable in the live worker, so the Ed25519 verifier fails closed and ` +
+        `rejects EVERY webhook. This is the 2026-07-19 #125 failure mode (the phone path goes dark and ` +
+        `the unsigned reachability probe can't see it — it returns 401 either way). Fix: confirm the ` +
+        `\`TELNYX_PUBLIC_KEY\` secret is set on the production Pages binding (and sourced from GCP SM ` +
+        `without a trailing newline/CR).`,
+    );
+  } else if (verdict.degraded.length) {
+    log(
+      `⚠️  outbound telephony creds degraded on ${base}: ${verdict.degraded.join(', ')} not resolvable. ` +
+        `Inbound simulation (webhook-driven) is unaffected, but OUTBOUND call initiation ` +
+        `(/api/telnyx/call) would throw. Re-provision the missing Telnyx secret(s). Non-paging.`,
     );
   }
 }
@@ -410,6 +474,8 @@ async function main() {
   await checkDbRead(ALIAS);
   await checkWebhookReachability(BRANDED);
   await checkWebhookReachability(ALIAS);
+  await checkTelephonyReadiness(BRANDED);
+  await checkTelephonyReadiness(ALIAS);
   await checkGroqCredential();
   await checkGroqCompletion();
 
